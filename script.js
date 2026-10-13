@@ -1,7 +1,7 @@
 'use strict';
-// ===== 資料結構（schema v2，可直接同步至 Firestore 文件）=====
+// ===== 資料結構（schema v3，可直接同步至 Firestore 文件）=====
 const KEY = 'chickBabyState';
-const SCHEMA = 2;
+const SCHEMA = 3;
 const MIN = 60000;
 const DECAY = { hunger: 0.8, happiness: 0.6, energy: 0.5, cleanliness: 0.4 };
 const STAGES = { eggUntil: 2, chickUntil: 60 };
@@ -14,6 +14,7 @@ function newState(name) {
   return { schemaVersion: SCHEMA, id: uid(), name, born: now, birthTime: new Date(now).toISOString(), last: now, updatedAt: now,
     hunger: 80, happiness: 80, energy: 80, cleanliness: 100, health: 100, sick: false, sleeping: false, dead: false, poop: 0,
     traits: { strength: 10, speed: 10, stamina: 10, weight: 20, personality: '溫和' },
+    coins: 0, bestFloor: 0,
     counters: { feeds: 0, snacks: 0, plays: 0, sleeps: 0, cleans: 0, doctor: 0 } };
 }
 function migrate(s) {
@@ -25,6 +26,7 @@ function migrate(s) {
     s.counters = s.counters || { feeds: 0, snacks: 0, plays: 0, sleeps: 0, cleans: 0, doctor: 0 };
     s.schemaVersion = 2;
   }
+  if (s.schemaVersion < 3) { s.coins = s.coins || 0; s.bestFloor = s.bestFloor || 0; s.schemaVersion = 3; }
   return s;
 }
 const clamp = v => Math.max(0, Math.min(100, v));
@@ -75,11 +77,11 @@ function updatePersonality() {
 
 // ===== 食物 =====
 const FOODS = [
-  { id: 'rice', name: '米粒', stage: 'chick', sprite: 'rice', hunger: 20, happiness: 2, health: 1, weight: 1, strength: 0, speed: 0, stamina: 1 },
-  { id: 'worm', name: '蟲蟲', stage: 'chick', sprite: 'worm', hunger: 15, happiness: 6, health: 2, weight: 1, strength: 2, speed: 0.5, stamina: 0 },
-  { id: 'candy', name: '糖果', stage: 'chick', sprite: 'candy', snack: true, hunger: 5, happiness: 15, health: -3, weight: 2, strength: 0, speed: 0, stamina: 0 },
-  { id: 'corn', name: '玉米', stage: 'adult', sprite: 'corn', hunger: 30, happiness: 4, health: 2, weight: 2, strength: 1, speed: 1, stamina: 2 },
-  { id: 'cake', name: '蛋糕', stage: 'adult', sprite: 'cake', snack: true, hunger: 10, happiness: 25, health: -5, weight: 4, strength: 0, speed: -0.5, stamina: 0 }
+  { id: 'rice', name: '米粒', stage: 'chick', price: 0, sprite: 'rice', hunger: 20, happiness: 2, health: 1, weight: 1, strength: 0, speed: 0, stamina: 0.5 },
+  { id: 'worm', name: '蟲蟲', stage: 'chick', price: 5, sprite: 'worm', hunger: 20, happiness: 8, health: 3, weight: 1, strength: 4, speed: 1, stamina: 1 },
+  { id: 'candy', name: '糖果', stage: 'chick', price: 3, sprite: 'candy', snack: true, hunger: 5, happiness: 20, health: -3, weight: 2, strength: 0, speed: 1, stamina: 0 },
+  { id: 'corn', name: '玉米', stage: 'adult', price: 10, sprite: 'corn', hunger: 35, happiness: 6, health: 4, weight: 2, strength: 2, speed: 3, stamina: 4 },
+  { id: 'cake', name: '蛋糕', stage: 'adult', price: 15, sprite: 'cake', snack: true, hunger: 10, happiness: 35, health: -5, weight: 4, strength: 2, speed: 0, stamina: 2 }
 ];
 const unlocked = f => f.stage === 'chick' || stage() === 'adult';
 
@@ -105,7 +107,7 @@ const S = {
   i_energy: ['..33','.33.','3333','.33.','33..'],
   i_clean: ['..3..','.323.','32223','32223','.333.'],
   i_feed: ['....33...','...3223..','..32223..','..32223..','...333...','..3......','.3.......','3........'],
-  i_play: ['..33333..','.3211123.','321111123','311222113','311222113','321111123','.3211123.','..33333..'],
+  i_play: ['.......33','.......3.','.....333.','.....3...','...333...','...3.....','.333.....','.3.......'],
   i_sleep: ['...3333..','..33.....','.33......','.33......','.33......','.33......','..33.....','...3333..'],
   i_wash: ['....3....','...323...','..32223..','.3222223.','.3222223.','.3221223.','..32223..','...333...'],
   i_doc: ['...333...','...323...','.3333333.','.3222223.','.3333333.','...323...','...333...','.........'],
@@ -138,7 +140,7 @@ function bar(x, y, icon, v) {
 
 // ===== 選單 / 輸入 =====
 const ICONS = [
-  { act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'play', icon: 'i_play', label: '玩耍' },
+  { act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'play', icon: 'i_play', label: '樓梯' },
   { act: 'sleep', icon: 'i_sleep', label: '睡覺' }, { act: 'clean', icon: 'i_wash', label: '清潔' },
   { act: 'doctor', icon: 'i_doc', label: '看醫生' }, { act: 'status', icon: 'i_stat', label: '狀態' }];
 let sel = 0, menu = null, menuSel = 0;
@@ -152,20 +154,23 @@ function renderMenu() {
   if (!menu) { el.hidden = true; return; }
   el.hidden = false;
   if (menu === 'feed') {
-    el.innerHTML = '<div class="mt">— 餵食 —</div>' + FOODS.map((f, i) =>
-      `<div class="mi${i === menuSel ? ' on' : ''}" data-i="${i}">${i === menuSel ? '▶' : '　'}${unlocked(f) ? f.name + (f.snack ? '<small>點心</small>' : '') : '???'}</div>`).join('') +
+    el.innerHTML = `<div class="mt">— 餵食 —  ◎${state.coins}</div>` + FOODS.map((f, i) => {
+      const u = unlocked(f), off = u && f.price > state.coins ? ' off' : '';
+      return `<div class="mi${i === menuSel ? ' on' : ''}${off}" data-i="${i}">${i === menuSel ? '▶' : '　'}${u ? f.name + (f.snack ? '<small>點心</small>' : '') + `<em>${f.price ? '◎' + f.price : '免費'}</em>` : '???'}</div>`;
+    }).join('') +
       '<div class="mi back" data-i="-1">✕ 關閉</div>';
   } else if (menu === 'status') {
     const t = state.traits, born = new Date(state.born);
     const row = (k, v) => `<div><b>${k}</b><span>${v}</span></div>`;
     el.innerHTML = '<div class="mt">— 狀態 —</div><div class="grid">' + row('名字', esc(state.name)) + row('性格', t.personality) +
-      row('力量', t.strength) + row('速度', t.speed) + row('體力', t.stamina) + row('體重', t.weight + 'g') + '</div>' +
+      row('力量', t.strength) + row('速度', t.speed) + row('體力', t.stamina) + row('體重', t.weight + 'g') + row('金幣', '◎' + state.coins) + row('最深', (state.bestFloor || 0) + '樓') + '</div>' +
       `<div class="wide"><b>出生</b><span>${born.getMonth() + 1}/${born.getDate()} ${String(born.getHours()).padStart(2, '0')}:${String(born.getMinutes()).padStart(2, '0')}</span></div>` +
       `<div class="wide"><b>ID</b><span class="id">${state.id.slice(0, 8)}</span></div><div class="mi back on">✕ 關閉</div>`;
   }
 }
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 $('menu').addEventListener('click', e => {
+  if (game) return;
   const it = e.target.closest('.mi');
   if (menu !== 'feed' || !it) return closeMenu();
   const i = +it.dataset.i; if (i < 0) return closeMenu();
@@ -174,6 +179,8 @@ $('menu').addEventListener('click', e => {
 function chooseFood(f) {
   if (!unlocked(f)) return say('還沒解鎖，長大一點再說！');
   if (state.hunger > 95) { closeMenu(); return say('吃不下了啦～'); }
+  if (f.price > state.coins) return say(`金幣不夠！${f.name} 要 ◎${f.price}，玩下樓梯賺金幣吧。`);
+  state.coins -= f.price; save(); render();
   closeMenu();
   anim = { type: 'eat', food: f, phase: 'drop', fx: Math.max(14, Math.min(78, petX + (petX > 48 ? -20 : 24))), fy: -8, t: 0, bite: 0 };
   say(`${f.name} 掉下來了！`);
@@ -189,9 +196,7 @@ function finishEat(f) {
 
 const ACTIONS = {
   feed() { openMenu('feed'); },
-  play() { if (state.energy < 15) return say('太累了，想睡覺…'); state.happiness = clamp(state.happiness + 20);
-    state.energy = clamp(state.energy - 15); state.hunger = clamp(state.hunger - 8);
-    trait('speed', 1); trait('stamina', 0.5); trait('weight', -1); state.counters.plays++; fx('ball'); happyT = 12; say('好好玩！'); },
+  play() { if (state.energy < 15) return say('太累了，想睡覺…'); startGame(); },
   sleep() { state.sleeping = !state.sleeping; if (state.sleeping) { state.counters.sleeps++; trait('stamina', 0.5); } say(state.sleeping ? '晚安～' : '早安！'); },
   clean() { state.cleanliness = 100; state.poop = 0; state.counters.cleans++; fx('bubble'); say('洗香香，好舒服～'); },
   doctor() { if (!state.sick && state.health > 90) return say('很健康，不用看醫生喔！');
@@ -199,6 +204,7 @@ const ACTIONS = {
   status() { openMenu('status'); }
 };
 function activate(i) {
+  if (game) return;
   tick();
   if (state.dead) return restart();
   sel = i; const act = ICONS[i].act;
@@ -214,10 +220,11 @@ $('labels').addEventListener('click', e => {
   if (menu) { const was = menu; closeMenu(); if (ICONS[i].act === was) { sel = i; return; } }
   activate(i);
 });
-cv.addEventListener('click', () => { if (!state) return; if (state.dead) return restart(); if (menu) closeMenu(); });
+cv.addEventListener('click', () => { if (!state || game) return; if (state.dead) return restart(); if (menu) closeMenu(); });
 document.addEventListener('keydown', e => {
   if (!state || $('nameDialog').open) return;
   const k = e.key;
+  if (game) { gameKey(e, true); return; }
   if (menu) {
     const n = menu === 'feed' ? FOODS.length : 0;
     if (k === 'Escape' || k === 'Backspace') closeMenu();
@@ -231,6 +238,142 @@ document.addEventListener('keydown', e => {
   else return;
   e.preventDefault();
 });
+
+
+// ===== 小雞下樓梯 =====
+let game = null;
+const GH = 90, PLAT_W = 24, GAP = 16, TOP = 10;
+const DIG = ['333','3.3','3.3','3.3','333','.3.','33.','.3.','.3.','333','333','..3','333','3..','333','333','..3','333','..3','333','3.3','3.3','333','..3','..3','333','3..','333','..3','333','333','3..','333','3.3','333','333','..3','..3','..3','..3','333','3.3','333','3.3','333','333','3.3','333','..3','333'];
+function num(n, x, y, c = 3) { String(n).split('').forEach((d, i) => { for (let j = 0; j < 5; j++) [...DIG[+d * 5 + j]].forEach((ch, k) => { if (ch === '3') { ctx.fillStyle = PAL[c]; ctx.fillRect(x + i * 4 + k, y + j, 1, 1); } }); }); }
+function pickType(n) {
+  if (n < 4) return 'normal';
+  const r = Math.random(), hard = Math.min(0.12, n * 0.003);
+  return r < 0.46 - hard ? 'normal' : r < 0.58 ? 'spiky' : r < 0.72 ? 'conveyor' : r < 0.85 ? 'bouncy' : 'fragile';
+}
+function startGame() {
+  closeMenu();
+  const t = state.traits, st = stage(), spr0 = chickSprite(st);
+  const maxHp = 10 + Math.min(4, Math.max(0, Math.floor((t.stamina - 10) / 5)));
+  game = { st, pw: sw(spr0), ph: S[spr0].length, x: 40, y: 20, vy: 0, hp: maxHp, maxHp, floor: 0, made: 0, t: 0,
+    speed: 1.2 + Math.min(0.5, Math.max(0, (t.speed - 10) * 0.03)), scroll: 0.32, plats: [], left: false, right: false,
+    dir: -1, inv: 0, on: null, over: false };
+  for (let y = 30; y < GH + GAP; y += GAP) addPlat(y);
+  const sp = game.plats.find(p => p.y >= 60); sp.type = 'normal'; game.x = sp.x + PLAT_W / 2 - game.pw / 2; game.y = sp.y - game.ph; game.on = sp; sp.counted = true;
+  // 遊戲時換成較高的畫面，但 LCD 總高度不變（仍在蛋殼內）
+  const h0 = cv.offsetHeight + $('labels').offsetHeight;
+  $('labels').hidden = true; $('gamebar').hidden = false; document.body.classList.add('playing');
+  const hh = Math.min(h0 - $('gamebar').offsetHeight + 22, Math.round(cv.offsetWidth * GH / 96));
+  cv.height = GH; cv.style.height = hh + 'px'; cv.style.width = Math.round(hh * 96 / GH) + 'px';
+  say('←→ 移動，往下跳！小心尖刺～');
+}
+function addPlat(y) {
+  const g = game; g.made++;
+  const prev = g.plats[g.plats.length - 1], px = prev ? Math.max(0, Math.min(96 - PLAT_W, prev.x + Math.round((Math.random() * 2 - 1) * 44))) : Math.floor(Math.random() * (96 - PLAT_W));
+  g.plats.push({ x: px, y, type: pickType(g.made), dir: Math.random() < 0.5 ? -1 : 1, brk: -1, counted: false, hurt: false });
+}
+function hurt(n) { const g = game; if (g.inv > 0) return; g.hp = Math.max(0, g.hp - n); g.inv = 30; }
+function gameStep() {
+  const g = game; frame++;
+  if (!g.over) {
+    g.t++;
+    g.scroll = 0.25 + Math.min(0.35, g.floor * 0.006);
+    for (const p of g.plats) p.y -= g.scroll;
+    g.plats = g.plats.filter(p => p.y > TOP - 4 && p.brk !== 0);
+    const last = g.plats[g.plats.length - 1];
+    if (!last || last.y < GH + 4 - GAP) addPlat((last ? last.y : GH) + GAP);
+    // 移動
+    let dx = (g.right ? 1 : 0) - (g.left ? 1 : 0);
+    if (dx) g.dir = dx;
+    let mx = dx * g.speed;
+    if (g.on) {
+      const p = g.on;
+      if (!g.plats.includes(p) || g.x + g.pw - 3 < p.x || g.x + 3 > p.x + PLAT_W) g.on = null;
+      else {
+        g.y = p.y - g.ph;
+        if (p.type === 'conveyor') mx += p.dir * 0.7;
+        if (p.type === 'fragile' && p.brk > 0 && --p.brk === 0) g.on = null;
+      }
+    }
+    g.x = Math.max(0, Math.min(96 - g.pw, g.x + mx));
+    if (!g.on) {
+      const prevBottom = g.y + g.ph;
+      g.vy = Math.min(2.6, g.vy + 0.2); g.y += g.vy;
+      const bottom = g.y + g.ph;
+      for (const p of g.plats) {
+        if (g.vy >= 0 && prevBottom <= p.y + 1 && bottom >= p.y && g.x + g.pw - 3 >= p.x && g.x + 3 <= p.x + PLAT_W && p.brk !== 0) {
+          g.y = p.y - g.ph; g.vy = 0;
+          if (p.type === 'bouncy') { g.vy = -3.2; break; }
+          g.on = p;
+          if (p.type === 'spiky') { if (!p.hurt) { p.hurt = true; hurt(4); } }
+          else if (!p.counted) g.hp = Math.min(g.maxHp, g.hp + 1);
+          if (p.type === 'fragile' && p.brk < 0) p.brk = 12;
+          break;
+        }
+      }
+    }
+    for (const p of g.plats) if (!p.counted && p.y + 2 < g.y) { p.counted = true; g.floor++; }
+    if (g.y < TOP + 1) { hurt(4); g.y = TOP + 2; g.vy = 1; if (g.on) { g.on.counted = true; g.on = null; } }
+    if (g.inv > 0) g.inv--;
+    if (g.hp <= 0 || g.y > GH) endGame();
+  }
+  drawGame();
+}
+function drawGame() {
+  const g = game;
+  ctx.fillStyle = PAL[0]; ctx.fillRect(0, 0, 96, GH);
+  // HUD
+  ctx.fillStyle = PAL[3]; ctx.fillRect(0, 0, 96, 7);
+  spr('heart', 1, 1); for (let i = 0; i < g.maxHp; i++) { ctx.fillStyle = i < g.hp ? PAL[0] : PAL[2]; ctx.fillRect(8 + i * 3, 2, 2, 3); }
+  num(g.floor, 96 - String(g.floor).length * 4 - 1, 1, 0);
+  // 天花板尖刺
+  ctx.fillStyle = PAL[2]; for (let x = 0; x < 96; x += 4) { ctx.fillRect(x, 7, 4, 1); ctx.fillRect(x + 1, 8, 2, 1); ctx.fillRect(x + 1, 9, 1, 1); }
+  for (const p of g.plats) {
+    const x = Math.round(p.x), y = Math.round(p.y);
+    if (p.type === 'normal') { ctx.fillStyle = PAL[3]; ctx.fillRect(x, y, PLAT_W, 3); ctx.fillStyle = PAL[1]; ctx.fillRect(x + 1, y + 1, PLAT_W - 2, 1); }
+    else if (p.type === 'spiky') { ctx.fillStyle = PAL[3]; ctx.fillRect(x, y + 1, PLAT_W, 2); for (let i = 0; i < PLAT_W; i += 3) { ctx.fillRect(x + i + 1, y - 1, 1, 2); } }
+    else if (p.type === 'conveyor') { ctx.fillStyle = PAL[3]; ctx.fillRect(x, y, PLAT_W, 3); ctx.fillStyle = PAL[0];
+      for (let i = 0; i < PLAT_W; i += 4) ctx.fillRect(x + ((i + Math.floor(frame / 3) * p.dir) % PLAT_W + PLAT_W) % PLAT_W, y + 1, 2, 1); }
+    else if (p.type === 'bouncy') { ctx.fillStyle = PAL[3]; ctx.fillRect(x, y, PLAT_W, 1); ctx.fillStyle = PAL[2];
+      for (let i = 1; i < PLAT_W; i += 3) { ctx.fillRect(x + i, y + 1, 1, 1); ctx.fillRect(x + i + 1, y + 2, 1, 1); } ctx.fillStyle = PAL[3]; ctx.fillRect(x, y + 3, PLAT_W, 1); }
+    else { ctx.fillStyle = p.brk > 0 && frame % 2 ? PAL[1] : PAL[2]; for (let i = 0; i < PLAT_W; i += 3) ctx.fillRect(x + i, y + (p.brk > 0 ? (i % 2) : 0), 2, 3); }
+  }
+  if (!(g.inv > 0 && frame % 4 < 2)) spr(chickSprite(g.st, g.on && (g.left || g.right) ? Math.floor(frame / 4) % 2 : 0), g.x, g.y, g.dir > 0);
+  if (g.over) { ctx.fillStyle = PAL[3]; ctx.fillRect(18, 34, 60, 22); ctx.fillStyle = PAL[0]; ctx.fillRect(19, 35, 58, 20);
+    num(g.floor, 48 - String(g.floor).length * 2, 38); spr('heart', 45, 47); }
+}
+function endGame() {
+  const g = game; g.over = true; g.left = g.right = false;
+  const coins = g.floor;
+  state.coins = (state.coins || 0) + coins; state.bestFloor = Math.max(state.bestFloor || 0, g.floor);
+  state.energy = clamp(state.energy - 15); state.hunger = clamp(state.hunger - 8);
+  state.happiness = clamp(state.happiness + 10 + Math.min(15, Math.floor(g.floor / 2)));
+  trait('speed', Math.min(2, 0.5 + g.floor * 0.03)); trait('weight', -1); state.counters.plays++;
+  updatePersonality(); save(); render();
+  $('menu').hidden = false;
+  $('menu').innerHTML = `<div class="mt">— 遊戲結束 —</div><div class="wide"><b>下了</b><span>${g.floor} 樓</span></div><div class="wide"><b>獲得</b><span>◎${coins} 金幣</span></div><div class="wide"><b>目前</b><span>◎${state.coins}</span></div><div class="wide"><b>最深</b><span>${state.bestFloor} 樓</span></div><div class="mi back on" id="gameOk">✕ 離開</div>`;
+  say(`下了 ${g.floor} 樓，賺到 ◎${coins}！`);
+}
+function quitGame() {
+  if (!game) return;
+  if (!game.over) endGame();
+  game = null; cv.height = H; cv.style.width = cv.style.height = ''; $('menu').hidden = true; $('labels').hidden = false; $('gamebar').hidden = true; document.body.classList.remove('playing');
+  draw();
+}
+function gameKey(e, down) {
+  const k = e.key;
+  if (k === 'ArrowLeft') game.left = down; else if (k === 'ArrowRight') game.right = down;
+  else if (down && (k === 'Escape' || (game.over && (k === 'Enter' || k === ' ')))) quitGame();
+  else return;
+  e.preventDefault();
+}
+document.addEventListener('keyup', e => { if (game) gameKey(e, false); });
+document.querySelectorAll('#gamebar [data-dir]').forEach(b => {
+  const d = b.dataset.dir;
+  const set = v => e => { e.preventDefault(); if (game && !game.over) game[d] = v; };
+  b.addEventListener('pointerdown', set(true)); ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, set(false)));
+});
+$('quitBtn').addEventListener('click', quitGame);
+$('menu').addEventListener('click', () => { if (game && game.over) quitGame(); });
 
 // ===== 繪圖 =====
 function chickSprite(st, alt) { return st === 'chick' ? (alt ? 'chick2' : 'chick') : (alt ? 'adult2' : 'adult'); }
@@ -298,7 +441,8 @@ function drawIcon(i) {
     g.fillStyle = on ? (ch === '3' ? PAL[0] : PAL[1]) : PAL[+ch]; g.fillRect(2 + k, 1 + j, 1, 1); }));
 }
 for (let i = 0; i < 6; i++) drawIcon(i);
-setInterval(draw, 100);
+let sub = 0;
+setInterval(() => { if (game) gameStep(); else if (++sub % 3 === 0) draw(); }, 33);
 
 // ===== 彩色像素蛋殼 =====
 function drawShell() {
@@ -329,6 +473,7 @@ function render() {
   $('petName').textContent = state.name;
   $('stage').textContent = state.dead ? '天堂' : { egg: '蛋', chick: '小雞', adult: '大雞' }[st];
   const a = Math.floor(ageMin());
+  $('coins').textContent = '◎' + (state.coins || 0);
   $('age').textContent = a < 60 ? a + '分' : a < 1440 ? Math.floor(a / 60) + '時' : Math.floor(a / 1440) + '天';
   if (state.dead) say(`${state.name} 去當小天使了…點畫面重新開始。`);
   else if (st === 'egg') say('蛋蛋正在孵化中…再等一下下！');
@@ -349,3 +494,17 @@ if (state) {
 } else askName();
 setInterval(tick, 5000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
+
+// 下樓梯：滑鼠左鍵按住往左、右鍵按住往右
+const scrEl = document.querySelector('.scr');
+scrEl.addEventListener('pointerdown', e => {
+  if (!game || game.over || e.pointerType !== 'mouse') return;
+  if (e.button === 0) game.left = true; else if (e.button === 2) game.right = true; else return;
+  e.preventDefault();
+});
+window.addEventListener('pointerup', e => {
+  if (!game || e.pointerType !== 'mouse') return;
+  if (e.button === 0) game.left = false; else if (e.button === 2) game.right = false;
+});
+scrEl.addEventListener('contextmenu', e => { if (game) e.preventDefault(); });
+window.addEventListener('blur', () => { if (game) game.left = game.right = false; });
