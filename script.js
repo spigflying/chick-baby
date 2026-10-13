@@ -122,7 +122,7 @@ const S = {
 };
 
 const cv = $('screen'), ctx = cv.getContext('2d');
-const W = 96, H = 74, GROUND = 60;
+const W = 96, H = 86, GROUND = 72, HUD = 26;
 function spr(name, x, y, flip, cut = 0) {
   const rows = S[name];
   rows.forEach((r, j) => [...r].forEach((c, i) => {
@@ -134,10 +134,12 @@ function spr(name, x, y, flip, cut = 0) {
 }
 const sw = n => S[n][0].length;
 function bar(x, y, icon, v) {
-  const iw = sw(icon), ih = S[icon].length;
-  spr(icon, x + Math.floor((11 - iw) / 2), y + Math.floor((11 - ih) / 2)); ctx.fillStyle = PAL[3]; ctx.fillRect(x + 12, y + 3, 6, 6);
-  ctx.fillStyle = PAL[0]; ctx.fillRect(x + 13, y + 4, 4, 4);
-  ctx.fillStyle = PAL[2]; ctx.fillRect(x + 13, y + 4, Math.round(4 * v / 100), 4);
+  const iw = sw(icon), ih = S[icon].length, n = 17;
+  spr(icon, x + Math.floor((11 - iw) / 2), y + Math.floor((11 - ih) / 2));
+  ctx.fillStyle = PAL[3]; ctx.fillRect(x + 12, y + 3, n + 2, 6);
+  ctx.fillStyle = PAL[0]; ctx.fillRect(x + 13, y + 4, n, 4);
+  ctx.fillStyle = PAL[2]; ctx.fillRect(x + 13, y + 4, Math.round(n * v / 100), 4);
+  ctx.fillStyle = PAL[1]; for (let i = 1; i < 4; i++) if (Math.round(n * v / 100) < Math.round(n * i / 4)) ctx.fillRect(x + 13 + Math.round(n * i / 4), y + 4, 1, 4);
 }
 
 // ===== 選單 / 輸入 =====
@@ -392,9 +394,9 @@ function drawTornado(tx, top, bot) {
 function drawClean(a, pw, ph, baseY) {
   if (a.phase === 'tornado') {
     for (const it of a.items) if (!it.lifted) spr('poop', it.x, it.y);
-    drawTornado(a.tx, 14, GROUND);
+    drawTornado(a.tx, HUD + 2, GROUND);
     for (const it of a.items) if (it.lifted) { it.ang += 0.7;
-      const px = a.tx + 5 + Math.cos(it.ang) * 15, py = 16 + Math.sin(it.ang) * 5;
+      const px = a.tx + 5 + Math.cos(it.ang) * 15, py = HUD + 4 + Math.sin(it.ang) * 5;
       ctx.fillStyle = PAL[0]; ctx.fillRect(px - 1, py - 1, 9, 7); spr('poop', px, py); }
     return;
   }
@@ -429,13 +431,13 @@ function draw() {
   const f = Math.floor(frame / 4) % 2, st = stage();
   ctx.fillStyle = state.sleeping ? PAL[2] : PAL[0]; ctx.fillRect(0, 0, W, H);
   // 狀態列
-  bar(0, 1, 'i_hunger', state.hunger); bar(19, 1, 'i_happy', state.happiness); bar(38, 1, 'i_energy', state.energy);
-  bar(57, 1, 'i_clean', state.cleanliness); bar(76, 1, 'i_health', state.health);
-  ctx.fillStyle = PAL[3]; ctx.fillRect(0, 13, W, 1);
+  bar(1, 1, 'i_hunger', state.hunger); bar(33, 1, 'i_happy', state.happiness); bar(65, 1, 'i_energy', state.energy);
+  bar(17, 13, 'i_clean', state.cleanliness); bar(49, 13, 'i_health', state.health);
+  ctx.fillStyle = PAL[3]; ctx.fillRect(0, HUD - 1, W, 1);
   // 地面
   ctx.fillStyle = PAL[1]; ctx.fillRect(0, GROUND, W, 1);
   for (let i = 0; i < W; i += 6) ctx.fillRect(i, GROUND + 2 + (i / 6 % 2), 2, 1);
-  if (state.dead) { spr('ghost', 43, 22 + (f ? 0 : 2)); spr('skull', 46, GROUND - 6); }
+  if (state.dead) { spr('ghost', 43, HUD + 20 + (f ? 0 : 2)); spr('skull', 46, GROUND - 6); }
   else if (st === 'egg') spr(f ? 'egg2' : 'egg', 42 + (f ? 1 : -1), GROUND - 12);
   else {
     const pw = sw(chickSprite(st)), ph = S[chickSprite(st)].length, baseY = GROUND - ph;
@@ -464,7 +466,7 @@ function draw() {
         spr(a.food.sprite, a.fx, a.fy, false, Math.ceil(fwid * a.bite / 4));
       }
       if (anim && a.phase === 'hearts') for (let k = 0; k < 3; k++) {
-        const hy = GROUND - ph - 4 - a.t * 0.8 - k * 6; if (hy > 10) spr('heart', petX + pw / 2 - 2 + (k - 1) * 6 + (Math.floor((a.t + k * 3) / 4) % 2), hy);
+        const hy = GROUND - ph - 4 - a.t * 0.8 - k * 6; if (hy > HUD + 1) spr('heart', petX + pw / 2 - 2 + (k - 1) * 6 + (Math.floor((a.t + k * 3) / 4) % 2), hy);
       }
     } else if (anim && anim.type === 'clean') {
       const a = anim; a.t++;
@@ -502,15 +504,15 @@ setInterval(() => { if (game) gameStep(); else if (++sub % 3 === 0) draw(); }, 3
 
 // ===== 彩色像素蛋殼 =====
 function drawShell() {
-  const c = $('shell'), W = 40, H = 54; c.width = W; c.height = H;
+  const c = $('shell'), W = 40, H = 56; c.width = W; c.height = H;
   const g = c.getContext('2d');
   const cols = ['#ff5c8a', '#ffd23f', '#3ec6ff', '#7ee07e', '#b48cff', '#ff9f43'];
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const nx = (x + .5 - W / 2) / (W / 2), ny = (y + .5 - H * .54) / (H * .46);
     const r = nx * nx / (ny < 0 ? 0.62 : 1) + ny * ny;
     const r2 = nx * nx + ny * ny * (ny < 0 ? 1 : 1);
-    if (ny < 0 ? nx * nx / (1 + ny * 0.2) ** 2 + ny * ny > 1 : nx * nx + ny * ny > 1) continue;
-    const e = ny < 0 ? nx * nx / (1 + ny * 0.2) ** 2 + ny * ny : nx * nx + ny * ny;
+    if (ny < 0 ? nx * nx / (1 + ny * 0.08) ** 2 + ny * ny > 1 : nx * nx + ny * ny > 1) continue;
+    const e = ny < 0 ? nx * nx / (1 + ny * 0.08) ** 2 + ny * ny : nx * nx + ny * ny;
     let col;
     if (e > 0.88) col = '#1a1030';
     else if (e > 0.78) col = '#ff3d7f';
