@@ -122,7 +122,7 @@ const S = {
 };
 
 const cv = $('screen'), ctx = cv.getContext('2d');
-const W = 96, H = 86, GROUND = 72, HUD = 26;
+const W = 120, H = 100, GROUND = 86, HUD = 14;
 function spr(name, x, y, flip, cut = 0) {
   const rows = S[name];
   rows.forEach((r, j) => [...r].forEach((c, i) => {
@@ -133,13 +133,13 @@ function spr(name, x, y, flip, cut = 0) {
   }));
 }
 const sw = n => S[n][0].length;
+const BAR_N = 9;
 function bar(x, y, icon, v) {
-  const iw = sw(icon), ih = S[icon].length, n = 17;
+  const iw = sw(icon), ih = S[icon].length, n = BAR_N, f = Math.round(n * v / 100);
   spr(icon, x + Math.floor((11 - iw) / 2), y + Math.floor((11 - ih) / 2));
   ctx.fillStyle = PAL[3]; ctx.fillRect(x + 12, y + 3, n + 2, 6);
   ctx.fillStyle = PAL[0]; ctx.fillRect(x + 13, y + 4, n, 4);
-  ctx.fillStyle = PAL[2]; ctx.fillRect(x + 13, y + 4, Math.round(n * v / 100), 4);
-  ctx.fillStyle = PAL[1]; for (let i = 1; i < 4; i++) if (Math.round(n * v / 100) < Math.round(n * i / 4)) ctx.fillRect(x + 13 + Math.round(n * i / 4), y + 4, 1, 4);
+  ctx.fillStyle = PAL[2]; ctx.fillRect(x + 13, y + 4, f, 4);
 }
 
 // ===== 選單 / 輸入 =====
@@ -186,7 +186,7 @@ function chooseFood(f) {
   if (f.price > state.coins) return say(`金幣不夠！${f.name} 要 ◎${f.price}，玩下樓梯賺金幣吧。`);
   state.coins -= f.price; save(); render();
   closeMenu();
-  anim = { type: 'eat', food: f, phase: 'drop', fx: Math.max(14, Math.min(78, petX + (petX > 48 ? -20 : 24))), fy: -8, t: 0, bite: 0 };
+  anim = { type: 'eat', food: f, phase: 'drop', fx: Math.max(14, Math.min(W - 18, petX + (petX > 48 ? -20 : 24))), fy: -8, t: 0, bite: 0 };
   say(`${f.name} 掉下來了！`);
 }
 function finishEat(f) {
@@ -267,7 +267,7 @@ function startGame() {
   const h0 = cv.offsetHeight + $('labels').offsetHeight;
   $('labels').hidden = true; $('gamebar').hidden = false; document.body.classList.add('playing');
   const hh = Math.min(h0 - $('gamebar').offsetHeight + 22, Math.round(cv.offsetWidth * GH / 96));
-  cv.height = GH; cv.style.height = hh + 'px'; cv.style.width = Math.round(hh * 96 / GH) + 'px';
+  cv.width = 96; cv.height = GH; cv.style.height = hh + 'px'; cv.style.width = Math.round(hh * 96 / GH) + 'px';
   say('←→ 移動，往下跳！小心尖刺～');
 }
 function addPlat(y) {
@@ -360,7 +360,7 @@ function endGame() {
 function quitGame() {
   if (!game) return;
   if (!game.over) endGame();
-  game = null; cv.height = H; cv.style.width = cv.style.height = ''; $('menu').hidden = true; $('labels').hidden = false; $('gamebar').hidden = true; document.body.classList.remove('playing');
+  game = null; cv.width = W; cv.height = H; cv.style.width = cv.style.height = ''; $('menu').hidden = true; $('labels').hidden = false; $('gamebar').hidden = true; document.body.classList.remove('playing');
   draw();
 }
 function gameKey(e, down) {
@@ -431,14 +431,13 @@ function draw() {
   const f = Math.floor(frame / 4) % 2, st = stage();
   ctx.fillStyle = state.sleeping ? PAL[2] : PAL[0]; ctx.fillRect(0, 0, W, H);
   // 狀態列
-  bar(1, 1, 'i_hunger', state.hunger); bar(33, 1, 'i_happy', state.happiness); bar(65, 1, 'i_energy', state.energy);
-  bar(17, 13, 'i_clean', state.cleanliness); bar(49, 13, 'i_health', state.health);
+  ['i_hunger', 'i_happy', 'i_energy', 'i_clean', 'i_health'].forEach((ic, i) => bar(1 + i * 24, 1, ic, state[['hunger', 'happiness', 'energy', 'cleanliness', 'health'][i]]));
   ctx.fillStyle = PAL[3]; ctx.fillRect(0, HUD - 1, W, 1);
   // 地面
   ctx.fillStyle = PAL[1]; ctx.fillRect(0, GROUND, W, 1);
   for (let i = 0; i < W; i += 6) ctx.fillRect(i, GROUND + 2 + (i / 6 % 2), 2, 1);
-  if (state.dead) { spr('ghost', 43, HUD + 20 + (f ? 0 : 2)); spr('skull', 46, GROUND - 6); }
-  else if (st === 'egg') spr(f ? 'egg2' : 'egg', 42 + (f ? 1 : -1), GROUND - 12);
+  if (state.dead) { spr('ghost', W / 2 - 5, HUD + 26 + (f ? 0 : 2)); spr('skull', W / 2 - 2, GROUND - 6); }
+  else if (st === 'egg') spr(f ? 'egg2' : 'egg', W / 2 - 6 + (f ? 1 : -1), GROUND - 12);
   else {
     const pw = sw(chickSprite(st)), ph = S[chickSprite(st)].length, baseY = GROUND - ph;
     let alt = f, py = baseY, flip = petDir > 0; // 精靈預設面向左，翻轉 = 面向右
