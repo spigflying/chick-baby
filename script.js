@@ -208,6 +208,7 @@ function activate(i) {
   if (state.sleeping && act !== 'sleep') return say('噓…牠在睡覺，先叫醒牠吧。');
   ACTIONS[act](); if (act !== 'feed') { updatePersonality(); save(); render(); }
 }
+$('labels').addEventListener('click', e => { const i = e.target.dataset.i; if (state && i !== undefined && !menu) activate(+i); });
 cv.addEventListener('click', e => {
   if (!state) return;
   const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
@@ -292,8 +293,9 @@ function draw() {
       ctx.fillStyle = i === sel && !state.dead ? (c === '3' ? PAL[0] : PAL[1]) : PAL[+c];
       ctx.fillRect(x + 4 + k, ICON_Y + 2 + j, 1, 1); }));
   });
-  const lbl = $('sel'); const t = state.dead ? '點畫面重新開始' : ICONS[sel].label + (ICONS[sel].act === 'sleep' && state.sleeping ? '(起床)' : '');
-  if (lbl.textContent !== t) lbl.textContent = t;
+  const ls = $('labels').children;
+  for (let i = 0; i < 6; i++) { const on = i === sel && !state.dead; if (ls[i].classList.contains('on') !== on) ls[i].classList.toggle('on', on); }
+  const sl = state.sleeping ? '起床' : '睡覺'; if (ls[2].textContent !== sl) ls[2].textContent = sl;
 }
 setInterval(draw, 100);
 
@@ -346,4 +348,3 @@ if (state) {
 } else askName();
 setInterval(tick, 5000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
-window.__chick = { get state() { return state; }, chooseFood, FOODS, get anim() { return anim; } };
