@@ -4,54 +4,36 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>小雞寶寶 電子雞</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/@chinese-fonts/cubic@latest/dist/Cubic_11/result.css" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<main class="device">
-  <h1>🐣 小雞寶寶</h1>
-  <div class="info"><span id="petName">—</span> ・ <span id="stage">蛋</span> ・ <span id="age">0 分鐘</span></div>
-  <div class="screen" id="screen">
-    <div class="pet" id="pet">
-      <div class="egg" id="egg"><div class="crack"></div></div>
-      <div class="chick" id="chick">
-        <div class="comb"></div>
-        <div class="body">
-          <div class="eye l"></div><div class="eye r"></div>
-          <div class="beak"></div>
-          <div class="blush l"></div><div class="blush r"></div>
-          <div class="wing l"></div><div class="wing r"></div>
-        </div>
-        <div class="feet"><span></span><span></span></div>
-      </div>
-      <div class="ghost" id="ghost">👻</div>
+<main class="device" id="device">
+  <canvas id="shell" class="shell"></canvas>
+  <div class="inner">
+    <div class="brand">CHICK♥BABY</div>
+    <div class="lcd">
+      <div class="lcd-top"><span id="petName">—</span><span id="stage">蛋</span><span id="age">0分</span></div>
+      <canvas id="screen" width="96" height="80"></canvas>
+      <p class="msg" id="msg">歡迎！</p>
     </div>
-    <div class="fx" id="fx"></div>
-    <div class="poop" id="poop"></div>
-    <div class="zzz" id="zzz">Z z z</div>
-    <div class="sick" id="sickIcon">🤒</div>
+    <section class="actions">
+      <button data-act="feed">餵食</button>
+      <button data-act="play">玩耍</button>
+      <button data-act="sleep" id="sleepBtn">睡覺</button>
+      <button data-act="clean">清潔</button>
+      <button data-act="doctor">看醫生</button>
+    </section>
+    <button class="restart" id="restart">重新開始</button>
   </div>
-  <p class="msg" id="msg">歡迎！</p>
-  <section class="stats">
-    <label>🍗 飽食度<progress id="s-hunger" max="100"></progress></label>
-    <label>😊 快樂度<progress id="s-happiness" max="100"></progress></label>
-    <label>⚡ 精力<progress id="s-energy" max="100"></progress></label>
-    <label>🛁 清潔度<progress id="s-cleanliness" max="100"></progress></label>
-    <label>❤️ 健康<progress id="s-health" max="100"></progress></label>
-  </section>
-  <section class="actions">
-    <button data-act="feed">🍗 餵食</button>
-    <button data-act="play">🎾 玩耍</button>
-    <button data-act="sleep" id="sleepBtn">😴 睡覺</button>
-    <button data-act="clean">🛁 清潔</button>
-    <button data-act="doctor">💉 看醫生</button>
-  </section>
-  <button class="restart" id="restart">🔄 重新開始</button>
 </main>
 <dialog id="nameDialog">
   <form method="dialog" id="nameForm">
     <p>幫你的小雞取個名字吧！</p>
     <input id="nameInput" maxlength="12" placeholder="例如：小黃" required>
-    <button>開始孵蛋 🥚</button>
+    <button>開始孵蛋</button>
   </form>
 </dialog>
 <script src="script.js"></script>
