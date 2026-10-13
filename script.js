@@ -117,6 +117,7 @@ const S = {
   corn: ['..33..','.3223.','.3223.','.3223.','.3223.','..33..','.3..3.'],
   cake: ['..3...','.333..','322223','311113','322223','333333'],
   candy: ['3.333.3','.32223.','3.333.3'],
+  sparkle: ['..3..','..3..','33.33','..3..','..3..'],
   i_health: ['3.3.','3333','3333','.33.']
 };
 
@@ -198,7 +199,7 @@ const ACTIONS = {
   feed() { openMenu('feed'); },
   play() { if (state.energy < 15) return say('太累了，想睡覺…'); startGame(); },
   sleep() { state.sleeping = !state.sleeping; if (state.sleeping) { state.counters.sleeps++; trait('stamina', 0.5); } say(state.sleeping ? '晚安～' : '早安！'); },
-  clean() { state.cleanliness = 100; state.poop = 0; state.counters.cleans++; fx('bubble'); say('洗香香，好舒服～'); },
+  clean() { closeMenu(); anim = { type: 'clean', phase: 'tornado', t: 0, tx: -16, items: Array.from({ length: state.poop }, (_, i) => ({ x: W - 9 - i * 7, y: GROUND - 5 - (i % 2) * 3, lifted: false, ang: i * 2 })), bubbles: [] }; say('龍捲風來打掃囉！'); },
   doctor() { if (!state.sick && state.health > 90) return say('很健康，不用看醫生喔！');
     state.sick = false; state.health = clamp(state.health + 30); state.happiness = clamp(state.happiness - 10); state.counters.doctor++; fx('syringe'); say('打針好痛…但病好了！'); },
   status() { openMenu('status'); }
@@ -210,7 +211,7 @@ function activate(i) {
   sel = i; const act = ICONS[i].act;
   if (act === 'status') return ACTIONS.status();
   if (stage() === 'egg') return say('蛋蛋還在孵化中…');
-  if (anim) return say('正在吃東西，等一下～');
+  if (anim) return say(anim.type === 'clean' ? '正在洗澎澎，等一下～' : '正在吃東西，等一下～');
   if (state.sleeping && act !== 'sleep') return say('噓…牠在睡覺，先叫醒牠吧。');
   ACTIONS[act](); if (act !== 'feed') { updatePersonality(); save(); render(); }
 }
@@ -375,6 +376,50 @@ document.querySelectorAll('#gamebar [data-dir]').forEach(b => {
 $('quitBtn').addEventListener('click', quitGame);
 $('menu').addEventListener('click', () => { if (game && game.over) quitGame(); });
 
+
+// ===== 清潔動畫 =====
+function drawTornado(tx, top, bot) {
+  const hgt = bot - top;
+  for (let j = 0; j < hgt; j++) {
+    const w = Math.max(2, Math.round(16 - j * 14 / hgt)), cx = tx + 8 + Math.round(Math.sin(j / 4 + frame * 0.9) * 2);
+    for (let i = 0; i < w; i++) {
+      const k = (i + j + frame) % 4; if (k === 3) continue;
+      ctx.fillStyle = k === 0 ? PAL[3] : PAL[2]; ctx.fillRect(cx - (w >> 1) + i, top + j, 1, 1);
+    }
+  }
+}
+function drawClean(a, pw, ph, baseY) {
+  if (a.phase === 'tornado') {
+    for (const it of a.items) if (!it.lifted) spr('poop', it.x, it.y);
+    drawTornado(a.tx, 14, GROUND);
+    for (const it of a.items) if (it.lifted) { it.ang += 0.7;
+      const px = a.tx + 5 + Math.cos(it.ang) * 15, py = 16 + Math.sin(it.ang) * 5;
+      ctx.fillStyle = PAL[0]; ctx.fillRect(px - 1, py - 1, 9, 7); spr('poop', px, py); }
+    return;
+  }
+  const front = a.phase === 'soap' || a.phase === 'rinse' ? -10 + a.t * 12 : W + 20;
+  const bubbles = [[1, 3], [pw - 4, 2], [2, ph - 6], [pw - 5, ph - 7], [pw / 2 - 2, -2], [pw / 2, ph / 2 - 2]];
+  if (a.phase === 'soap') {
+    // 泡泡水浪
+    for (let x = 0; x < Math.min(W, front); x++) {
+      const crest = GROUND - 2 - (x > front - 6 ? (front - x) : 0) + Math.round(Math.sin((x + frame * 3) / 3));
+      ctx.fillStyle = PAL[1]; ctx.fillRect(x, crest, 1, H - crest);
+      if ((x + frame) % 7 === 0) spr('bubble', x - 1, crest - 3 - ((x * 3 + frame) % 5));
+    }
+    if (front > petX + pw / 2) bubbles.forEach(([bx, by], i) => { if ((frame + i) % 6 !== 0) spr('bubble', petX + bx, baseY + by); else { ctx.fillStyle = PAL[2]; ctx.fillRect(petX + bx + 1, baseY + by + 1, 2, 2); } });
+  } else if (a.phase === 'rinse') {
+    for (let x = 0; x < Math.min(W, front); x++) {
+      const crest = GROUND - 7 + Math.round(Math.sin((x + frame * 4) / 2.5));
+      ctx.fillStyle = (x + frame) % 3 ? PAL[2] : PAL[1]; ctx.fillRect(x, crest, 1, 1);
+      ctx.fillStyle = PAL[1]; for (let y = crest + 2; y < H; y += 2) if ((x + y + frame) % 4 === 0) ctx.fillRect(x, y, 1, 1);
+    }
+    if (front <= petX + pw / 2) bubbles.forEach(([bx, by]) => spr('bubble', petX + bx, baseY + by));
+    else bubbles.slice(0, Math.max(0, 6 - Math.floor((front - petX) / 6))).forEach(([bx, by]) => spr('bubble', petX + bx, baseY + by - 3));
+  } else if (a.phase === 'shake') {
+    for (let k = 0; k < 4; k++) { const d = (a.t + k * 2) % 6; ctx.fillStyle = PAL[2]; ctx.fillRect(petX + (k % 2 ? pw + d : -d - 1), baseY + 3 + k * 3, 1, 1); }
+    spr('sparkle', petX + pw - 1, baseY - 6 + (a.t % 2)); if (a.t > 3) spr('sparkle', petX - 5, baseY - 2);
+  }
+}
 // ===== 繪圖 =====
 function chickSprite(st, alt) { return st === 'chick' ? (alt ? 'chick2' : 'chick') : (alt ? 'adult2' : 'adult'); }
 function draw() {
@@ -420,6 +465,15 @@ function draw() {
       if (anim && a.phase === 'hearts') for (let k = 0; k < 3; k++) {
         const hy = GROUND - ph - 4 - a.t * 0.8 - k * 6; if (hy > 10) spr('heart', petX + pw / 2 - 2 + (k - 1) * 6 + (Math.floor((a.t + k * 3) / 4) % 2), hy);
       }
+    } else if (anim && anim.type === 'clean') {
+      const a = anim; a.t++;
+      if (a.phase === 'tornado') { a.tx += 5; py = baseY; alt = f; if (Math.abs(a.tx + 7 - (petX + pw / 2)) < 14) petX += (a.t % 2 ? 1 : -1);
+        for (const it of a.items) if (!it.lifted && a.tx + 12 >= it.x) it.lifted = true;
+        if (a.tx > W + 4) { a.phase = 'soap'; a.t = 0; say('泡泡水沖過來～'); } }
+      else if (a.phase === 'soap') { if (a.t > 11) { a.phase = 'rinse'; a.t = 0; say('清水沖乾淨！'); } }
+      else if (a.phase === 'rinse') { if (a.t > 11) { a.phase = 'shake'; a.t = 0; } }
+      else if (a.phase === 'shake') { petX += a.t % 2 ? 2 : -2; flip = a.t % 4 < 2; if (a.t > 8) { anim = null;
+        state.cleanliness = 100; state.poop = 0; state.counters.cleans++; updatePersonality(); save(); render(); say('洗香香，好舒服～'); } }
     } else if (!state.sleeping && !menu) {
       if (frame % 3 === 0) { petX += petDir; if (petX < 8 || petX > W - pw - 22 || Math.random() < 0.02) petDir *= -1; petX = Math.max(8, Math.min(W - pw - 22, petX)); }
     }
@@ -427,7 +481,8 @@ function draw() {
     spr(state.sleeping ? chickSprite(st, 1) : chickSprite(st, alt), petX, py, flip && !state.sleeping);
     if (state.sleeping) { spr('z', petX + pw + 2, baseY - 6 - f * 3); spr('z', petX + pw + 8, baseY - 14 - f * 3); }
     if (state.sick) spr('skull', petX - 7, baseY - 6 + f);
-    for (let i = 0; i < state.poop; i++) spr('poop', W - 9 - i * 7, GROUND - 5 - (i % 2) * 3);
+    if (!(anim && anim.type === 'clean')) for (let i = 0; i < state.poop; i++) spr('poop', W - 9 - i * 7, GROUND - 5 - (i % 2) * 3);
+    if (anim && anim.type === 'clean') drawClean(anim, pw, ph, baseY);
     if (fxT > 0 && fxKind) { spr(fxKind, petX + pw / 2 - 3, baseY - 8 - (6 - fxT) * 2); if (frame % 3 === 0) fxT--; }
   }
   const ls = $('labels').children;
