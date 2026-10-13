@@ -109,10 +109,10 @@ export function checkFeed(p: PetState, food: Food | undefined, ctx: FeedContext,
   if (p.status === 'dead') return 'PET_DEAD';
   if (p.status === 'egg') return 'PET_EGG';
   if (p.sleeping) return 'PET_SLEEPING';
+  if (!ctx.isOwner && (!food.visitorAllowed || food.price === 0)) return 'VISITOR_FREE_FOOD';
   if (p.hunger >= cfg.feed.fullAt) return 'TOO_FULL';
   if (p.hunger >= cfg.feed.snackOnlyAt && !food.snack) return 'SNACK_ONLY';
   if (!ctx.isOwner) {
-    if (!food.visitorAllowed || food.price === 0) return 'VISITOR_FREE_FOOD';
     if (food.snack && p.health < cfg.feed.visitorLowHealthSnackBelow) return 'LOW_HEALTH_SNACK';
     if (ctx.visitorCountPet >= cfg.feed.visitorDailyPerPet || ctx.visitorCountMine >= cfg.feed.visitorDailyPerVisitorPerPet) return 'DAILY_CAP';
   }

@@ -1,7 +1,7 @@
 export const env = {
   port: Number(process.env.PORT ?? 8080),
   databaseUrl: process.env.DATABASE_URL ?? 'postgres://chick:chick@localhost:5432/chick',
-  devLogin: process.env.DEV_LOGIN === '1',
+  devLogin: process.env.DEV_LOGIN === '1' && process.env.NODE_ENV !== 'production', // 正式環境一律關閉
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',
   adminEmails: (process.env.ADMIN_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
   publicOrigins: (process.env.PUBLIC_ORIGIN ?? '').split(',').map((s) => s.trim()).filter(Boolean),
