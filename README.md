@@ -4,6 +4,38 @@
 
 線上遊玩：https://spigflying.github.io/chick-baby/
 
+
+## 多人版（M1，開發中）
+
+規格：[`docs/requirements.md`](docs/requirements.md) v1.1。根目錄的 `index.html / script.js / style.css` 是單機原型（GitHub Pages），多人版放在 pnpm monorepo：
+
+| 路徑 | 內容 |
+|---|---|
+| `packages/engine` | 共用遊戲邏輯（寵物模擬 timeScale、食物、物種、下樓梯引擎 + seeded RNG），前後端共用 |
+| `apps/server` | Node 22 + TypeScript、Fastify + ws、Kysely migration、Postgres `LISTEN/NOTIFY` |
+| `apps/web` | Vite + TypeScript，彩色像素蛋殼 + Game Boy 四綠螢幕（移植原型精靈與動畫） |
+
+### 本機執行
+
+```bash
+docker compose up -d            # Postgres 16（chick / chick；同時建立 chick_test）
+cp apps/server/.env.example apps/server/.env   # DEV_LOGIN=1 開啟免 Google 的開發登入
+pnpm install
+pnpm dev                        # server :8080 + web :5173（Vite 代理 /api、/ws）
+```
+
+打開 http://localhost:5173 ，用「開發用登入」輸入任意名字（`dev-admin` 為管理員）。
+要測 Google 登入：在 `.env` 填 `GOOGLE_CLIENT_ID`，並把 `http://localhost:5173` 加到 OAuth 用戶端的 JavaScript origins。
+
+```bash
+pnpm test        # engine + server（需要 Postgres 的 chick_test）+ web
+pnpm typecheck
+pnpm build       # web/dist + server/dist
+docker build -t chick-baby .   # Cloud Run 單一容器
+```
+
+部署步驟：[`docs/DEPLOY.md`](docs/DEPLOY.md)。
+
 ## 特色
 - 復古像素風：彩色像素蛋殼外殼，加上 Game Boy 四色綠螢幕，所有操作都在螢幕內完成
 - 五項狀態：飽食度、快樂度、精力、清潔度、健康，會隨真實時間下降
