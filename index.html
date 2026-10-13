@@ -16,17 +16,10 @@
     <div class="brand">CHICK♥BABY</div>
     <div class="lcd">
       <div class="lcd-top"><span id="petName">—</span><span id="stage">蛋</span><span id="age">0分</span></div>
-      <canvas id="screen" width="96" height="80"></canvas>
+      <div class="scr"><canvas id="screen" width="96" height="96"></canvas><div class="menu" id="menu" hidden></div></div>
+      <div class="lcd-top"><span id="sel">餵食</span><span>◀▶ ⏎</span></div>
       <p class="msg" id="msg">歡迎！</p>
     </div>
-    <section class="actions">
-      <button data-act="feed">餵食</button>
-      <button data-act="play">玩耍</button>
-      <button data-act="sleep" id="sleepBtn">睡覺</button>
-      <button data-act="clean">清潔</button>
-      <button data-act="doctor">看醫生</button>
-    </section>
-    <button class="restart" id="restart">重新開始</button>
   </div>
 </main>
 <dialog id="nameDialog">
