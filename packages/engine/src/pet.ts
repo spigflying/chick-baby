@@ -16,7 +16,7 @@ export interface PetState {
 }
 export interface SimEvent { type: 'hatch' | 'poop' | 'sick' | 'death' | 'wake'; at: number; payload?: Record<string, unknown> }
 export type GameErrorCode =
-  | 'FORBIDDEN' | 'PET_DEAD' | 'PET_EGG' | 'PET_SLEEPING' | 'NOT_SLEEPING' | 'TOO_FULL' | 'SNACK_ONLY' | 'VISITOR_FREE_FOOD'
+  | 'FORBIDDEN' | 'PET_DEAD' | 'PET_EGG' | 'PET_SLEEPING' | 'ALREADY_SLEEPING' | 'NOT_SLEEPING' | 'TOO_FULL' | 'SNACK_ONLY' | 'VISITOR_FREE_FOOD'
   | 'LOW_HEALTH_SNACK' | 'DAILY_CAP' | 'INSUFFICIENT_COINS' | 'NOT_NEEDED' | 'TOO_TIRED' | 'BAD_REQUEST' | 'UNKNOWN_FOOD';
 
 const clamp = (v: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, v));
@@ -136,6 +136,7 @@ export function applyOwnerAction(p: PetState, action: OwnerAction, cfg: GameConf
   if (p.status === 'dead') return 'PET_DEAD';
   if (p.status === 'egg') return 'PET_EGG';
   if (action === 'wake') { if (!p.sleeping) return 'NOT_SLEEPING'; p.sleeping = false; }
+  else if (action === 'sleep' && p.sleeping) return 'ALREADY_SLEEPING';
   else if (p.sleeping) return 'PET_SLEEPING';
   else if (action === 'sleep') { p.sleeping = true; p.counters.sleeps++; grow(p, 'stamina', 0.5); }
   else if (action === 'clean') { p.cleanliness = 100; p.poop = 0; p.dirtySince = null; p.counters.cleans++; }
