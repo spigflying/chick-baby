@@ -102,11 +102,11 @@ const S = {
   ball: ['.333.','32123','31213','32123','.333.'],
   bubble: ['.33.','3..3','3..3','.33.'],
   syringe: ['3.....','.3333.','.3222.3','.3333.','3.....'],
-  i_hunger: ['.33.','3223','3223','.33.','3...'],
-  i_happy: ['.333.','3.3.3','33333','3...3','.333.'],
-  i_energy: ['..33','.33.','3333','.33.','33..'],
-  i_clean: ['..3..','.323.','32223','32223','.333.'],
-  i_feed: ['....33...','...3223..','..32223..','..32223..','...333...','..3......','.3.......','3........'],
+  i_hunger: ['..3333.....','.322223....','3211223....','3212223....','32222223...','32222223...','.3332203.3.','....3330303','.......3003','......3003.','.......33..'],
+  i_happy: ['..3333..','.311113.','31311313','31111113','31311313','31133113','.311113.','..3333..'],
+  i_energy: ['....333.','...333..','..333...','.3333333','.....33.','....33..','...33...','..3.....'],
+  i_clean: ['...3....','..323...','.32223..','.32223..','3222223.','3212223.','3221223.','.33333..'],
+  i_feed: ['..3333.....','.322223....','3211223....','3212223....','32222223...','32222223...','.3332203.3.','....3330303','.......3003','......3003.','.......33..'],
   i_play: ['.......33','.......3.','.....333.','.....3...','...333...','...3.....','.333.....','.3.......'],
   i_sleep: ['...3333..','..33.....','.33......','.33......','.33......','.33......','..33.....','...3333..'],
   i_wash: ['....3....','...323...','..32223..','.3222223.','.3222223.','.3221223.','..32223..','...333...'],
@@ -118,7 +118,7 @@ const S = {
   cake: ['..3...','.333..','322223','311113','322223','333333'],
   candy: ['3.333.3','.32223.','3.333.3'],
   sparkle: ['..3..','..3..','33.33','..3..','..3..'],
-  i_health: ['3.3.','3333','3333','.33.']
+  i_health: ['.33..33.','32233223','32122223','32222223','.322223.','..3223..','...33...','........']
 };
 
 const cv = $('screen'), ctx = cv.getContext('2d');
@@ -134,9 +134,10 @@ function spr(name, x, y, flip, cut = 0) {
 }
 const sw = n => S[n][0].length;
 function bar(x, y, icon, v) {
-  spr(icon, x, y); ctx.fillStyle = PAL[3]; ctx.fillRect(x + 6, y, 11, 5);
-  ctx.fillStyle = PAL[0]; ctx.fillRect(x + 7, y + 1, 9, 3);
-  ctx.fillStyle = PAL[2]; ctx.fillRect(x + 7, y + 1, Math.round(9 * v / 100), 3);
+  const iw = sw(icon), ih = S[icon].length;
+  spr(icon, x + Math.floor((11 - iw) / 2), y + Math.floor((11 - ih) / 2)); ctx.fillStyle = PAL[3]; ctx.fillRect(x + 12, y + 3, 6, 6);
+  ctx.fillStyle = PAL[0]; ctx.fillRect(x + 13, y + 4, 4, 4);
+  ctx.fillStyle = PAL[2]; ctx.fillRect(x + 13, y + 4, Math.round(4 * v / 100), 4);
 }
 
 // ===== 選單 / 輸入 =====
@@ -428,9 +429,9 @@ function draw() {
   const f = Math.floor(frame / 4) % 2, st = stage();
   ctx.fillStyle = state.sleeping ? PAL[2] : PAL[0]; ctx.fillRect(0, 0, W, H);
   // 狀態列
-  bar(2, 2, 'i_hunger', state.hunger); bar(21, 2, 'i_happy', state.happiness); bar(40, 2, 'i_energy', state.energy);
-  bar(59, 2, 'i_clean', state.cleanliness); bar(77, 2, 'i_health', state.health);
-  ctx.fillStyle = PAL[3]; ctx.fillRect(0, 9, W, 1);
+  bar(0, 1, 'i_hunger', state.hunger); bar(19, 1, 'i_happy', state.happiness); bar(38, 1, 'i_energy', state.energy);
+  bar(57, 1, 'i_clean', state.cleanliness); bar(76, 1, 'i_health', state.health);
+  ctx.fillStyle = PAL[3]; ctx.fillRect(0, 13, W, 1);
   // 地面
   ctx.fillStyle = PAL[1]; ctx.fillRect(0, GROUND, W, 1);
   for (let i = 0; i < W; i += 6) ctx.fillRect(i, GROUND + 2 + (i / 6 % 2), 2, 1);
@@ -491,9 +492,9 @@ function draw() {
 }
 function drawIcon(i) {
   const cell = $('labels').children[i], c = cell.querySelector('canvas'), g = c.getContext('2d'), on = cell.classList.contains('on');
-  g.clearRect(0, 0, 13, 10);
+  g.clearRect(0, 0, 13, 11); const iw = sw(ICONS[i].icon), ih = S[ICONS[i].icon].length, ox = Math.floor((13 - iw) / 2), oy = Math.floor((11 - ih) / 2);
   S[ICONS[i].icon].forEach((r, j) => [...r].forEach((ch, k) => { if (ch === '.') return;
-    g.fillStyle = on ? (ch === '3' ? PAL[0] : PAL[1]) : PAL[+ch]; g.fillRect(2 + k, 1 + j, 1, 1); }));
+    g.fillStyle = on ? (ch === '3' ? PAL[0] : PAL[1]) : PAL[+ch]; g.fillRect(ox + k, oy + j, 1, 1); }));
 }
 for (let i = 0; i < 6; i++) drawIcon(i);
 let sub = 0;
