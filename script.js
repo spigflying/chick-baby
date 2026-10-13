@@ -119,7 +119,7 @@ const S = {
 };
 
 const cv = $('screen'), ctx = cv.getContext('2d');
-const W = 96, H = 96, GROUND = 60, ICON_Y = 78;
+const W = 96, H = 74, GROUND = 60;
 function spr(name, x, y, flip, cut = 0) {
   const rows = S[name];
   rows.forEach((r, j) => [...r].forEach((c, i) => {
@@ -154,20 +154,20 @@ function renderMenu() {
   if (menu === 'feed') {
     el.innerHTML = '<div class="mt">— 餵食 —</div>' + FOODS.map((f, i) =>
       `<div class="mi${i === menuSel ? ' on' : ''}" data-i="${i}">${i === menuSel ? '▶' : '　'}${unlocked(f) ? f.name + (f.snack ? '<small>點心</small>' : '') : '???'}</div>`).join('') +
-      '<div class="mi back" data-i="-1">✕ 返回</div>';
+      '<div class="mi back" data-i="-1">✕ 關閉</div>';
   } else if (menu === 'status') {
     const t = state.traits, born = new Date(state.born);
-    el.innerHTML = `<div class="mt">— 狀態 —</div><table>
-      <tr><td>名字</td><td>${esc(state.name)}</td></tr><tr><td>性格</td><td>${t.personality}</td></tr>
-      <tr><td>力量</td><td>${t.strength}</td></tr><tr><td>速度</td><td>${t.speed}</td></tr>
-      <tr><td>體力</td><td>${t.stamina}</td></tr><tr><td>體重</td><td>${t.weight}g</td></tr>
-      <tr><td>出生</td><td>${born.getMonth() + 1}/${born.getDate()} ${String(born.getHours()).padStart(2, '0')}:${String(born.getMinutes()).padStart(2, '0')}</td></tr>
-      <tr><td>ID</td><td class="id">${state.id.slice(0, 8)}</td></tr></table><div class="mi back on" data-i="-1">✕ 返回</div>`;
+    const row = (k, v) => `<div><b>${k}</b><span>${v}</span></div>`;
+    el.innerHTML = '<div class="mt">— 狀態 —</div><div class="grid">' + row('名字', esc(state.name)) + row('性格', t.personality) +
+      row('力量', t.strength) + row('速度', t.speed) + row('體力', t.stamina) + row('體重', t.weight + 'g') + '</div>' +
+      `<div class="wide"><b>出生</b><span>${born.getMonth() + 1}/${born.getDate()} ${String(born.getHours()).padStart(2, '0')}:${String(born.getMinutes()).padStart(2, '0')}</span></div>` +
+      `<div class="wide"><b>ID</b><span class="id">${state.id.slice(0, 8)}</span></div><div class="mi back on">✕ 關閉</div>`;
   }
 }
 const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 $('menu').addEventListener('click', e => {
-  const it = e.target.closest('.mi'); if (!it) return;
+  const it = e.target.closest('.mi');
+  if (menu !== 'feed' || !it) return closeMenu();
   const i = +it.dataset.i; if (i < 0) return closeMenu();
   menuSel = i; chooseFood(FOODS[i]);
 });
@@ -208,14 +208,13 @@ function activate(i) {
   if (state.sleeping && act !== 'sleep') return say('噓…牠在睡覺，先叫醒牠吧。');
   ACTIONS[act](); if (act !== 'feed') { updatePersonality(); save(); render(); }
 }
-$('labels').addEventListener('click', e => { const i = e.target.dataset.i; if (state && i !== undefined && !menu) activate(+i); });
-cv.addEventListener('click', e => {
-  if (!state) return;
-  const r = cv.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W, y = (e.clientY - r.top) / r.height * H;
-  if (state.dead) return restart();
-  if (menu) return;
-  if (y >= ICON_Y - 2) activate(Math.min(5, Math.floor(x / 16)));
+$('labels').addEventListener('click', e => {
+  const c = e.target.closest('.cell'); if (!c || !state) return;
+  const i = +c.dataset.i;
+  if (menu) { const was = menu; closeMenu(); if (ICONS[i].act === was) { sel = i; return; } }
+  activate(i);
 });
+cv.addEventListener('click', () => { if (!state) return; if (state.dead) return restart(); if (menu) closeMenu(); });
 document.addEventListener('keydown', e => {
   if (!state || $('nameDialog').open) return;
   const k = e.key;
@@ -283,20 +282,17 @@ function draw() {
     for (let i = 0; i < state.poop; i++) spr('poop', W - 9 - i * 7, GROUND - 5 - (i % 2) * 3);
     if (fxT > 0 && fxKind) { spr(fxKind, petX + pw / 2 - 3, baseY - 8 - (6 - fxT) * 2); if (frame % 3 === 0) fxT--; }
   }
-  // 圖示列
-  ctx.fillStyle = PAL[3]; ctx.fillRect(0, ICON_Y - 3, W, 1);
-  ICONS.forEach((ic, i) => {
-    const x = i * 16;
-    if (i === sel && !state.dead) { ctx.fillStyle = PAL[3]; ctx.fillRect(x + 1, ICON_Y - 1, 14, 14);
-      ctx.fillStyle = PAL[0]; ctx.fillRect(x + 2, ICON_Y, 12, 12); ctx.fillStyle = PAL[3]; ctx.fillRect(x + 3, ICON_Y + 1, 10, 10); }
-    S[ic.icon].forEach((r, j) => [...r].forEach((c, k) => { if (c === '.') return;
-      ctx.fillStyle = i === sel && !state.dead ? (c === '3' ? PAL[0] : PAL[1]) : PAL[+c];
-      ctx.fillRect(x + 4 + k, ICON_Y + 2 + j, 1, 1); }));
-  });
   const ls = $('labels').children;
-  for (let i = 0; i < 6; i++) { const on = i === sel && !state.dead; if (ls[i].classList.contains('on') !== on) ls[i].classList.toggle('on', on); }
-  const sl = state.sleeping ? '起床' : '睡覺'; if (ls[2].textContent !== sl) ls[2].textContent = sl;
+  for (let i = 0; i < 6; i++) { const on = i === sel && !state.dead; if (ls[i].classList.contains('on') !== on) { ls[i].classList.toggle('on', on); drawIcon(i); } }
+  const sl = state.sleeping ? '起床' : '睡覺', sp = ls[2].querySelector('span'); if (sp.textContent !== sl) sp.textContent = sl;
 }
+function drawIcon(i) {
+  const cell = $('labels').children[i], c = cell.querySelector('canvas'), g = c.getContext('2d'), on = cell.classList.contains('on');
+  g.clearRect(0, 0, 13, 10);
+  S[ICONS[i].icon].forEach((r, j) => [...r].forEach((ch, k) => { if (ch === '.') return;
+    g.fillStyle = on ? (ch === '3' ? PAL[0] : PAL[1]) : PAL[+ch]; g.fillRect(2 + k, 1 + j, 1, 1); }));
+}
+for (let i = 0; i < 6; i++) drawIcon(i);
 setInterval(draw, 100);
 
 // ===== 彩色像素蛋殼 =====

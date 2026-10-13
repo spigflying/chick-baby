@@ -21,15 +21,17 @@ dialog::backdrop{background:#0008}
 dialog input{font-family:var(--px);font-size:14px;width:100%;margin:10px 0;padding:8px;border:3px solid var(--g0);background:var(--g2);color:var(--g0);outline:none}
 .scr{position:relative}
 #screen{cursor:pointer}
-.menu{position:absolute;left:8%;right:8%;top:12%;bottom:22%;background:var(--g3);border:3px solid var(--g0);box-shadow:3px 3px 0 var(--g1);padding:4px 6px;font-size:clamp(9px,2.7vw,12px);line-height:1.35;overflow:hidden}
+.menu{position:absolute;left:5%;right:5%;top:4%;bottom:4%;background:var(--g3);border:3px solid var(--g0);box-shadow:3px 3px 0 var(--g1);padding:3px 6px;font-size:clamp(9px,2.7vw,12px);line-height:1.3;overflow-y:auto;cursor:pointer}
 .menu .mt{text-align:center;margin-bottom:2px}
 .menu .mi{cursor:pointer;padding:0 2px}
 .menu .mi.on{background:var(--g0);color:var(--g3)}
 .menu small{font-size:.7em;margin-left:4px;border:1px solid currentColor;padding:0 2px}
-.menu table{width:100%;border-collapse:collapse;font-size:.9em}
-.menu td{padding:0 2px}.menu td:last-child{text-align:right}
 .menu .id{font-family:'Press Start 2P',monospace;font-size:.7em}
 .menu .back{margin-top:2px;text-align:center}
-.labels{display:grid;grid-template-columns:repeat(6,1fr);background:var(--g3);border-top:2px solid var(--g0);margin-top:-1px}
-.labels span{text-align:center;font-size:clamp(10px,3vw,13px);line-height:1.6;color:var(--g0);cursor:pointer;user-select:none}
-.labels span.on{background:var(--g0);color:var(--g3)}
+.labels{display:grid;grid-template-columns:repeat(6,1fr);gap:2px;background:var(--g3);padding:2px 0}
+.cell{all:unset;display:flex;flex-direction:column;align-items:center;gap:1px;padding:2px 0;cursor:pointer;color:var(--g0);font-family:var(--px);font-size:clamp(10px,3vw,13px);line-height:1.2;user-select:none;-webkit-tap-highlight-color:transparent}
+.cell canvas{width:70%;image-rendering:pixelated}
+.cell.on{background:var(--g0);color:var(--g3)}
+.menu .grid{display:grid;grid-template-columns:1fr 1fr;column-gap:8px}
+.menu .grid div,.menu .wide{display:flex;justify-content:space-between;gap:4px}
+.menu b{font-weight:normal;opacity:.8}
