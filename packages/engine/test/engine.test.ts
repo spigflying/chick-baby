@@ -30,15 +30,17 @@ describe('pet sim', () => {
     const mk = () => { const p = newPet('duck', 0); simulate(p, 10 * H, createRng(5)); return p; };
     expect(mk()).toEqual(mk());
   });
-  it('max one poop per 10 min, none below hunger 70', () => {
-    const p = newPet('chicken', 0); const r = createRng(3); simulate(p, 61_000, r);
-    p.hunger = 100;
-    for (let i = 0; i < 200; i++) { p.lastPoopAt = null; p.poop = 0; applyFood(p, foodById('candy')!, 100_000, r); }
+  it('v1.3: poop only after feeding, ~70% per feed, any hunger, natural max 3, never over time', () => {
+    const r = createRng(3);
+    let hits = 0;
+    for (let i = 0; i < 1000; i++) { const p = newPet('chicken', 0); simulate(p, 61_000, r); p.hunger = 10; p.poop = 0; p.lastPoopAt = 99_999; applyFood(p, { ...foodById('rice')!, hunger: 0 }, 100_000, r); hits += p.poop; }
+    expect(hits).toBeGreaterThan(650); expect(hits).toBeLessThan(750);
     const q = newPet('chicken', 0); simulate(q, 61_000, r); q.hunger = 50;
     for (let i = 0; i < 50; i++) applyFood(q, { ...foodById('rice')!, hunger: 0 }, 100_000 + i, r);
-    expect(q.poop).toBe(0);
-    const z = newPet('chicken', 0); simulate(z, 61_000, r); z.hunger = 95; z.lastPoopAt = 90_000; z.poop = 0;
-    applyFood(z, foodById('candy')!, 100_000, r); expect(z.poop).toBe(0); // within 10 min
+    expect(q.poop).toBe(3);
+    const z = newPet('chicken', 0); simulate(z, 61_000, r); z.hunger = 95; z.poop = 0;
+    simulate(z, 61_000 + 6 * 3_600_000, r);
+    expect(z.poop).toBe(0); // 時間經過不會便便
   });
 });
 describe('feeding rules', () => {
@@ -96,5 +98,21 @@ describe('stairs engine', () => {
     const p = newPet('chicken', 0); simulate(p, 61_000, createRng(1));
     const e = p.energy; const coins = applyStairsResult(p, 12);
     expect(coins).toBe(12); expect(e - p.energy).toBeCloseTo(15 * GAME.timeScale);
+  });
+});
+
+describe('rose tea (v1.3)', () => {
+  it('costs 500, is a visitor-buyable drink, and adds exactly 20 poops (capped at POOP_HARD_MAX)', async () => {
+    const { POOP_HARD_MAX } = await import('../src');
+    const f = foodById('rosetea')!;
+    expect(f).toMatchObject({ price: 500, drink: true, visitorAllowed: true, snack: true, poop: 20 });
+    const p = newPet('chicken', 0); const r = createRng(9); simulate(p, 61_000, r); p.hunger = 50; p.poop = 1;
+    expect(checkFeed(p, f, { isOwner: true, visitorCountPet: 0, visitorCountMine: 0, balance: 499 })).toBe('INSUFFICIENT_COINS');
+    expect(checkFeed(p, f, { isOwner: false, visitorCountPet: 0, visitorCountMine: 0, balance: 500 })).toBeNull();
+    const ev = applyFood(p, f, 100_000, r);
+    expect(p.poop).toBe(21);
+    expect(ev).toEqual([{ type: 'poop', at: 100_000, payload: { count: 20, food: 'rosetea' } }]);
+    p.hunger = 50; applyFood(p, f, 100_001, r);
+    expect(p.poop).toBe(POOP_HARD_MAX);
   });
 });

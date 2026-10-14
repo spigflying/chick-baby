@@ -1,3 +1,4 @@
+import { blip, presenceDiff } from './visitors';
 import './style.css';
 import { api, act, errText, ApiError } from './api';
 import { Live } from './ws';
@@ -11,7 +12,7 @@ const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const app = $('#app');
 
-let cfg: any; let me: any = null; let live: Live | null = null; let device: Device | null = null; let presence: any[] = [];
+let cfg: any; let me: any = null; let live: Live | null = null; let device: Device | null = null; let presence: any[] = []; let presenceSeen = false;
 let wallet = 0;
 let idleOff: (() => void) | null = null;
 let sleepTimer = 0;
@@ -70,13 +71,13 @@ async function loginPage() {
 // ---------- 家（自己 / 別人）----------
 async function homePage(homeId: string) {
   device?.destroy();
-  app.innerHTML = `<main class="page"><div id="devSlot"></div><div class="panel" id="side"></div></main>`;
+  app.innerHTML = `<main class="page"><div class="presrow" id="presRow"></div><div id="devSlot"></div><div class="panel" id="side"></div></main>`;
   device = new Device({ me: me.user, cfg, live: live!, wallet: () => wallet, setWallet, toast, goHome: () => nav('/') });
   $('#devSlot').replaceWith(device.el);
   try {
     const view = await api('GET', `/homes/${homeId}`);
     device.setHome(view);
-    presence = [];
+    presence = []; presenceSeen = false;
     live!.joinHome(view.home.id);
     renderSide(view);
   } catch (e) {
@@ -106,6 +107,8 @@ async function renderSide(view: any) {
   } else if (owner) { const ul = document.getElementById('fedList'); if (ul) ul.innerHTML = '<li class="muted">還沒有寵物</li>'; }
 }
 function renderPresence() {
+  const row = document.getElementById('presRow');
+  if (row) row.innerHTML = `<b>現在在這裡</b> ${presence.map((u) => `<span>${esc(u.display_name)}${u.id === me.user.id ? '（你）' : ''}</span>`).join('')}`;
   const el = document.getElementById('pres'); if (!el) return;
   el.innerHTML = presence.length ? presence.map((u) => `<span>${esc(u.display_name)}${u.id === me.user.id ? '（你）' : ''}</span>`).join('') : '<span class="muted">—</span>';
 }
@@ -239,7 +242,13 @@ function startLive() {
     else if (s === 'paused') toast('閒置中，已暫停連線；回來點一下畫面就會繼續');
   };
   live.on((m) => {
-    if (m.type === 'home.presence' && device?.home && m.home_id === device.home.id) { presence = m.users; renderPresence(); }
+    if (m.type === 'home.presence' && device?.home && m.home_id === device.home.id) {
+      const d = presenceDiff(presenceSeen ? presence : null, m.users, me.user.id);
+      presence = m.users; presenceSeen = true; renderPresence(); device.setPresence(m.users);
+      const msg = [...d.joined.map((n) => `${n} 來了`), ...d.left.map((n) => `${n} 離開了`)].join('、');
+      if (msg) toast(msg);
+      if (d.joined.length || d.left.length) blip(d.joined.length > 0);
+    }
     else if (m.type === 'home.state' && device?.home && m.home.id === device.home.id) device.setHome(m);
     else if (m.type === 'home.kicked' && device?.home?.id === m.home_id) { toast('主人變更了存取設定，你被請出去了'); nav('/'); }
     else if (m.type === 'wallet.updated') setWallet(m.balance);

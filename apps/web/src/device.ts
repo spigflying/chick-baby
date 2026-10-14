@@ -1,4 +1,5 @@
-import { PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE } from './sprites';
+import { PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID } from './sprites';
+import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
 import { drawShell, SHELL_COLORS } from './shell';
 import { act, errText } from './api';
 import type { Live } from './ws';
@@ -14,6 +15,8 @@ export interface Ctx {
   toast: (t: string) => void;
   goHome: () => void;
 }
+/** 便便位置：從右往左排在地上，一排 16 個，超過就往上疊（玫瑰茶最多 23 個）。 */
+export function poopXY(i: number) { const row = Math.floor(i / 16), col = i % 16; return { x: W - 9 - col * 7, y: GROUND - 5 - (col % 2) * 3 - row * 7 }; }
 type Cell = { act: string; icon: string; label: string };
 
 export class Device {
@@ -28,13 +31,48 @@ export class Device {
   stairs: StairsClient | null = null;
   private timer = 0; private off: (() => void)[] = [];
   private hatchPick = 'chicken';
+  guests: PresenceUser[] = []; guestExtra = 0; private walkers = new GuestWalkers();
+
+  /** v1.3：在場者的寵物同框。 */
+  setPresence(users: PresenceUser[]) {
+    if (!this.home) return;
+    const g = guestsOf(users, this.home.owner.id);
+    this.guests = g.shown; this.guestExtra = g.extra;
+    const tags = this.$('.tags');
+    tags.innerHTML = `<span class="tag own" data-g="owner">${esc(this.home.owner.display_name)}</span>`
+      + this.guests.map((u, i) => `<span class="tag" data-g="${i}" title="${esc(u.pet ? u.pet.name : '沒有寵物')}">${esc(u.display_name)}${u.pet ? (u.pet.status === 'dead' ? '†' : '') : '·沒寵物'}</span>`).join('')
+      + (this.guestExtra ? `<span class="tag more">+${this.guestExtra}</span>` : '');
+  }
+  private lanes() { return lanes(W, this.guests.length); }
+  /** 主人寵物的活動範圍：有訪客時只用第 0 條跑道。 */
+  private ownerRange(pw: number) { if (!this.guests.length) return { min: 8, max: W - pw - 22 }; const l = this.lanes()[0]; return { min: l.x0, max: Math.max(l.x0, l.x1 - pw) }; }
+  private ownerCx() { if (!this.guests.length) return W / 2; const l = this.lanes()[0]; return (l.x0 + l.x1) / 2; }
+  private tag(sel: string, cx: number, top: number) {
+    const el = this.el.querySelector(`.tags [data-g="${sel}"]`) as HTMLElement | null; if (!el) return;
+    el.style.left = `${(cx / W) * 100}%`; el.style.top = `${(Math.max(HUD + 1, top - 7) / H) * 100}%`;
+  }
+  drawGuests() {
+    const g = this.g, f = Math.floor(this.frame / 4) % 2, L = this.lanes();
+    const names = this.guests.map((u) => guestSprite(u.pet, f));
+    const xs = this.walkers.step(this.guests.map((u) => u.id), (i) => L[i + 1], (i) => spriteW(names[i]),
+      (i) => this.frame % 3 === 0 && !!this.guests[i].pet && this.guests[i].pet!.status === 'alive' && !this.guests[i].pet!.sleeping);
+    this.guests.forEach((u, i) => {
+      const n = names[i], w = spriteW(n), h = spriteH(n), x = xs[i];
+      const y = n === 'ghost' ? GROUND - h - 4 + (f ? 0 : 2) : GROUND - h;
+      if (n) spr(g, n, x, y, this.walkers.dir(u.id) > 0 && n !== 'ghost' && n !== 'egg' && !u.pet!.sleeping);
+      if (u.pet?.sleeping) spr(g, 'z', x + w + 1, y - 5 - f * 2);
+      if (u.pet?.sick && u.pet.status === 'alive') spr(g, 'skull', x - 6, y - 6 + f);
+      this.tag(String(i), x + w / 2, n ? y : GROUND - 4);
+    });
+  }
+  private drawOwnerTag(cx: number, top: number) { this.tag('owner', cx, top); }
 
   constructor(private ctx: Ctx) {
     this.el = document.createElement('div');
     this.el.className = 'device';
     this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
       <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">◎0</span><span data-k="age">—</span></div>
-      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="menu" hidden></div></div>
+      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="menu" hidden></div></div>
       <div class="labels"></div>
       <div class="gamebar" hidden><button data-dir="left">◀</button><button class="quit">離開</button><button data-dir="right">▶</button></div>
       <p class="msg">…</p></div></div>`;
@@ -210,7 +248,7 @@ export class Device {
       const v = this.visitor, f = cfg.game.feed;
       el.innerHTML = `<div class="mt">— 餵食 —  ◎${coins}</div>` + cfg.foods.map((fd: any, i: number) => {
         const blocked = (!this.isOwner && (!fd.visitorAllowed || fd.price === 0)) || fd.price > coins;
-        return `<div class="mi${i === this.menuSel ? ' on' : ''}${blocked ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(fd.name)}${fd.snack ? '<small>點心</small>' : ''}</span><em>${fd.price ? '◎' + fd.price : '免費'}</em></div>`;
+        return `<div class="mi${i === this.menuSel ? ' on' : ''}${blocked ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(fd.name)}${fd.drink ? '<small>飲料</small>' : fd.snack ? '<small>點心</small>' : ''}</span><em>${fd.price ? '◎' + fd.price : '免費'}</em></div>`;
       }).join('') +
         (this.isOwner ? '' : `<div class="note">今天你餵了 ${v?.today_mine ?? 0}/${f.visitorDailyPerVisitorPerPet}・全部訪客 ${v?.today_pet_total ?? 0}/${f.visitorDailyPerPet}</div>`) +
         '<div class="mi back" data-i="-1">✕ 關閉</div>';
@@ -306,10 +344,10 @@ export class Device {
   // ---------- 動畫 ----------
   startEat(foodId: string) {
     const sprite = FOOD_SPRITE[foodId] ?? 'food';
-    this.anim = { type: 'eat', sprite, phase: 'drop', fx: Math.max(14, Math.min(W - 18, this.petX + (this.petX > 48 ? -20 : 24))), fy: -8, t: 0, bite: 0 };
+    this.anim = { type: 'eat', sprite, drink: !!this.ctx.cfg.foods.find((f: any) => f.id === foodId)?.drink, level: CUP_LIQUID.rows.length, phase: 'drop', fx: Math.max(14, Math.min(W - 18, this.petX + (this.petX > 48 ? -20 : 24))), fy: -8, t: 0, bite: 0 };
   }
   startClean(poop: number) {
-    this.anim = { type: 'clean', phase: 'tornado', t: 0, tx: -16, items: Array.from({ length: poop }, (_, i) => ({ x: W - 9 - i * 7, y: GROUND - 5 - (i % 2) * 3, lifted: false, ang: i * 2 })) };
+    this.anim = { type: 'clean', phase: 'tornado', t: 0, tx: -16, items: Array.from({ length: poop }, (_, i) => ({ ...poopXY(i), lifted: false, ang: i * 2 })) };
   }
   private finishAnim(msg?: string) { this.anim = null; if (this.pendingPet) { this.setPet(this.pendingPet); this.pendingPet = null; } if (msg) this.say(msg); }
 
@@ -328,19 +366,27 @@ export class Device {
     g.fillStyle = PAL[2]; g.fillRect(x + 13, y + 4, f, 4);
   }
   draw() {
+    this.drawMain();
+    this.drawGuests();
+    const more = this.el.querySelector('.tags .more') as HTMLElement | null;
+    if (more) { more.style.right = '1%'; more.style.top = `${((HUD + 1) / H) * 100}%`; }
+  }
+  drawMain() {
     const g = this.g, p = this.pet; this.frame++;
+    const cx = this.ownerCx();
     const f = Math.floor(this.frame / 4) % 2;
     g.fillStyle = p?.sleeping ? PAL[2] : PAL[0]; g.fillRect(0, 0, W, H);
     if (p && p.status === 'alive') (['i_hunger', 'i_happy', 'i_energy', 'i_clean', 'i_health'] as const).forEach((ic, i) => this.bar(1 + i * 24, 1, ic, p[['hunger', 'happiness', 'energy', 'cleanliness', 'health'][i]]));
     g.fillStyle = PAL[3]; g.fillRect(0, HUD - 1, W, 1);
     g.fillStyle = PAL[1]; g.fillRect(0, GROUND, W, 1);
     for (let i = 0; i < W; i += 6) g.fillRect(i, GROUND + 2 + ((i / 6) % 2), 2, 1);
-    if (!p) { spr(g, 'egg', W / 2 - 6, GROUND - 12); g.fillStyle = PAL[0]; g.fillRect(W / 2 - 3, GROUND - 9, 6, 5); spr(g, 'z', W / 2 + 8, GROUND - 22 - f * 2); return; }
-    if (p.status === 'dead') { spr(g, 'ghost', W / 2 - 5, HUD + 22 + (f ? 0 : 2)); spr(g, 'tomb', W / 2 - 4, GROUND - 8); return; }
+    if (!p) { spr(g, 'egg', cx - 6, GROUND - 12); g.fillStyle = PAL[0]; g.fillRect(cx - 3, GROUND - 9, 6, 5); spr(g, 'z', cx + 8, GROUND - 22 - f * 2); this.drawOwnerTag(cx, GROUND - 12); return; }
+    if (p.status === 'dead') { spr(g, 'ghost', cx - 5, HUD + 22 + (f ? 0 : 2)); spr(g, 'tomb', cx - 4, GROUND - 8); this.drawOwnerTag(cx, HUD + 22); return; }
     if (p.status === 'egg') {
       const left = p.hatch_at - this.ctx.live.serverNow(), shake = left < 15000 ? (f ? 1 : -1) : (this.frame % 16 < 2 ? 1 : 0);
-      spr(g, f && left < 15000 ? 'egg2' : 'egg', W / 2 - 6 + shake, GROUND - 12);
-      if (left > 0) num(g, Math.ceil(left / 1000), W / 2 - 4, HUD + 10);
+      spr(g, f && left < 15000 ? 'egg2' : 'egg', cx - 6 + shake, GROUND - 12);
+      if (left > 0) num(g, Math.ceil(left / 1000), cx - 4, HUD + 10);
+      this.drawOwnerTag(cx, GROUND - 12);
       return;
     }
     const name1 = speciesSprite(p.species, 1), pw = sw(name1), ph = sh(name1), baseY = GROUND - ph;
@@ -359,13 +405,20 @@ export class Device {
         if (Math.abs(this.petX - a.target) <= 1) { this.petX = a.target; a.phase = 'peck'; a.t = 0; this.petDir = a.faceRight ? 1 : -1; }
         else { this.petDir = a.target > this.petX ? 1 : -1; this.petX += this.petDir; }
         flip = this.petDir > 0; alt = Math.floor(a.t / 2) % 2;
+      } else if (a.phase === 'peck' && a.drink) {
+        // 飲料：小口小口慢慢喝，杯子裡的茶一格一格變少（約 5 秒）
+        flip = a.faceRight; this.petDir = flip ? 1 : -1;
+        const sip = Math.floor(a.t / 4) % 4 === 0; py = baseY + (sip ? 1 : 0); alt = 0;
+        a.level = Math.max(0, CUP_LIQUID.rows.length - Math.floor(a.t / 12));
+        if (a.level === 0 && a.t % 12 === 11) { a.phase = 'hearts'; a.t = 0; if (this.pendingPet) { this.setPet(this.pendingPet); this.pendingPet = null; } this.say('喝光光～咦，肚子怪怪的…'); }
       } else if (a.phase === 'peck') {
         flip = a.faceRight; this.petDir = flip ? 1 : -1;
         const cyc = Math.floor(a.t / 3) % 2; py = baseY + (cyc ? 2 : 0); alt = cyc;
         if (a.t % 6 === 5) a.bite++;
         if (a.bite >= 4) { a.phase = 'hearts'; a.t = 0; if (this.pendingPet) { this.setPet(this.pendingPet); this.pendingPet = null; } this.say('好吃！吃光光～'); }
       } else if (a.phase === 'hearts' && a.t > 24) this.finishAnim();
-      if (this.anim && a.phase !== 'hearts') spr(g, a.sprite, a.fx, a.fy, false, Math.ceil(sw(a.sprite) * a.bite / 4));
+      if (this.anim && a.drink && a.phase !== 'hearts') this.drawCup(a);
+      else if (this.anim && a.phase !== 'hearts') spr(g, a.sprite, a.fx, a.fy, false, Math.ceil(sw(a.sprite) * a.bite / 4));
       if (this.anim && a.phase === 'hearts') for (let k = 0; k < 3; k++) { const hy = GROUND - ph - 4 - a.t * 0.8 - k * 6; if (hy > HUD + 1) spr(g, 'heart', this.petX + pw / 2 - 2 + (k - 1) * 6 + (Math.floor((a.t + k * 3) / 4) % 2), hy); }
     } else if (a && a.type === 'clean') {
       a.t++;
@@ -376,14 +429,26 @@ export class Device {
       else if (a.phase === 'rinse') { if (a.t > 11) { a.phase = 'shake'; a.t = 0; } }
       else if (a.phase === 'shake') { this.petX += a.t % 2 ? 2 : -2; flip = a.t % 4 < 2; if (a.t > 8) this.finishAnim('洗香香，好舒服～'); }
     } else if (!p.sleeping && !this.menu) {
-      if (this.frame % 3 === 0) { this.petX += this.petDir; if (this.petX < 8 || this.petX > W - pw - 22 || Math.random() < 0.02) this.petDir *= -1; this.petX = Math.max(8, Math.min(W - pw - 22, this.petX)); }
+      const rg = this.ownerRange(pw);
+      if (this.frame % 3 === 0) { this.petX += this.petDir; if (this.petX < rg.min || this.petX > rg.max || Math.random() < 0.02) this.petDir *= -1; }
+      this.petX = Math.max(rg.min, Math.min(rg.max, this.petX));
     }
     spr(g, p.sleeping ? speciesSprite(p.species, 's') : speciesSprite(p.species, alt ? 2 : 1), this.petX, py, flip && !p.sleeping);
     if (p.sleeping) { spr(g, 'z', this.petX + pw + 2, baseY - 6 - f * 3); spr(g, 'z', this.petX + pw + 8, baseY - 14 - f * 3); }
     if (p.sick) spr(g, 'skull', this.petX - 7, baseY - 6 + f);
-    if (!(this.anim && this.anim.type === 'clean')) for (let i = 0; i < p.poop; i++) spr(g, 'poop', W - 9 - i * 7, GROUND - 5 - (i % 2) * 3);
+    this.drawOwnerTag(this.petX + pw / 2, py);
+    if (!(this.anim && this.anim.type === 'clean')) for (let i = 0; i < p.poop; i++) { const q = poopXY(i); spr(g, 'poop', q.x, q.y); }
     if (this.anim && this.anim.type === 'clean') this.drawClean(this.anim, pw, ph, baseY);
     if (this.fxT > 0 && this.fxKind) { spr(g, this.fxKind, this.petX + pw / 2 - 3, baseY - 8 - (6 - this.fxT) * 2); if (this.frame % 3 === 0) this.fxT--; }
+  }
+  /** 杯子：先畫整杯，再把喝掉的茶水列塗回背景色；喝光後不再冒煙。 */
+  drawCup(a: any) {
+    const g = this.g;
+    spr(g, a.sprite, a.fx, a.fy);
+    const drained = CUP_LIQUID.rows.length - a.level;
+    g.fillStyle = this.pet?.sleeping ? PAL[2] : PAL[0];
+    for (let k = 0; k < drained; k++) g.fillRect(Math.round(a.fx + CUP_LIQUID.x0), Math.round(a.fy + CUP_LIQUID.rows[k]), CUP_LIQUID.x1 - CUP_LIQUID.x0 + 1, 1);
+    if (a.level === 0) g.fillRect(Math.round(a.fx), Math.round(a.fy), 6, 2);
   }
   drawTornado(tx: number, top: number, bot: number) {
     const g = this.g, hgt = bot - top;

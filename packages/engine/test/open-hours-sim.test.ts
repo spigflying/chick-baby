@@ -68,17 +68,15 @@ describe('simulate with open hours', () => {
     expect(p.hatchedAt).toBe(tpe('2026-10-13T09:00:30'));
     expect(ev.map((e) => e.type)).toEqual(['hatch']);
   });
-  it('poop interval counts open time only', () => {
+  it('v1.3: no poop interval — consecutive feeds can poop right away, overnight adds none', () => {
     const cfg = { ...GAME, poop: { ...GAME.poop, afterFeedChance: 1 } };
-    const p = alivePet(tpe('2026-10-12T19:58:00'), { hunger: 75, lastPoopAt: tpe('2026-10-12T19:58:00'), poop: 0 });
+    const p = alivePet(tpe('2026-10-12T19:58:00'), { hunger: 20, lastPoopAt: tpe('2026-10-12T19:58:00'), poop: 0 });
     const corn = foodById('corn')!;
     simulate(p, tpe('2026-10-13T09:05:00'), createRng(9), cfg, clock);
-    applyFood(p, corn, tpe('2026-10-13T09:05:00'), createRng(9), cfg, clock); // 開放時間只過了 7 分鐘
     expect(p.poop).toBe(0);
-    p.hunger = 75;
-    simulate(p, tpe('2026-10-13T09:09:00'), createRng(9), cfg, clock);
-    applyFood(p, corn, tpe('2026-10-13T09:09:00'), createRng(9), cfg, clock); // 11 分鐘
-    expect(p.poop).toBe(1);
+    applyFood(p, corn, tpe('2026-10-13T09:05:00'), createRng(9), cfg, clock);
+    p.hunger = 20; applyFood(p, corn, tpe('2026-10-13T09:05:01'), createRng(9), cfg, clock);
+    expect(p.poop).toBe(2);
   });
   it('dirty-for-30-minutes counts open time only', () => {
     const cfg = { ...GAME, sick: { ...GAME.sick, chancePerMin: 12 } }; // × timeScale = 1 → 一定生病

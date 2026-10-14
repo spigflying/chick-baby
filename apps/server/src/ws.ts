@@ -4,7 +4,8 @@ import type { Db } from './db';
 import { COOKIE, sessionUser } from './auth';
 import { env } from './env';
 import { AppError } from './errors';
-import { canEnter, feed, getHome, ownerAction, viewHome } from './game';
+import { canEnter, currentPet, feed, getHome, ownerAction, viewHome } from './game';
+import { PresenceStore, petSummary } from './presence';
 import { rateLimit } from './core';
 import { createSolo, currentTick, finish, handleInput, matches, type Match } from './stairs';
 import { publicPet, rowToState } from './pets';
@@ -17,24 +18,27 @@ import type { DbGate } from './gate';
 interface Conn { id: number; ws: WebSocket; user: { id: string; display_name: string; avatar_url: string | null }; homeId: string | null; connectedAt: number; match: Match | null; ip: string; ua: string }
 const conns = new Set<Conn>();
 // 在場名單：home → (instance:conn) → user；透過 NOTIFY 在所有執行個體間同步
-const presence = new Map<string, Map<string, { id: string; display_name: string; avatar_url: string | null }>>();
+const presence = new PresenceStore();
 let seq = 0;
 
 function send(c: Conn, msg: unknown) { if (c.ws.readyState === 1) c.ws.send(JSON.stringify(msg)); }
 function inHome(homeId: string) { return [...conns].filter((c) => c.homeId === homeId); }
 function broadcastPresence(homeId: string) {
-  const users = [...(presence.get(homeId)?.values() ?? [])];
-  const uniq = [...new Map(users.map((u) => [u.id, u])).values()];
-  for (const c of inHome(homeId)) send(c, { type: 'home.presence', home_id: homeId, users: uniq });
+  const users = presence.users(homeId);
+  for (const c of inHome(homeId)) send(c, { type: 'home.presence', home_id: homeId, users });
 }
 
 export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
   bus.on(async (m) => {
     try {
       if (m.t === 'pet') {
-        const targets = inHome(m.home); if (!targets.length) return;
+        const targets = inHome(m.home); const visiting = presence.hasPet(m.pet);
+        if (!targets.length && !visiting) return;
         const row = await db.selectFrom('pets').selectAll().where('id', '=', m.pet).executeTakeFirst(); if (!row) return;
-        for (const c of targets) send(c, { type: 'pet.updated', home_id: m.home, pet: publicPet(row, rowToState(row)), event: m.ev ?? null });
+        const pub = publicPet(row, rowToState(row));
+        for (const c of targets) send(c, { type: 'pet.updated', home_id: m.home, pet: pub, event: m.ev ?? null });
+        // 這隻寵物的主人正在拜訪別人家：同步更新那些家的在場寵物（每個執行個體都收到同一則 NOTIFY，結果一致）
+        if (visiting) for (const h of presence.updatePet(m.pet, petSummary(pub))) broadcastPresence(h);
       } else if (m.t === 'wallet') {
         const targets = [...conns].filter((c) => c.user.id === m.user); if (!targets.length) return;
         const w = await db.selectFrom('wallets').select('balance').where('user_id', '=', m.user).executeTakeFirst();
@@ -43,8 +47,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
         const home = await getHome(db, m.home); if (!home) return;
         for (const c of inHome(m.home)) if (!(await canEnter(db, home, c.user.id))) { leaveHome(c); send(c, { type: 'home.kicked', home_id: m.home }); }
       } else if (m.t === 'presence') {
-        let map = presence.get(m.home); if (!map) presence.set(m.home, (map = new Map()));
-        if (m.on) map.set(m.key, m.user); else map.delete(m.key);
+        presence.set(m.home, m.key, m.on ? m.user : null);
         broadcastPresence(m.home);
       }
     } catch (e) { app.log.error(e); }
@@ -84,7 +87,8 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             const view = await viewHome(db, String(msg.home_id), c.user.id);
             leaveHome(c); c.homeId = view.home.id;
             send(c, { type: 'home.state', ...view });
-            await bus.publish({ t: 'presence', home: c.homeId, key: `${env.instanceId}:${c.id}`, on: true, user: c.user });
+            const pet = petSummary(view.home.is_owner ? view.pet : await currentPet(db, c.user.id));
+            await bus.publish({ t: 'presence', home: c.homeId, key: `${env.instanceId}:${c.id}`, on: true, user: { ...c.user, pet } });
             break;
           }
           case 'home.leave': leaveHome(c); break;

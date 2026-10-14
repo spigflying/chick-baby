@@ -120,6 +120,19 @@ describe('pets & feeding', () => {
     expect((await b.call('GET', `/api/homes/${home}/visitors`)).status).toBe(403);
   });
 
+  it('rose tea: visitor pays 500 via the ledger and the pet gets 20 poops (v1.3)', async () => {
+    const a = await login('alice'); const b = await login('bob');
+    const pet = await hatchAlive(a, 'chicken', { hunger: 30, poop: 0 });
+    expect((await feed(b, pet, 'rosetea')).json.error).toBe('INSUFFICIENT_COINS');
+    await db.updateTable('wallets').set({ balance: 600 }).where('user_id', '=', b.id).execute();
+    const r = await feed(b, pet, 'rosetea');
+    expect(r.status, JSON.stringify(r.json)).toBe(200);
+    expect(r.json.pet.poop).toBe(20);
+    expect((await b.call('GET', '/api/me')).json.wallet.balance).toBe(100);
+    const led = await db.selectFrom('coin_ledger').select(['reason', 'delta', 'balance_after']).where('user_id', '=', b.id).orderBy('id', 'desc').executeTakeFirstOrThrow();
+    expect(led).toMatchObject({ reason: 'feed', delta: -500, balance_after: 100 });
+  });
+
   it('20/pet/day total across visitors', async () => {
     const a = await login('alice');
     const pet = await hatchAlive(a, 'duck', { hunger: 0 });
@@ -369,5 +382,48 @@ describe('review follow-ups (v1.2)', () => {
     await expect(feedAction(db, { userId: a.id }, pet, 'worm', rid())).rejects.toMatchObject({ code: 'GAME_CLOSED' });
     const w = await db.selectFrom('wallets').select('balance').where('user_id', '=', a.id).executeTakeFirstOrThrow();
     expect(w.balance).toBe(first.json.balance);
+  });
+});
+
+describe('home presence carries pets (v1.3)', () => {
+  async function openWs(c: Client) {
+    const msgs: any[] = [];
+    const ws = await app.injectWS('/ws', { headers: { cookie: c.cookie }, socket: { remoteAddress: '127.0.0.1' } } as any, { onInit: (s) => s.on('message', (d) => msgs.push(JSON.parse(String(d)))) });
+    const wait = async (pred: (m: any) => boolean) => {
+      for (let i = 0; i < 100; i++) { const m = [...msgs].reverse().find(pred); if (m) return m; await new Promise((r) => setTimeout(r, 20)); }
+      throw new Error('timeout: ' + JSON.stringify(msgs.map((m) => m.type)));
+    };
+    await wait((m) => m.type === 'hello'); // 伺服器的 message handler 在 hello 之後才掛上
+    return { ws, msgs, wait };
+  }
+  const presenceWith = (n: number) => (m: any) => m.type === 'home.presence' && m.users.length === n;
+  it('owner and visitor see the same set of pets; updates and leaves propagate', async () => {
+    const a = await login('Benson'), b = await login('仲軍'), c = await login('NoPet');
+    const petA = await hatchAlive(a, 'chicken');
+    const petB = await hatchAlive(b, 'duck');
+    const home = (await a.call('GET', '/api/me')).json.home.id;
+    const wa = await openWs(a), wb = await openWs(b), wc = await openWs(c);
+    wa.ws.send(JSON.stringify({ type: 'home.join', home_id: home }));
+    await wa.wait(presenceWith(1));
+    wb.ws.send(JSON.stringify({ type: 'home.join', home_id: home }));
+    wc.ws.send(JSON.stringify({ type: 'home.join', home_id: home }));
+    const pa = await wa.wait(presenceWith(3)), pb = await wb.wait(presenceWith(3)), pc = await wc.wait(presenceWith(3));
+    expect(pb.users).toEqual(pa.users); expect(pc.users).toEqual(pa.users);
+    const byName = Object.fromEntries(pa.users.map((u: any) => [u.display_name, u]));
+    expect(byName['Benson'].pet).toMatchObject({ id: petA, species: 'chicken', status: 'alive' });
+    expect(byName['仲軍'].pet).toMatchObject({ id: petB, species: 'duck', status: 'alive', name: 'Pduck' });
+    expect(['happy', 'ok', 'sad']).toContain(byName['仲軍'].pet.mood);
+    expect(byName['NoPet'].pet).toBeNull();
+    // 訪客自己的寵物狀態改變 → 拜訪中的家也更新
+    await db.updateTable('pets').set({ status: 'dead', died_at: sql`now()` } as any).where('id', '=', petB).execute();
+    const homeB = (await b.call('GET', '/api/me')).json.home.id;
+    await bus.publish({ t: 'pet', home: homeB, pet: petB });
+    const dead = await wa.wait((m) => m.type === 'home.presence' && m.users.some((u: any) => u.pet?.id === petB && u.pet.status === 'dead'));
+    expect(dead.users).toHaveLength(3);
+    wb.ws.terminate();
+    const left = await wa.wait((m) => m.type === 'home.presence' && m.users.length === 2 && !m.users.some((u: any) => u.id === b.id));
+    expect(left.users.map((u: any) => u.display_name).sort()).toEqual(['Benson', 'NoPet']);
+    wa.ws.terminate(); wc.ws.terminate();
+    await new Promise((r) => setTimeout(r, 300)); // 讓離開的 NOTIFY 在關閉 DB 前送完
   });
 });

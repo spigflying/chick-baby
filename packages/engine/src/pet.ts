@@ -1,5 +1,5 @@
 import { GAME, type GameConfig } from './config';
-import { FOOD_BY_ID, type Food } from './foods';
+import { FOOD_BY_ID, POOP_HARD_MAX, type Food } from './foods';
 import { SPECIES, type SpeciesId } from './species';
 import { nextFloat, type Rng } from './rng';
 import { ALWAYS_OPEN, type Clock } from './hours';
@@ -51,9 +51,9 @@ export function updatePersonality(p: PetState) {
   p.personality = r;
 }
 
-function tryPoop(p: PetState, at: number, chance: number, rng: Rng, cfg: GameConfig, events: SimEvent[], clock: Clock) {
-  if (p.hunger < cfg.poop.minHunger || p.poop >= cfg.poop.max) return;
-  if (p.lastPoopAt !== null && clock.elapsed(p.lastPoopAt, at) < cfg.poop.minIntervalMs) return;
+/** v1.3：只在餵食後便便（不再隨時間便便、沒有飽食門檻與間隔），自然上限 cfg.poop.max。 */
+function tryPoop(p: PetState, at: number, chance: number, rng: Rng, cfg: GameConfig, events: SimEvent[]) {
+  if (p.poop >= cfg.poop.max) return;
   if (nextFloat(rng) < chance) { p.poop++; p.lastPoopAt = at; events.push({ type: 'poop', at }); }
 }
 
@@ -81,7 +81,6 @@ function step(p: PetState, t: number, stepMs: number, rng: Rng, cfg: GameConfig,
   p.happiness = clamp(p.happiness - d.happiness * m * ts * (sleep ? 0.3 : 1));
   p.energy = clamp(p.energy + (sleep ? cfg.sleepEnergyGain : -d.energy) * m * ts);
   p.cleanliness = clamp(p.cleanliness - (d.cleanliness + p.poop * cfg.poop.cleanPerPoopPerMin) * m * ts);
-  tryPoop(p, t, cfg.poop.chancePerMin * m * ts, rng, cfg, events, clock);
   if (sleep && p.energy >= 100) { p.sleeping = false; events.push({ type: 'wake', at: t, payload: { auto: true } }); }
   // 骯髒持續時間（只算開放時間）
   if (p.cleanliness < cfg.sick.dirtyBelow) { if (p.dirtySince === null) p.dirtySince = t; } else p.dirtySince = null;
@@ -152,7 +151,10 @@ export function applyFood(p: PetState, food: Food, at: number, rng: Rng, cfg: Ga
   p.hunger = clamp(p.hunger + food.hunger); p.happiness = clamp(p.happiness + food.happiness); p.health = clamp(p.health + food.health);
   grow(p, 'weight', food.weight); grow(p, 'strength', food.strength); grow(p, 'speed', food.speed); grow(p, 'stamina', food.stamina);
   p.counters.feeds++; if (food.snack) p.counters.snacks++;
-  tryPoop(p, at, cfg.poop.afterFeedChance, rng, cfg, events, clock);
+  if (food.poop) {
+    const n = Math.min(POOP_HARD_MAX, p.poop + food.poop) - p.poop;
+    if (n > 0) { p.poop += n; p.lastPoopAt = at; events.push({ type: 'poop', at, payload: { count: n, food: food.id } }); }
+  } else tryPoop(p, at, cfg.poop.afterFeedChance, rng, cfg, events);
   updatePersonality(p);
   return events;
 }
