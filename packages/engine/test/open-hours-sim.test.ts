@@ -89,3 +89,16 @@ describe('simulate with open hours', () => {
     expect(p.sick).toBe(true);
   });
 });
+
+describe('morning wake events are capped (review follow-up)', () => {
+  it('a pet left alone for two weeks gets one morning wake row, not one per weekday', () => {
+    const p = alivePet(tpe('2026-10-12T19:00:00'), { hunger: 50, happiness: 100, cleanliness: 100, health: 100, energy: 40 });
+    const noDecay = { ...GAME, decay: { hunger: 0, happiness: 0, energy: 0, cleanliness: 0 } }; // 只看早安事件，不讓牠餓死
+    const ev = simulate(p, tpe('2026-10-26T09:30:00'), createRng(11), noDecay, clock);
+    expect(p.status).toBe('alive');
+    const wakes = ev.filter((e) => e.type === 'wake' && (e.payload as any)?.reason === 'morning');
+    expect(wakes).toHaveLength(1);
+    expect(wakes[0].at).toBe(tpe('2026-10-26T09:00:00')); // 最後一次開門
+    expect((wakes[0].payload as any).days).toBe(10); // 合併了 10 個開門日
+  });
+});

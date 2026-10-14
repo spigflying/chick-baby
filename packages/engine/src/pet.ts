@@ -64,6 +64,15 @@ function morning(p: PetState, at: number, cfg: GameConfig, events: SimEvent[]) {
   events.push({ type: 'wake', at, payload: { reason: 'morning' } });
 }
 
+/** 一次結算跨過好幾個開門日時，只留最後一筆早安事件（payload.days = 合併的天數），避免久沒人碰的寵物一次寫入很多列。 */
+function collapseMornings(events: SimEvent[]): SimEvent[] {
+  const isMorning = (e: SimEvent) => e.type === 'wake' && (e.payload as { reason?: string } | undefined)?.reason === 'morning';
+  const n = events.filter(isMorning).length;
+  if (n <= 1) return events;
+  let seen = 0;
+  return events.filter((e) => !isMorning(e) || ++seen === n).map((e) => (isMorning(e) ? { ...e, payload: { reason: 'morning', days: n } } : e));
+}
+
 /** 一個模擬步（最多 1 分鐘）：結束於 t，長度 stepMs。 */
 function step(p: PetState, t: number, stepMs: number, rng: Rng, cfg: GameConfig, events: SimEvent[], clock: Clock) {
   const ts = cfg.timeScale, m = stepMs / MIN;
@@ -117,7 +126,7 @@ export function simulate(p: PetState, to: number, rng: Rng, cfg: GameConfig = GA
   }
   for (; oi < openings.length; oi++) if (p.status === 'alive') morning(p, openings[oi], cfg, events);
   p.lastSimulatedAt = to;
-  return events;
+  return collapseMornings(events);
 }
 
 export interface FeedContext { isOwner: boolean; visitorCountPet: number; visitorCountMine: number; balance: number }
