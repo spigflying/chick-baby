@@ -12,7 +12,8 @@ export class Live {
   private samples: { rtt: number; off: number }[] = [];
   private stopped = false;
   private timer: number | undefined;
-  onStatus: (s: 'online' | 'offline' | 'unauthorized') => void = () => {};
+  onStatus: (s: 'online' | 'offline' | 'unauthorized' | 'paused') => void = () => {};
+  private paused = false;
   static PROACTIVE_MS = 50 * 60_000;
 
   start() {
@@ -23,6 +24,15 @@ export class Live {
     }, 10_000);
   }
   stop() { this.stopped = true; clearInterval(this.timer); this.ws?.close(); }
+  get isPaused() { return this.paused; }
+  /** 閒置或分頁隱藏：關閉連線且不自動重連，直到 resume()。比賽中不暫停。 */
+  pause() {
+    if (this.paused || this.stopped || this.inMatch) return;
+    this.paused = true; const w = this.ws; this.ws = null; w?.close(1000, 'idle');
+    this.onStatus('paused');
+  }
+  /** 回到分頁或有操作：重新連線；hello 之後會重新 home.join 同步狀態。 */
+  resume() { if (!this.paused || this.stopped) return; this.paused = false; this.open(); }
   on(h: Handler) { this.handlers.add(h); return () => this.handlers.delete(h); }
   send(msg: unknown) { if (this.ws?.readyState === 1) { this.ws.send(JSON.stringify(msg)); return true; } return false; }
   serverNow() { return Date.now() + this.offset; }
@@ -34,7 +44,7 @@ export class Live {
   reconnect(_why: string) { const w = this.ws; this.ws = null; w?.close(1000, 'reconnect'); this.open(); }
 
   private open() {
-    if (this.stopped) return;
+    if (this.stopped || this.paused) return;
     const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
     this.ws = ws;
     ws.onopen = () => { this.connectedAt = Date.now(); this.attempt = 0; this.samples = []; };

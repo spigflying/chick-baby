@@ -4,6 +4,7 @@ import { Live } from './ws';
 import { Device } from './device';
 import { drawShell } from './shell';
 import { spriteCanvas, speciesSprite, SPECIES_LABEL } from './sprites';
+import { watchIdle } from './idle';
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -11,6 +12,7 @@ const app = $('#app');
 
 let cfg: any; let me: any = null; let live: Live | null = null; let device: Device | null = null; let presence: any[] = [];
 let wallet = 0;
+let idleOff: (() => void) | null = null;
 
 function toast(t: string) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.append(d); setTimeout(() => d.remove(), 2600); }
 function nav(path: string, replace = false) { if (replace) history.replaceState(null, '', path); else history.pushState(null, '', path); void route(); }
@@ -29,7 +31,7 @@ function renderBar() {
   const link = (href: string, t: string, on: boolean) => `<a data-nav href="${href}" class="${on ? 'on' : ''}">${t}</a>`;
   bar.innerHTML = `<span class="who">🐣 <b>${esc(me.user.display_name)}</b></span><span class="coin" id="barCoins">◎${wallet}</span><span>分享碼 <span class="code">${esc(me.user.share_code)}</span></span>
     <nav>${link('/', '我的家', p === '/')}${link('/visit', '去拜訪', p === '/visit' || p.startsWith('/home/'))}${link('/settings', '家的設定', p === '/settings')}${me.user.role === 'admin' ? link('/admin', '管理', p === '/admin') : ''}<a href="#" id="logout">登出</a></nav>`;
-  $('#logout').onclick = async (e) => { e.preventDefault(); await api('POST', '/auth/logout'); live?.stop(); live = null; me = null; nav('/', true); };
+  $('#logout').onclick = async (e) => { e.preventDefault(); await api('POST', '/auth/logout'); live?.stop(); live = null; idleOff?.(); idleOff = null; me = null; nav('/', true); };
 }
 function setWallet(n: number) { wallet = n; const c = document.getElementById('barCoins'); if (c) c.textContent = '◎' + n; device?.renderTop(); }
 
@@ -206,7 +208,10 @@ async function route() {
 function startLive() {
   live?.stop();
   live = new Live();
-  live.onStatus = (s) => { if (s === 'unauthorized') { me = null; void route(); } };
+  live.onStatus = (s) => {
+    if (s === 'unauthorized') { me = null; void route(); }
+    else if (s === 'paused') toast('閒置中，已暫停連線；回來點一下畫面就會繼續');
+  };
   live.on((m) => {
     if (m.type === 'home.presence' && device?.home && m.home_id === device.home.id) { presence = m.users; renderPresence(); }
     else if (m.type === 'home.state' && device?.home && m.home.id === device.home.id) device.setHome(m);
@@ -214,6 +219,7 @@ function startLive() {
     else if (m.type === 'wallet.updated') setWallet(m.balance);
   });
   live.start();
+  idleOff?.(); idleOff = watchIdle(live);
 }
 async function boot() {
   cfg = cfg ?? await api('GET', '/config');
