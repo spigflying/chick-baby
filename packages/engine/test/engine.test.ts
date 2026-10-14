@@ -118,11 +118,12 @@ describe('rose tea (v1.3)', () => {
 });
 
 describe('sleep energy (v1.4)', () => {
-  it('sleeping pet goes 0 → 100 in about 10 real minutes at timeScale 1/12', () => {
-    expect(GAME.sleepEnergyGain).toBe(120);
+  it('sleeping pet goes 0 → 100 in about 1 real minute at timeScale 1/12', () => {
+    expect(GAME.sleepEnergyGain).toBe(1200);
     const p = newPet('chicken', 0); const r = createRng(4); simulate(p, 61_000, r);
     Object.assign(p, { energy: 0, sleeping: true, hunger: 100, health: 100 });
-    simulate(p, 61_000 + 8 * 60_000, r); expect(p.energy).toBeLessThan(100); expect(p.sleeping).toBe(true);
-    simulate(p, 61_000 + 11 * 60_000, r); expect(p.energy).toBeGreaterThanOrEqual(99);
+    simulate(p, 61_000 + 30_000, r); expect(p.energy).toBeCloseTo(50, 0); expect(p.sleeping).toBe(true);
+    simulate(p, 61_000 + 60_000, r); expect(p.energy).toBe(100);
   });
+
 });

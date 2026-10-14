@@ -1,3 +1,4 @@
+import { TopTip, tipText, type TopKey } from './topTip';
 import { PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID } from './sprites';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
 import { drawShell, SHELL_COLORS } from './shell';
@@ -147,7 +148,7 @@ export class Device {
     this.el = document.createElement('div');
     this.el.className = 'device';
     this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
-      <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">◎0</span><span data-k="age">—</span></div>
+      <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">◎0</span><span data-k="age">—</span></div><div class="toptip" role="tooltip" hidden></div>
       <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="menu" hidden></div></div>
       <div class="labels"></div>
       <div class="fightbar" hidden><button data-pad="left">◀</button><button data-pad="jump">▲</button><button data-pad="attack">啄</button><button data-pad="right">▶</button><button class="navbtn">選單</button></div>
@@ -155,7 +156,7 @@ export class Device {
       <div class="gamebar" hidden><button data-dir="left">◀</button><button class="quit">離開</button><button data-dir="right">▶</button></div>
       <p class="msg">…</p></div></div>`;
     this.cv = this.el.querySelector('canvas.screen')!; this.g = this.cv.getContext('2d')!;
-    this.bind();
+    this.bind(); this.bindTopTip();
     this.timer = window.setInterval(() => this.loop(), 33);
     this.off.push(ctx.live.on((m) => this.onLive(m)));
   }
@@ -220,6 +221,30 @@ export class Device {
       old.replaceWith(pad);
     });
   }
+  private topTip = new TopTip(() => this.showTopTip());
+  private onDocDown = (e: PointerEvent) => { if (!(e.target as HTMLElement)?.closest?.('.lcd-top [data-k]')) this.topTip.outside(); };
+  private bindTopTip() {
+    this.el.querySelectorAll<HTMLElement>('.lcd-top [data-k]').forEach((s) => {
+      const k = s.dataset.k as TopKey;
+      s.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') this.topTip.hover(k); });
+      s.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') this.topTip.leave(k); });
+      s.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
+      s.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (this.topTip.shown === k && matchMedia('(hover:hover)').matches) return; this.topTip.tap(k); });
+    });
+    document.addEventListener('pointerdown', this.onDocDown);
+    this.off.push(() => { document.removeEventListener('pointerdown', this.onDocDown); this.topTip.outside(); });
+  }
+  private showTopTip() {
+    const tip = this.$('.toptip'), k = this.topTip.shown;
+    if (!k) { tip.hidden = true; return; }
+    const s = this.$(`.lcd-top [data-k="${k}"]`);
+    tip.textContent = tipText(k, s.textContent ?? '', this.pet?.status === 'egg');
+    tip.hidden = false;
+    const lcd = this.$('.lcd').getBoundingClientRect(), r = s.getBoundingClientRect();
+    tip.style.top = `${r.bottom - lcd.top + 4}px`;
+    const left = Math.min(Math.max(0, r.left - lcd.left + r.width / 2 - tip.offsetWidth / 2), lcd.width - tip.offsetWidth);
+    tip.style.left = `${Math.max(0, left)}px`;
+  }
   renderTop() {
     const p = this.pet, t = (k: string, v: string) => { this.$(`[data-k="${k}"]`).textContent = v; };
     t('name', p ? p.name : this.isOwner ? '空巢' : '沒有寵物');
@@ -229,6 +254,7 @@ export class Device {
       const a = Math.max(0, Math.floor((Date.now() - (p.hatched_at ?? p.born_at)) / 60000));
       t('age', p.status === 'egg' ? `${Math.max(0, Math.ceil((p.hatch_at - this.ctx.live.serverNow()) / 1000))}秒` : a < 60 ? a + '分' : a < 1440 ? Math.floor(a / 60) + '時' : Math.floor(a / 1440) + '天');
     } else t('age', '—');
+    if (this.topTip.shown) this.showTopTip();
   }
 
   // ---------- 輸入 ----------
