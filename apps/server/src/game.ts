@@ -1,3 +1,4 @@
+import { listItems } from './items';
 import * as engine from '@chick/engine';
 import { clock } from './hours';
 import { applyFood, applyOwnerAction, checkFeed, foodById, createRng, GAME, isSpecies, newPet, revive as reviveState, SPECIES, type OwnerAction } from '@chick/engine';
@@ -37,7 +38,8 @@ export async function getMe(db: Db, userId: string) {
   const w = await db.selectFrom('wallets').select('balance').where('user_id', '=', userId).executeTakeFirstOrThrow();
   const home = await db.selectFrom('homes').select(['id', 'name', 'access_mode']).where('owner_id', '=', userId).executeTakeFirstOrThrow();
   const pet = await currentPet(db, userId);
-  return { user: { ...publicUser(u), share_code: u.share_code, role: u.role }, wallet: { balance: w.balance }, home, pet };
+  const items = await listItems(db, userId);
+  return { user: { ...publicUser(u), share_code: u.share_code, role: u.role }, wallet: { balance: w.balance }, home, pet, items };
 }
 
 async function currentPetRow(db: Db | Tx, ownerId: string) {

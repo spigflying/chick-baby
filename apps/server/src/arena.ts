@@ -1,24 +1,27 @@
-// v1.4 打架模式（伺服器權威）。每個家由「目前有連線的最小 instance id」負責模擬；
+// v1.5 打架模式 v2（混戰）。每個家由「目前有連線的最小 instance id」負責模擬；
 // 輸入與狀態都經過 LISTEN/NOTIFY，所以不論玩家連到哪個執行個體都看到同一場。
 import { randomUUID } from 'node:crypto';
-import { addFighter, ARENA_PARAMS, cancelFights, canFightPet, createArena, fightTransfer, phaseAt, removeFighter, setArenaInput, stepArena, type ArenaEvent, type ArenaState, type FightEnd } from '@chick/engine';
+import { addFighter, ARENA_PARAMS, cancelFights, canFightPet, createArena, meleeTransfers, phaseAt, removeFighter, setArenaInput, setFighterItems, stepArena, type ArenaEvent, type ArenaState, type FightEnd, type ItemId } from '@chick/engine';
 import type { Db } from './db';
 import type { Bus } from './bus';
-import { changeBalance, lockWallets } from './core';
+import { changeBalance, lockWallets, notify } from './core';
 import { clock } from './hours';
 import { env } from './env';
 import type { PresenceStore } from './presence';
+import { listItems } from './items';
+import { lockPet, savePet, settle as settlePet } from './pets';
 
 const P = ARENA_PARAMS;
 const TICK_MS = 1000 / P.tickRate;
 export const FIGHT_COIN_CAP = 20;
-interface Arena { home: string; state: ArenaState; startAt: number; lastKey?: string; lastSnapAt?: number }
+/** 決勝瞬間凍結畫面（伺服器暫停模擬）多久 */
+export const FREEZE_MS = 1500;
+interface Arena { home: string; state: ArenaState; startAt: number; lastKey?: string; lastSnapAt?: number; frozenUntil?: number; frozenTick?: number }
 const arenas = new Map<string, Arena>();
-const pairCooldown = new Map<string, number>();
+const homeCooldown = new Map<string, number>();
 const inserts = new Map<string, Promise<unknown>>();
 let deps: { db: Db; bus: Bus; presence: PresenceStore; instance: () => string } | null = null;
 
-const pairKey = (a: string, b: string) => [a, b].sort().join('|');
 export function isAuthority(home: string) { return !!deps && deps.presence.instances(home)[0] === deps.instance(); }
 const pub = (m: Record<string, unknown>) => void deps!.bus.publish(m).catch(() => {});
 
@@ -26,37 +29,62 @@ export function initArena(d: { db: Db; bus: Bus; presence: PresenceStore; instan
   deps = { ...d, instance: d.instance ?? (() => env.instanceId) };
 }
 function petOf(home: string, user: string) { return deps!.presence.users(home).find((u) => u.id === user)?.pet ?? null; }
+/** 這位使用者正在（本執行個體負責的）某場對戰中嗎？買道具時用。 */
+export function inFight(user: string) { for (const a of arenas.values()) if (a.state.fighters.some((f) => f.userId === user && f.fightId)) return true; return false; }
 
-/** 開打前檢查：開放時間（整場要在關門前結束）、同一對的冷卻、雙方寵物資格。 */
-export function canStart(home: string, a: string, b: string, now = Date.now()): string | null {
+/** 開打前檢查：開放時間（整場要在關門前結束）、家的冷卻（上一場結束後 30 秒）、所有參賽寵物資格。 */
+export function canStart(home: string, users: string[], now = Date.now()): string | null {
   const phase = phaseAt(clock(), now);
   if (phase !== 'open') return phase === 'closing' ? 'GAME_CLOSING' : 'GAME_CLOSED';
   const closesAt = clock().status(now).closes_at;
   if (closesAt !== null && now + P.fightTicks * TICK_MS + 2000 > closesAt) return 'GAME_CLOSING';
-  if ((pairCooldown.get(pairKey(a, b)) ?? 0) > now) return 'PAIR_COOLDOWN';
-  if (!canFightPet(petOf(home, a)) || !canFightPet(petOf(home, b))) return 'NOT_ELIGIBLE';
+  if ((homeCooldown.get(home) ?? 0) > now) return 'HOME_COOLDOWN';
+  if (users.length < 2 || users.some((u) => !canFightPet(petOf(home, u)))) return 'NOT_ELIGIBLE';
   return null;
 }
 
 /** 每個執行個體都會收到同一則 NOTIFY；只有負責的執行個體處理輸入。 */
 export function onArenaBus(m: any) {
-  if (!deps || !m?.home) return;
-  if (!isAuthority(m.home)) return;
-  if (m.t === 'arena.join') join(m.home, m.user);
+  if (!deps) return;
+  if (m?.t === 'arena.items') { for (const a of arenas.values()) if (isAuthority(a.home) && a.state.fighters.some((f) => f.userId === m.user)) void listItems(deps.db, m.user).then((it) => { setFighterItems(a.state, m.user, it); snapshot(a); }).catch(() => {}); return; }
+  if (m?.t === 'pet' && m.home) { const a = arenas.get(m.home); if (a && isAuthority(m.home)) void loadAmmo(a); return; }
+  if (!m?.home || !isAuthority(m.home)) return;
+  if (m.t === 'arena.join') void join(m.home, m.user);
   else if (m.t === 'arena.in') { const a = arenas.get(m.home); if (a) setArenaInput(a.state, m.user, m); }
-  else if (m.t === 'arena.leave') { const a = arenas.get(m.home); if (a) { const e = removeFighter(a.state, m.user); if (e) void settle(a.home, e); snapshot(a); } }
+  else if (m.t === 'arena.leave') { const a = arenas.get(m.home); if (a) { const e = removeFighter(a.state, m.user); if (e) onEnd(a, e); snapshot(a); } }
 }
-function join(home: string, user: string) {
+/** 丟大便的彈藥 = 這個家（對戰所在的家）地上的便便數 = 屋主目前寵物的 poop。 */
+async function homePetId(home: string) {
+  const r = await deps!.db.selectFrom('pets').innerJoin('homes', 'homes.owner_id', 'pets.owner_id').select(['pets.id', 'pets.poop'])
+    .where('homes.id', '=', home).where('pets.status', '=', 'alive').executeTakeFirst();
+  return r ?? null;
+}
+async function loadAmmo(a: Arena) { try { const r = await homePetId(a.home); a.state.poopAmmo = r?.poop ?? 0; } catch { /* 下次再試 */ } }
+async function usePoop(home: string) {
+  try {
+    const r = await homePetId(home); if (!r) return;
+    await deps!.db.transaction().execute(async (tx) => {
+      const row = await lockPet(tx, r.id); if (!row) return;
+      const { state } = await settlePet(tx, row);
+      state.poop = Math.max(0, state.poop - 1);
+      await savePet(tx, r.id, state);
+      await notify(tx, { t: 'pet', home, pet: r.id });
+    });
+  } catch (err) { console.error('poop use failed', err); }
+}
+async function join(home: string, user: string) {
   const pet = petOf(home, user);
   if (!canFightPet(pet)) return pub({ t: 'arena.notice', home, user, code: 'NOT_ELIGIBLE' });
+  const items = await listItems(deps!.db, user).catch(() => ({}));
   let a = arenas.get(home);
-  if (!a) arenas.set(home, (a = { home, state: createArena(), startAt: Date.now() }));
+  if (!a) { arenas.set(home, (a = { home, state: createArena(), startAt: Date.now() })); void loadAmmo(a); }
   // 顯示用：寵物名（主人暱稱）；暱稱是使用者自訂的 display_name
   const nick = deps!.presence.users(home).find((u) => u.id === user)?.display_name ?? '?';
   const name = `${pet!.name}（${nick}）`;
   const x = 8 + ((a.state.fighters.length * 29) % (P.width - P.petW - 16));
-  if (!addFighter(a.state, { userId: user, petId: pet!.id, species: pet!.species, name, x })) {
+  if (!addFighter(a.state, { userId: user, petId: pet!.id, species: pet!.species, name, x, items })) {
     if (!a.state.fighters.some((f) => f.userId === user)) pub({ t: 'arena.notice', home, user, code: 'ARENA_FULL' });
+    else setFighterItems(a.state, user, items);
   }
   snapshot(a);
 }
@@ -67,7 +95,7 @@ export function onPresenceChange(home: string) {
   const users = new Map(deps.presence.users(home).map((u) => [u.id, u]));
   for (const f of [...a.state.fighters]) {
     const u = users.get(f.userId);
-    if (!u || !canFightPet(u.pet) || u.pet!.id !== f.petId) { const e = removeFighter(a.state, f.userId); if (e) void settle(home, e); }
+    if (!u || !canFightPet(u.pet) || u.pet!.id !== f.petId) { const e = removeFighter(a.state, f.userId); if (e) onEnd(a, e); }
   }
   snapshot(a);
 }
@@ -75,61 +103,81 @@ export function onPresenceChange(home: string) {
 export function snapshotMsg(a: Arena, now = Date.now()) {
   const r1 = (v: number) => Math.round(v * 10) / 10;
   return {
-    t: 'arena.state', home: a.home, tick: a.state.tick, server_time: now,
-    fighters: a.state.fighters.map((f) => ({ u: f.userId, pet: f.petId, sp: f.species, name: f.name, x: r1(f.x), y: r1(f.y), dir: f.dir, atk: f.atk, inv: f.inv, hp: f.hp, fight: f.fightId })),
-    fights: a.state.fights.map((x) => ({ id: x.id, a: x.a, b: x.b, left_ms: Math.max(0, Math.round((x.endTick - a.state.tick) * TICK_MS)) })),
+    t: 'arena.state', home: a.home, tick: a.state.tick, server_time: now, frozen: !!a.frozenUntil && a.frozenUntil > now,
+    fighters: a.state.fighters.map((f) => ({ u: f.userId, pet: f.petId, sp: f.species, name: f.name, x: r1(f.x), y: r1(f.y), dir: f.dir, atk: f.atk, inv: f.inv, hp: f.hp, fight: f.fightId,
+      out: f.out, sw: f.swing, sn: f.swingN, hn: f.hitN, hd: f.hitDmg, chg: f.charge, eq: f.equip, items: f.items, slip: f.slip > 0 })),
+    fights: a.state.fights.map((x) => ({ id: x.id, parts: x.parts.map((p) => p.u), left_ms: Math.max(0, Math.round((x.endTick - a.state.tick) * TICK_MS)) })),
+    proj: a.state.proj.map((p) => ({ x: r1(p.x), y: r1(p.y) })), ammo: a.state.poopAmmo,
     hp_max: P.hpMax,
   };
 }
 /** 有變化才送（或每 2 秒心跳一次），避免沒人動時一直 NOTIFY。 */
 function snapshot(a: Arena, onlyIfChanged = false) {
   const m = snapshotMsg(a), now = Date.now();
-  const key = JSON.stringify([m.fighters, m.fights.map((f) => f.id)]);
+  const key = JSON.stringify([m.fighters, m.fights.map((f) => f.id), m.proj, m.ammo, m.frozen]);
   if (onlyIfChanged && key === a.lastKey && now - (a.lastSnapAt ?? 0) < 2000) return;
   a.lastKey = key; a.lastSnapAt = now; pub(m);
 }
 
+/** 決勝瞬間：先送出凍結的快照（HP 等還沒重置前的畫面），再暫停模擬 FREEZE_MS，然後結算。 */
+function onEnd(a: Arena, e: FightEnd, frozen?: ReturnType<typeof snapshotMsg>) {
+  if (e.reason !== 'cancel') {
+    a.frozenUntil = Date.now() + FREEZE_MS; a.frozenTick = a.state.tick;
+    if (frozen) pub({ ...frozen, frozen: true });
+  }
+  void settle(a.home, e);
+}
 function handle(a: Arena, events: ArenaEvent[]) {
   for (const e of events) {
     if (e.type === 'start') {
-      const fa = a.state.fighters.find((f) => f.userId === e.fight.a)!, fb = a.state.fighters.find((f) => f.userId === e.fight.b)!;
-      inserts.set(e.fight.id, deps!.db.insertInto('fights').values({ id: e.fight.id, home_id: a.home, a_user_id: fa.userId, b_user_id: fb.userId, a_pet_id: fa.petId, b_pet_id: fb.petId, status: 'playing', instance_id: deps!.instance() }).execute().catch((err) => console.error('fight insert failed', err)));
-      pub({ t: 'arena.event', home: a.home, kind: 'start', fight: e.fight.id, a: fa.name, b: fb.name });
+      const parts = e.fight.parts;
+      inserts.set(e.fight.id, deps!.db.insertInto('fights').values({ id: e.fight.id, home_id: a.home, a_user_id: parts[0].u, b_user_id: parts[1].u, a_pet_id: parts[0].pet, b_pet_id: parts[1].pet,
+        participants: JSON.stringify(parts.map((p) => ({ user_id: p.u, pet_id: p.pet }))), status: 'playing', instance_id: deps!.instance() }).execute().catch((err) => console.error('fight insert failed', err)));
+      pub({ t: 'arena.event', home: a.home, kind: 'start', fight: e.fight.id, names: parts.map((p) => p.name), a: parts[0].name, b: parts[1].name });
     } else if (e.type === 'refused') pub({ t: 'arena.notice', home: a.home, user: e.from, code: e.reason });
-    else if (e.type === 'end') void settle(a.home, e);
+    else if (e.type === 'poop') void usePoop(a.home);
+    else if (e.type === 'ko') pub({ t: 'arena.event', home: a.home, kind: 'ko', fight: e.fightId, user: e.user });
   }
 }
 
 /**
- * 結算：冪等（只有 status = 'playing' 的那一筆會被更新）。單一 transaction：先依 id 排序鎖兩個錢包，
- * 勝方拿走 min(20, 輸家餘額)；平手／取消不轉帳。寫 coin_ledger（reason = fight）與 audit_log。
+ * 結算：冪等（只有 status = 'playing' 的那一筆會被更新）。單一 transaction：依 id 排序鎖所有參賽者的錢包，
+ * 每個輸家付 min(20, 自己的餘額) 給贏家；平手／取消不轉帳。寫 coin_ledger（reason = fight）、
+ * 用到的道具各扣 1 場（取消的對戰不扣）、audit_log。
  */
 export async function settle(home: string, e: FightEnd) {
   if (!deps) return null;
   const { db } = deps; const f = e.fight;
-  pairCooldown.set(pairKey(f.a, f.b), Date.now() + P.pairCooldownMs);
+  homeCooldown.set(home, Date.now() + P.homeCooldownMs);
   await inserts.get(f.id); inserts.delete(f.id);
   try {
     const res = await db.transaction().execute(async (tx) => {
       const status = e.reason === 'cancel' ? 'aborted' : 'done';
-      const row = await tx.updateTable('fights').set({ status, a_hp: e.hpA, b_hp: e.hpB, reason: e.reason, ended_at: new Date() })
+      const parts = f.parts.map((p) => ({ user_id: p.u, pet_id: p.pet, name: p.name, dmg: p.dmg, hits: p.hits, taken: p.taken, hp: p.hp, out: p.out, forfeit: p.forfeit }));
+      const row = await tx.updateTable('fights').set({ status, a_hp: f.parts[0]?.hp, b_hp: f.parts[1]?.hp, reason: e.reason, ended_at: new Date(), participants: JSON.stringify(parts) })
         .where('id', '=', f.id).where('status', '=', 'playing').returning(['id']).executeTakeFirst();
       if (!row) return null; // 已結算過
-      let amount = 0;
-      if (status === 'done' && e.winner && e.loser) {
-        const w = await lockWallets(tx, [e.winner, e.loser]);
-        amount = fightTransfer(w.find((x) => x.user_id === e.loser)?.balance ?? 0, FIGHT_COIN_CAP);
-        if (amount > 0) {
-          await changeBalance(tx, e.loser, -amount, 'fight', { type: 'fight', id: f.id });
-          await changeBalance(tx, e.winner, amount, 'fight', { type: 'fight', id: f.id });
-        }
-        await tx.updateTable('fights').set({ winner_user_id: e.winner, transfer: amount }).where('id', '=', f.id).execute();
+      let deltas: Record<string, number> = {};
+      if (status === 'done' && e.winner && e.losers.length) {
+        const w = await lockWallets(tx, f.parts.map((p) => p.u)); // 依 id 排序上鎖
+        deltas = meleeTransfers(e, Object.fromEntries(w.map((x) => [x.user_id, x.balance])), FIGHT_COIN_CAP);
+        for (const u of [...Object.keys(deltas)].sort()) if (u !== e.winner && deltas[u] < 0) await changeBalance(tx, u, deltas[u], 'fight', { type: 'fight', id: f.id });
+        if (deltas[e.winner] > 0) await changeBalance(tx, e.winner, deltas[e.winner], 'fight', { type: 'fight', id: f.id });
+        await tx.updateTable('fights').set({ winner_user_id: e.winner, transfer: deltas[e.winner] ?? 0 }).where('id', '=', f.id).execute();
       }
-      await tx.insertInto('audit_log').values({ user_id: e.winner ?? f.a, action: 'fight.settle', result: 'ok', target_type: 'fight', target_id: f.id,
-        detail: JSON.stringify({ home, a: f.a, b: f.b, winner: e.winner, loser: e.loser, amount, hpA: e.hpA, hpB: e.hpB, reason: e.reason }) }).execute();
-      return { amount };
+      const usedRows: { user: string; item: ItemId }[] = [];
+      if (status === 'done') for (const [u, items] of Object.entries(e.used)) for (const it of items) {
+        const r = await tx.updateTable('user_items').set((eb: any) => ({ fights_left: eb('fights_left', '-', 1), updated_at: new Date() }))
+          .where('user_id', '=', u).where('item_id', '=', it).where('fights_left', '>', 0).returning('fights_left').executeTakeFirst();
+        if (r) usedRows.push({ user: u, item: it });
+      }
+      for (const u of new Set(usedRows.map((r) => r.user))) await notify(tx, { t: 'arena.items', user: u });
+      await tx.insertInto('audit_log').values({ user_id: e.winner ?? f.parts[0]?.u ?? null, action: 'fight.settle', result: 'ok', target_type: 'fight', target_id: f.id,
+        detail: JSON.stringify({ home, parts: f.parts.map((p) => p.u), winner: e.winner, losers: e.losers, deltas, draw: e.draw, reason: e.reason, used: usedRows }) }).execute();
+      return { deltas, amount: e.winner ? deltas[e.winner] ?? 0 : 0 };
     });
-    if (res) pub({ t: 'arena.result', home, fight: f.id, a: f.a, b: f.b, winner: e.winner, loser: e.loser, amount: res.amount, reason: e.reason, hpA: e.hpA, hpB: e.hpB });
+    if (res) pub({ t: 'arena.result', home, fight: f.id, winner: e.winner, winner_name: f.parts.find((p) => p.u === e.winner)?.name ?? null, losers: e.losers, draw: e.draw, amount: res.amount, reason: e.reason,
+      parts: f.parts.map((p) => ({ u: p.u, name: p.name, dmg: p.dmg, hits: p.hits, taken: p.taken, hp: p.hp, out: p.out, forfeit: p.forfeit, delta: res.deltas[p.u] ?? 0 })) });
     return res;
   } catch (err) { console.error('fight settle failed', err); return null; }
 }
@@ -137,13 +185,27 @@ export async function settle(home: string, e: FightEnd) {
 export function stepArenas(now = Date.now()) {
   for (const a of [...arenas.values()]) {
     if (!isAuthority(a.home)) { onPresenceChange(a.home); continue; }
+    if (a.frozenUntil) {
+      if (a.frozenUntil > now) continue;
+      // 解凍：凍結期間不追 tick
+      a.startAt = now - a.state.tick * TICK_MS; a.frozenUntil = undefined; a.frozenTick = undefined; snapshot(a);
+    }
     const target = Math.floor((now - a.startAt) / TICK_MS);
     let snap = false;
-    while (a.state.tick < target) {
-      handle(a, stepArena(a.state, { canStart: (x, y) => canStart(a.home, x, y, now), newId: randomUUID }));
+    while (a.state.tick < target && !a.frozenUntil) {
+      const before = a.state.fights.length ? snapshotMsg(a) : null;
+      const ev = stepArena(a.state, { canStart: (users) => canStart(a.home, users, now), newId: randomUUID });
+      handle(a, ev);
+      for (const e of ev) if (e.type === 'end') {
+        // 決勝那一刻的畫面：重置 HP 前的狀態 = 用參賽者最後的 HP 疊在本 tick 位置上
+        const fz = snapshotMsg(a); const hp = new Map(e.fight.parts.map((p) => [p.u, p]));
+        fz.fighters = fz.fighters.map((x) => { const p = hp.get(x.u); return p ? { ...x, hp: p.hp, out: p.out, fight: e.fight.id } : x; });
+        fz.fights = [{ id: e.fight.id, parts: e.fight.parts.map((p) => p.u), left_ms: before?.fights[0]?.left_ms ?? 0 }];
+        onEnd(a, e, fz);
+      }
       if (a.state.tick % P.snapshotEvery === 0) snap = true;
     }
-    if (snap) snapshot(a, true);
+    if (snap && !a.frozenUntil) snapshot(a, true);
     if (!a.state.fighters.length) { arenas.delete(a.home); snapshot(a); }
   }
 }
@@ -157,3 +219,4 @@ export async function abortArenas() {
   await Promise.all(all);
 }
 export const _arenas = arenas;
+export const _homeCooldown = homeCooldown;

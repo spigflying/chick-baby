@@ -49,6 +49,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
         return;
       }
       if (m.t === 'pet') {
+        onArenaBus(m); // 丟大便的彈藥（地上的便便數）
         const targets = inHome(m.home); const visiting = presence.hasPet(m.pet);
         if (!targets.length && !visiting) return;
         const row = await db.selectFrom('pets').selectAll().where('id', '=', m.pet).executeTakeFirst(); if (!row) return;
@@ -136,7 +137,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
           }
           case 'arena.input': {
             if (!c.homeId) return;
-            await bus.publish({ t: 'arena.in', home: c.homeId, user: c.user.id, left: !!msg.left, right: !!msg.right, jump: !!msg.jump, attack: !!msg.attack });
+            await bus.publish({ t: 'arena.in', home: c.homeId, user: c.user.id, left: !!msg.left, right: !!msg.right, jump: !!msg.jump, attack: !!msg.attack, upAtk: !!msg.upAtk, item: !!msg.item, equip: typeof msg.equip === 'string' ? msg.equip.slice(0, 10) : null });
             break;
           }
           case 'pet.action': {

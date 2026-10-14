@@ -142,6 +142,26 @@ const migrations: Record<string, Migration> = {
         ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin'));`.execute(db);
     },
   },
+  '0003_fight_v2_items': {
+    async up(db: Kysely<unknown>) {
+      await sql`
+      ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+      ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item'));
+      -- v1.5 混戰：a/b 保留為前兩位參賽者（相容舊資料），完整名單與每人統計放 participants
+      ALTER TABLE fights ADD COLUMN participants jsonb NOT NULL DEFAULT '[]';
+      CREATE TABLE user_items (
+        user_id uuid NOT NULL REFERENCES users(id), item_id text NOT NULL CHECK (item_id IN ('sword','kame','poop')),
+        fights_left int NOT NULL DEFAULT 0 CHECK (fights_left >= 0), updated_at timestamptz NOT NULL DEFAULT now(),
+        PRIMARY KEY (user_id, item_id)
+      );
+      `.execute(db);
+    },
+    async down(db: Kysely<unknown>) {
+      await sql`DROP TABLE user_items; ALTER TABLE fights DROP COLUMN participants;
+        ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+        ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight'));`.execute(db);
+    },
+  },
 };
 
 const provider: MigrationProvider = { getMigrations: async () => migrations };
