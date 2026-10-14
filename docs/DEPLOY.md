@@ -1,6 +1,8 @@
 # 部署到 Cloud Run（專案 `silver-greens`）
 
 > 2026-10-14 已依本文件部署完成（服務網址 `https://chick-baby-704427759894.asia-east1.run.app`）。採用 [`gcp-plan.md`](gcp-plan.md) 的**方案 A**：Cloud Run + Cloud SQL `db-f1-micro`，都在 `asia-east1`；遊戲只在**平日 09:00–20:00** 開放（[`requirements.md`](requirements.md) §4.7），其他時間 Cloud SQL 由排程停機。
+
+> 2026-10-14 已切換到自訂網域 **`https://chick.thesilvertrees.com`**（見第 7a 步）。`PUBLIC_ORIGIN`、`CRON_OIDC_AUDIENCE` 與 `chick-daily` 的 URI／audience 都已改用此網域；舊的 run.app 網址仍可連線。
 > 專案 `silver-greens` 屬於個人帳號 **`spigflying@gmail.com`**；所有指令都在第 0 步建立的 gcloud configuration 下執行，不要用公司帳號。
 > 根目錄的靜態原型（GitHub Pages）不受影響；Cloud Run 服務的是 `apps/web` + `apps/server`。
 
@@ -182,6 +184,28 @@ gcloud run deploy $SERVICE \
 - `NODE_ENV=production` 時開發用登入（`DEV_LOGIN`）一律關閉，Cookie 加上 `Secure`。
 - 部署後確認網址：`gcloud run services describe $SERVICE --format='value(status.url)'`。若和 `$SERVICE_URL` 不同，更新 `PUBLIC_ORIGIN`、`CRON_OIDC_AUDIENCE`（`gcloud run services update $SERVICE --update-env-vars=PUBLIC_ORIGIN=...,CRON_OIDC_AUDIENCE=...`）、OAuth 的 JavaScript origin，以及第 8 步 `chick-daily` 的 `--oidc-token-audience`。三者必須是同一個字串（不含結尾 `/`）。
 - `CRON_OIDC_AUDIENCE`／`CRON_OIDC_SA_EMAIL` 不是機密，用一般環境變數即可。沒設定時 `/api/internal/daily` 一律回 403。
+
+## 7a. 自訂網域 chick.thesilvertrees.com（2026-10-14 已完成）
+
+和 `vote.thesilvertrees.com`（服務 `vote-lab`）相同做法：Cloud Run 網域對應（asia-east1 支援），不用負載平衡器。`thesilvertrees.com` 已在 spigflying@gmail.com 驗證，DNS 在本專案的 Cloud DNS zone `thesilvertrees-com`。
+
+```bash
+gcloud beta run domain-mappings create --service=$SERVICE --domain=chick.thesilvertrees.com --region=$REGION
+gcloud dns record-sets create chick.thesilvertrees.com. --zone=thesilvertrees-com \
+  --type=CNAME --ttl=300 --rrdatas=ghs.googlehosted.com.
+# 等待憑證（約 20 分鐘）：Ready / CertificateProvisioned = True
+gcloud beta run domain-mappings describe --domain=chick.thesilvertrees.com --region=$REGION
+
+export PUBLIC_URL=https://chick.thesilvertrees.com
+gcloud run services update $SERVICE --region=$REGION \
+  --update-env-vars=PUBLIC_ORIGIN=$PUBLIC_URL,CRON_OIDC_AUDIENCE=$PUBLIC_URL
+gcloud scheduler jobs update http chick-daily --location=$REGION \
+  --uri=$PUBLIC_URL/api/internal/daily \
+  --oidc-service-account-email=$SCHED_SA --oidc-token-audience=$PUBLIC_URL
+```
+
+- `--oidc-token-audience` 必須和 `--oidc-service-account-email` 一起指定。
+- Google OAuth 用戶端的 JavaScript origin 需另外加上 `https://chick.thesilvertrees.com`（第 5 步）。
 
 ## 8. 排程（Cloud Scheduler，3 個 job，在每個帳單帳戶 3 個免費 job 以內）
 
