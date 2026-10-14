@@ -466,7 +466,7 @@ describe('fight mode (v1.4)', () => {
     const { A, a, b, home, wa, wc, arena, fb } = await setup(7);
     await peck(wa);
     const start = await wc.wait((m) => m.type === 'arena.event' && m.kind === 'start', 'start');
-    expect([start.a, start.b]).toEqual(['Benson', '仲軍']);
+    expect([start.a, start.b]).toEqual(['Pchicken（Benson）', 'Pduck（仲軍）']); // 寵物名（使用者暱稱）
     const st = await wc.wait((m) => m.type === 'arena.state' && m.fights.length === 1 && m.fighters.some((f: any) => f.u === b.id && f.hp < 100), 'hp');
     expect(st.fights[0].left_ms).toBeGreaterThan(55_000);
     Object.assign(fb, { hp: 5, inv: 0, x: 52, kx: 0, vy: 0, y: 74, onGround: true }); arena.state.fighters.find((f) => f.userId === a.id)!.cd = 0;
@@ -507,5 +507,14 @@ describe('fight mode (v1.4)', () => {
     void arena; void fb;
     for (const w of [wa, wb]) w.ws.terminate();
     await new Promise((r) => setTimeout(r, 300));
+  });
+});
+
+describe('names (v1.4)', () => {
+  it('the user-chosen nickname survives re-login and is what presence shows', async () => {
+    const a = await login('Benson');
+    expect((await a.call('PATCH', '/api/me', { display_name: '班森', request_id: rid() })).status).toBe(200);
+    const again = await login('Benson'); // 同一個帳號再登入（Google 名稱仍是 Benson）
+    expect((await again.call('GET', '/api/me')).json.user.display_name).toBe('班森');
   });
 });

@@ -109,8 +109,9 @@ export class Device {
     this.myPresence = users.find((u) => u.id === this.ctx.me.id) ?? null;
     this.ensureJoined();
     const tags = this.$('.tags');
-    tags.innerHTML = `<span class="tag own" data-g="owner">${esc(this.home.owner.display_name)}</span>`
-      + this.guests.map((u, i) => `<span class="tag" data-g="${i}" title="${esc(u.pet ? u.pet.name : '沒有寵物')}">${esc(u.display_name)}${u.pet ? (u.pet.status === 'dead' ? '†' : '') : '·沒寵物'}</span>`).join('')
+    // 名牌：寵物用主人取的寵物名；滑過顯示主人的暱稱（使用者自訂的 display_name，不是 Google 名稱）
+    tags.innerHTML = `<span class="tag own" data-g="owner" title="${esc(this.home.owner.display_name)}">${esc(this.pet?.name ?? this.home.owner.display_name)}</span>`
+      + this.guests.map((u, i) => `<span class="tag" data-g="${i}" title="${esc(u.display_name)}">${u.pet ? esc(u.pet.name) + (u.pet.status === 'dead' ? '†' : '') : esc(u.display_name) + '·沒寵物'}</span>`).join('')
       + (this.guestExtra ? `<span class="tag more">+${this.guestExtra}</span>` : '');
   }
   private lanes() { return lanes(W, this.guests.length); }
@@ -173,6 +174,7 @@ export class Device {
     this.pet = p;
     if (p && prevSpecies && prevSpecies !== p.species) { const sc = SHELL_COLORS[p.species]; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim); }
     this.buildCells(); this.renderTop(); if (this.menu === 'status') this.renderMenu();
+    const ot = this.el.querySelector('.tags [data-g="owner"]'); if (ot && this.home) ot.textContent = this.pet?.name ?? this.home.owner.display_name;
   }
 
   // ---------- 圖示列 ----------

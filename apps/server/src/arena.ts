@@ -51,7 +51,9 @@ function join(home: string, user: string) {
   if (!canFightPet(pet)) return pub({ t: 'arena.notice', home, user, code: 'NOT_ELIGIBLE' });
   let a = arenas.get(home);
   if (!a) arenas.set(home, (a = { home, state: createArena(), startAt: Date.now() }));
-  const name = deps!.presence.users(home).find((u) => u.id === user)?.display_name ?? '?';
+  // 顯示用：寵物名（主人暱稱）；暱稱是使用者自訂的 display_name
+  const nick = deps!.presence.users(home).find((u) => u.id === user)?.display_name ?? '?';
+  const name = `${pet!.name}（${nick}）`;
   const x = 8 + ((a.state.fighters.length * 29) % (P.width - P.petW - 16));
   if (!addFighter(a.state, { userId: user, petId: pet!.id, species: pet!.species, name, x })) {
     if (!a.state.fighters.some((f) => f.userId === user)) pub({ t: 'arena.notice', home, user, code: 'ARENA_FULL' });
