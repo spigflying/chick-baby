@@ -60,10 +60,13 @@ export class Live {
       else if (m.type === 'game.closed' || (m.type === 'error' && m.code === 'GAME_CLOSED')) { this.stopped = true; this.onStatus('closed', { opens_at: m.opens_at ?? null }); } // 休息時段：不自動重連
       for (const h of this.handlers) h(m);
     };
-    ws.onclose = () => {
+    ws.onclose = (ev: CloseEvent) => {
       if (this.ws !== ws) return; // 已被主動取代
-      this.ws = null; this.onStatus('offline');
-      if (this.stopped) return;
+      this.ws = null;
+      // 4423 = 伺服器關門（休息時段）：就算沒收到 game.closed 也不自動重連
+      if (ev?.code === 4423 && !this.stopped) { this.stopped = true; this.onStatus('closed', { opens_at: null }); return; }
+      if (this.stopped) return; // 已經是 closed / unauthorized，不要再蓋成 offline
+      this.onStatus('offline');
       const delay = Math.min(15_000, 500 * 2 ** this.attempt++) * (0.7 + Math.random() * 0.6);
       setTimeout(() => this.open(), delay);
     };
