@@ -11,7 +11,7 @@ export const STAIRS_PARAMS = {
   boxW: 12, boxH: 14,
   hpBase: 10, hpMaxBonus: 4, speedBase: 1.2, speedMaxBonus: 0.5,
   typeOdds: { normal: 0.46, spiky: 0.12, conveyor: 0.14, bouncy: 0.13, fragile: 0.15 },
-  matchMaxTicks: 30 * 60 * 10,
+  matchMaxTicks: 30 * 60 * 5, // 5 分鐘：19:55 前開的局一定在 20:00 前結束（requirements §4.7）
 };
 export type StairsParams = typeof STAIRS_PARAMS;
 export type PlatType = 'normal' | 'spiky' | 'conveyor' | 'bouncy' | 'fragile';
