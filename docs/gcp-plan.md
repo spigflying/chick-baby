@@ -181,7 +181,7 @@ flowchart LR
 | DB 開關機 | Cloud Scheduler `chick-db-start`（平日 08:45，`activationPolicy: ALWAYS`）、`chick-db-stop`（平日 20:15，`NEVER`），用服務帳號 `chick-sql-ops` 的 OAuth token 呼叫 SQL Admin API |
 | DB 連線 | Cloud Run 內建 Cloud SQL Unix socket（`--add-cloudsql-instances`）；連線池 `max: 8` × 2 個執行個體 + 2 條 LISTEN = 18 條，低於 25 |
 | 備份 | Cloud SQL 自動備份，時段台北 12:00（開機期間）+ PITR；不需要另外的備份 Job |
-| 每日排程 | Cloud Scheduler `chick-daily`，平日 20:05（關門後、DB 關機前），清除 IP / 冪等紀錄 / 過期 session |
+| 每日排程 | Cloud Scheduler `chick-daily`，平日 20:05（關門後、DB 關機前），清除 IP / 冪等紀錄 / 過期 session；以服務帳號 `chick-scheduler` 的 OIDC token 呼叫 |
 
 Cloud Scheduler 共 3 個 job，剛好在每個帳單帳戶 3 個免費 job 以內。逐步指令見 [`DEPLOY.md`](DEPLOY.md)。
 
@@ -235,7 +235,7 @@ Cloud Scheduler 共 3 個 job，剛好在每個帳單帳戶 3 個免費 job 以�
 - **連線數**：f1-micro 只有 25 條連線。`max-instances=2` × pool 8 + 2 條 LISTEN = 18，換版時新舊 revision 短暫並存、手動 `psql`／匯出也還有餘裕。**不要把 max-instances 調高**；要調高就同時調低 pool。
 - **部署與重啟**：會送 SIGTERM，進行中的下樓梯會中止（requirements 已定義）。盡量在休息時段或離峰部署——注意休息時段 DB 是關的，部署後的 migration 會延到下次開門才跑。
 - **OAuth 同意畫面是整個專案共用一個**：在 `silver-greens` 設定品牌名稱，會影響同專案其他使用 Google 登入的服務。要先確認。
-- **cron secret**：用 `--headers` 傳給 Scheduler 時，會以明碼存在 job 設定裡。個人專案可以接受；之後可以改成 OIDC token 驗證。
+- **排程驗證**：`chick-daily` 用 Cloud Scheduler 的 OIDC token（服務帳號 `chick-scheduler`，audience = 服務網址）呼叫，伺服器以 `google-auth-library` 驗證 audience、email 與 `email_verified`（環境變數 `CRON_OIDC_AUDIENCE`、`CRON_OIDC_SA_EMAIL`）。不再有共用密碼存在 job 設定裡。
 - **帳號**：本機 gcloud 預設可能是公司帳號；所有指令都要在 `spigflying@gmail.com` 的 configuration 下執行（DEPLOY.md §0）。
 
 ## 7. Secrets 與設定
@@ -243,9 +243,8 @@ Cloud Scheduler 共 3 個 job，剛好在每個帳單帳戶 3 個免費 job 以�
 | 名稱 | 內容 | 誰可以讀 |
 |---|---|---|
 | `chick-database-url` | `postgres://chick:…@/chick?host=/cloudsql/silver-greens:asia-east1:chick-db` | `chick-run` |
-| `chick-cron-secret` | 隨機 48 字元，Scheduler 呼叫內部端點時用 | `chick-run`（Scheduler 建立 job 時讀取一次） |
 | `chick-admin-emails` | 管理員 email（逗號分隔） | `chick-run` |
-| 環境變數（不是機密） | `NODE_ENV=production`、`GOOGLE_CLIENT_ID`、`PUBLIC_ORIGIN`、`OPEN_HOURS` | — |
+| 環境變數（不是機密） | `NODE_ENV=production`、`GOOGLE_CLIENT_ID`、`PUBLIC_ORIGIN`、`OPEN_HOURS`、`CRON_OIDC_AUDIENCE`、`CRON_OIDC_SA_EMAIL` | — |
 
 - 每個 secret 只授予 `chick-run` `roles/secretmanager.secretAccessor`，不給專案層級權限。
 - Secret Manager 前 6 個有效版本免費（之後每版本每月 $0.06）。
@@ -307,7 +306,7 @@ Cloud Scheduler 共 3 個 job，剛好在每個帳單帳戶 3 個免費 job 以�
 | 資料被改壞 | Cloud SQL PITR（7 天內任一時間點，會還原成新 instance）或從自動備份還原 |
 | 想改回 24 小時開放 | 刪除 `chick-db-start`／`chick-db-stop`、DB 改 `--activation-policy=ALWAYS`、改 `OPEN_HOURS`；費用回到 §3.3 |
 | 想再省 → B | 1）建 Neon（新加坡，autoscaling 上限 0.25 CU）；2）在休息時段 `pg_dump -Fc` → `pg_restore` 到 Neon；3）更新 `chick-database-url`（direct 連線，不要用 `-pooler`）、拿掉 `--add-cloudsql-instances`、Cloud Run 改部署到 `asia-southeast1`；4）刪除兩個 DB 開關機 job；5）驗證後 export 一份再刪除 `chick-db` |
-| 整個計畫撤回 | 先 `gcloud sql export sql` 留一份資料，再刪除 `chick-baby` 服務、3 個 Scheduler job、secrets、Artifact Registry `chick`、Cloud SQL `chick-db`、兩個服務帳號。`silver-greens`、`vote-lab` 與 GitHub Pages 原型都不受影響 |
+| 整個計畫撤回 | 先 `gcloud sql export sql` 留一份資料，再刪除 `chick-baby` 服務、3 個 Scheduler job、secrets、Artifact Registry `chick`、Cloud SQL `chick-db`、三個服務帳號（`chick-run`、`chick-sql-ops`、`chick-scheduler`）。`silver-greens`、`vote-lab` 與 GitHub Pages 原型都不受影響 |
 
 ## 11. 待確認
 

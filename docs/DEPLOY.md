@@ -32,6 +32,7 @@ export REPO=chick
 export IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/server
 export RUN_SA=chick-run@$PROJECT_ID.iam.gserviceaccount.com
 export OPS_SA=chick-sql-ops@$PROJECT_ID.iam.gserviceaccount.com
+export SCHED_SA=chick-scheduler@$PROJECT_ID.iam.gserviceaccount.com
 export OPEN_HOURS="mon-fri 09:00-20:00 Asia/Taipei"
 
 gcloud config set project $PROJECT_ID
@@ -69,6 +70,16 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$OPS_
 - **建立第 8 步 Cloud Scheduler job 的人**，需要對 `chick-sql-ops` 有 `roles/iam.serviceAccountUser`（才能把 job 設成以它的身分取得 OAuth token）。專案 Owner 已內含；否則先授予：
   `gcloud iam service-accounts add-iam-policy-binding $OPS_SA --member=user:<你的帳號> --role=roles/iam.serviceAccountUser`
 
+```bash
+# 每日排程用（Cloud Scheduler 以它的 OIDC ID token 呼叫 /api/internal/daily）
+# 不需要任何專案層級角色：伺服器只檢查 token 的 email 是否等於 CRON_OIDC_SA_EMAIL
+gcloud iam service-accounts create chick-scheduler --display-name="chick-baby Scheduler (OIDC caller)"
+```
+
+- 建立 `chick-daily` job 的人同樣需要對 `chick-scheduler` 有 `roles/iam.serviceAccountUser`（Owner 已內含）：
+  `gcloud iam service-accounts add-iam-policy-binding $SCHED_SA --member=user:<你的帳號> --role=roles/iam.serviceAccountUser`
+- Cloud Scheduler 的 service agent（`service-$PROJECT_NUMBER@gcp-sa-cloudscheduler.iam.gserviceaccount.com`）要有 `roles/cloudscheduler.serviceAgent` 才能替 SA 簽 token；啟用 API 時會自動授予，通常不用處理。
+
 ## 3. Cloud SQL（PostgreSQL 16）
 
 ```bash
@@ -100,11 +111,10 @@ gcloud sql users create $DB_USER --instance=$SQL_INSTANCE --password="$DB_PASS"
 ```bash
 printf '%s' "postgres://$DB_USER:$DB_PASS@/$DB_NAME?host=/cloudsql/$PROJECT_ID:$REGION:$SQL_INSTANCE" | \
   gcloud secrets create chick-database-url --data-file=-
-printf '%s' "$(openssl rand -hex 24)" | gcloud secrets create chick-cron-secret --data-file=-
 # 管理員 Email（逗號分隔，可多個）
 printf '%s' "你的管理員@gmail.com" | gcloud secrets create chick-admin-emails --data-file=-
 
-for s in chick-database-url chick-cron-secret chick-admin-emails; do
+for s in chick-database-url chick-admin-emails; do
   gcloud secrets add-iam-policy-binding $s --member=serviceAccount:$RUN_SA --role=roles/secretmanager.secretAccessor
 done
 ```
@@ -157,8 +167,8 @@ gcloud run deploy $SERVICE \
   --session-affinity \
   --cpu=1 --memory=512Mi \
   --labels=app=chick-baby \
-  --set-env-vars="NODE_ENV=production,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,PUBLIC_ORIGIN=$SERVICE_URL,OPEN_HOURS=$OPEN_HOURS" \
-  --set-secrets=DATABASE_URL=chick-database-url:latest,CRON_SECRET=chick-cron-secret:latest,ADMIN_EMAILS=chick-admin-emails:latest
+  --set-env-vars="NODE_ENV=production,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,PUBLIC_ORIGIN=$SERVICE_URL,OPEN_HOURS=$OPEN_HOURS,CRON_OIDC_AUDIENCE=$SERVICE_URL,CRON_OIDC_SA_EMAIL=$SCHED_SA" \
+  --set-secrets=DATABASE_URL=chick-database-url:latest,ADMIN_EMAILS=chick-admin-emails:latest
 ```
 
 說明：
@@ -170,7 +180,8 @@ gcloud run deploy $SERVICE \
 - `--session-affinity` 讓重連盡量回到同一個執行個體；正確性不依賴它（跨執行個體用 Postgres `LISTEN/NOTIFY`）。
 - 伺服器第一次連上資料庫時自動執行 migration（Kysely，`kysely_migration_lock` 防止多個執行個體同時跑）；休息時段資料庫是關的，部署後的 migration 會延到下次開門才跑。
 - `NODE_ENV=production` 時開發用登入（`DEV_LOGIN`）一律關閉，Cookie 加上 `Secure`。
-- 部署後確認網址：`gcloud run services describe $SERVICE --format='value(status.url)'`。若和 `$SERVICE_URL` 不同，更新 `PUBLIC_ORIGIN`（`gcloud run services update $SERVICE --update-env-vars=PUBLIC_ORIGIN=...`）與 OAuth 的 JavaScript origin。
+- 部署後確認網址：`gcloud run services describe $SERVICE --format='value(status.url)'`。若和 `$SERVICE_URL` 不同，更新 `PUBLIC_ORIGIN`、`CRON_OIDC_AUDIENCE`（`gcloud run services update $SERVICE --update-env-vars=PUBLIC_ORIGIN=...,CRON_OIDC_AUDIENCE=...`）、OAuth 的 JavaScript origin，以及第 8 步 `chick-daily` 的 `--oidc-token-audience`。三者必須是同一個字串（不含結尾 `/`）。
+- `CRON_OIDC_AUDIENCE`／`CRON_OIDC_SA_EMAIL` 不是機密，用一般環境變數即可。沒設定時 `/api/internal/daily` 一律回 403。
 
 ## 8. 排程（Cloud Scheduler，3 個 job，在每個帳單帳戶 3 個免費 job 以內）
 
@@ -185,8 +196,14 @@ gcloud scheduler jobs create http chick-daily \
   --location=$REGION \
   --schedule="5 20 * * 1-5" --time-zone="Asia/Taipei" \
   --uri="$SERVICE_URL/api/internal/daily" --http-method=POST \
-  --headers="x-cron-secret=$(gcloud secrets versions access latest --secret=chick-cron-secret)"
+  --oidc-service-account-email=$SCHED_SA \
+  --oidc-token-audience="$SERVICE_URL"
 ```
+
+- `chick-daily` 以 `chick-scheduler` 的 **OIDC ID token**（`Authorization: Bearer …`）呼叫；job 設定裡不再存任何密碼。伺服器用 `google-auth-library` 驗證簽章與 `aud == CRON_OIDC_AUDIENCE`，並要求 `email == CRON_OIDC_SA_EMAIL`、`email_verified == true`；缺 token／token 無效回 401，audience 或 SA 不符回 403。
+- Cloud Run 服務維持 `--allow-unauthenticated`（網站本來就要公開），由程式檢查 token 即可。想多一層防護也可以加 `gcloud run services add-iam-policy-binding $SERVICE --member=serviceAccount:$SCHED_SA --role=roles/run.invoker`，但服務公開時這不會擋住其他人，只有改成不公開時才有意義（不建議：玩家要能連）。
+- 手動觸發測試：`gcloud scheduler jobs run chick-daily --location=$REGION`，然後看 `gcloud scheduler jobs describe chick-daily --location=$REGION --format='value(lastAttemptTime,status)'`。
+- 開關機 job（下面）是另一回事：它們呼叫的是 Google 的 SQL Admin API，所以用 **OAuth access token**（`oauthToken`，SA 為 `chick-sql-ops`），不是 OIDC；兩種 SA 分開，`chick-scheduler` 沒有任何 Cloud SQL 權限。
 
 開關機要用 `PATCH` 呼叫 SQL Admin API。本機 gcloud 578.0.0 的 `scheduler jobs create http` 只接受 delete/get/head/post/put，所以直接呼叫 Cloud Scheduler REST API 建立（REST 的 `httpMethod` 支援 `PATCH`）：
 
