@@ -1,6 +1,6 @@
 # 部署到 Cloud Run（專案 `silver-greens`）
 
-> 本文件只列步驟，**尚未執行**。採用 [`gcp-plan.md`](gcp-plan.md) 的**方案 A**：Cloud Run + Cloud SQL `db-f1-micro`，都在 `asia-east1`。
+> 本文件只列步驟，**尚未執行**。採用 [`gcp-plan.md`](gcp-plan.md) 的**方案 A**：Cloud Run + Cloud SQL `db-f1-micro`，都在 `asia-east1`；遊戲只在**平日 09:00–20:00** 開放（[`requirements.md`](requirements.md) §4.7），其他時間 Cloud SQL 由排程停機。
 > 專案 `silver-greens` 屬於個人帳號 **`spigflying@gmail.com`**；所有指令都在第 0 步建立的 gcloud configuration 下執行，不要用公司帳號。
 > 根目錄的靜態原型（GitHub Pages）不受影響；Cloud Run 服務的是 `apps/web` + `apps/server`。
 
@@ -8,14 +8,18 @@
 
 1. 前端在分頁隱藏或閒置時斷開 WebSocket（`apps/web/src/ws.ts`；要用 `stop()`／暫停旗標，只 `close()` 會被自動重連）。沒做的話只要有人開著分頁，Cloud Run 就 24 小時計費。
 2. 連線池 `max: 10` → `8`（`apps/server/src/db.ts`）。f1-micro 只有 25 條連線：2 個執行個體 × 8 + 2 條 LISTEN = 18。
+3. 開放時間（requirements §4.7）：時間凍結的模擬、早安、關門流程（19:55 / 20:00）、`GET /api/status`、讀取 `OPEN_HOURS` 環境變數。**資料庫停機時伺服器也要能啟動**：目前啟動時會先跑 migration（`apps/server/src/index.ts:9`），要改成第一次連上資料庫時才執行，否則休息時段有人打開網頁，容器會起不來。
 
 ## 0. 帳號與變數
 
 ```bash
-# 獨立的 gcloud configuration，避免用到預設的公司帳號
-gcloud config configurations create chick-baby
-gcloud auth login spigflying@gmail.com
-gcloud config set account spigflying@gmail.com
+# 用個人帳號的 configuration，避免用到預設的公司帳號
+# 本機已經有 silver-greens configuration（spigflying@gmail.com）就直接切過去：
+gcloud config configurations activate silver-greens
+# 沒有的話才建立：
+#   gcloud config configurations create silver-greens
+#   gcloud auth login spigflying@gmail.com
+#   gcloud config set account spigflying@gmail.com
 
 export PROJECT_ID=silver-greens
 export PROJECT_NUMBER=704427759894
@@ -27,6 +31,8 @@ export DB_USER=chick
 export REPO=chick
 export IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/server
 export RUN_SA=chick-run@$PROJECT_ID.iam.gserviceaccount.com
+export OPS_SA=chick-sql-ops@$PROJECT_ID.iam.gserviceaccount.com
+export OPEN_HOURS="mon-fri 09:00-20:00 Asia/Taipei"
 
 gcloud config set project $PROJECT_ID
 gcloud config set run/region $REGION
@@ -37,8 +43,10 @@ gcloud config set run/region $REGION
 ```bash
 gcloud services enable run.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com \
   artifactregistry.googleapis.com cloudbuild.googleapis.com cloudscheduler.googleapis.com iamcredentials.googleapis.com \
-  billingbudgets.googleapis.com
+  cloudbilling.googleapis.com billingbudgets.googleapis.com
 ```
+
+- 帳單相關指令（第 11 步）要加 `--billing-project=$PROJECT_ID`，否則 gcloud 會把配額算在它自己的共用專案上而被拒（2026-10-14 實測：`Cloud Billing API has not been used in project 681255809395`）。
 
 ## 2. 服務帳號
 
@@ -46,6 +54,10 @@ gcloud services enable run.googleapis.com sqladmin.googleapis.com secretmanager.
 gcloud iam service-accounts create chick-run --display-name="chick-baby Cloud Run"
 gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$RUN_SA --role=roles/cloudsql.client
 # Secret 存取權在第 4 步逐一授予
+
+# 資料庫開關機用（Cloud Scheduler 以它的 OAuth token 呼叫 SQL Admin API）
+gcloud iam service-accounts create chick-sql-ops --display-name="chick-baby Cloud SQL start/stop"
+gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$OPS_SA --role=roles/cloudsql.editor
 ```
 
 ## 3. Cloud SQL（PostgreSQL 16）
@@ -54,7 +66,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$RUN_
 gcloud sql instances create $SQL_INSTANCE \
   --database-version=POSTGRES_16 --region=$REGION \
   --edition=ENTERPRISE --tier=db-f1-micro --storage-size=10GB --storage-auto-increase \
-  --backup-start-time=18:00 --enable-point-in-time-recovery \
+  --backup-start-time=04:00 --enable-point-in-time-recovery \
   --retained-backups-count=7 --retained-transaction-log-days=7 \
   --availability-type=zonal
 gcloud sql databases create $DB_NAME --instance=$SQL_INSTANCE
@@ -62,7 +74,8 @@ export DB_PASS=$(openssl rand -base64 24 | tr -d '/+=')
 gcloud sql users create $DB_USER --instance=$SQL_INSTANCE --password="$DB_PASS"
 ```
 
-- 備份時間 `18:00` UTC = 台北 02:00；自動備份保留 7 份、PITR 7 天，不需要另外的備份 Job。
+- 備份時間 `04:00` UTC = 台北 12:00，**一定要在開機期間**（平日 08:45–20:15）；自動備份保留 7 份、PITR 7 天，不需要另外的備份 Job。
+- 建立後 instance 會一直開著，直到第 8 步的 `chick-db-stop` 第一次執行。
 - `--edition=ENTERPRISE` 不能省：shared-core（`db-f1-micro`）只有 Enterprise 版能用。
 - `--availability-type=zonal`：SSD 為 $0.17/GB-月；HA（regional）會讓 instance 與儲存都變兩倍。
 - f1-micro 預設 `max_connections = 25`，見上方「部署前要先完成的程式改動」第 2 點。
@@ -132,41 +145,89 @@ gcloud run deploy $SERVICE \
   --session-affinity \
   --cpu=1 --memory=512Mi \
   --labels=app=chick-baby \
-  --set-env-vars=NODE_ENV=production,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,PUBLIC_ORIGIN=$SERVICE_URL \
+  --set-env-vars="NODE_ENV=production,GOOGLE_CLIENT_ID=$GOOGLE_CLIENT_ID,PUBLIC_ORIGIN=$SERVICE_URL,OPEN_HOURS=$OPEN_HOURS" \
   --set-secrets=DATABASE_URL=chick-database-url:latest,CRON_SECRET=chick-cron-secret:latest,ADMIN_EMAILS=chick-admin-emails:latest
 ```
 
 說明：
 - `--no-cpu-throttling` = instance-based billing，下樓梯遊戲迴圈不會被節流。WebSocket 開著時執行個體本來就一直計費，instance-based 單價比 request-based 低。
 - `--cpu=1` 已是下限：低於 1 vCPU 必須用 request-based 計費且 concurrency=1，WebSocket 服務不適用。
-- `--min-instances=0`：沒人連線時最多 15 分鐘就縮到 0、停止計費；代價是第一個人進來要等約 1–2 秒冷啟動。設 `min=1` 每月約多 US$40–50，不建議。
+- `--min-instances=0`：沒人連線時最多 15 分鐘就縮到 0、停止計費；代價是第一個人進來要等約 1–2 秒冷啟動。設 `min=1` 會 24 小時計費，每月約多 US$40，不建議。
 - `--max-instances=2`：受 Cloud SQL 25 條連線限制。要調高就同時調低連線池。
 - `--timeout=3600` 讓 WebSocket 最長 60 分鐘；客戶端約 50 分鐘會在非比賽中主動重連。
 - `--session-affinity` 讓重連盡量回到同一個執行個體；正確性不依賴它（跨執行個體用 Postgres `LISTEN/NOTIFY`）。
-- 伺服器啟動時會自動執行 migration（Kysely，`kysely_migration_lock` 防止多個執行個體同時跑）。
+- 伺服器第一次連上資料庫時自動執行 migration（Kysely，`kysely_migration_lock` 防止多個執行個體同時跑）；休息時段資料庫是關的，部署後的 migration 會延到下次開門才跑。
 - `NODE_ENV=production` 時開發用登入（`DEV_LOGIN`）一律關閉，Cookie 加上 `Secure`。
 - 部署後確認網址：`gcloud run services describe $SERVICE --format='value(status.url)'`。若和 `$SERVICE_URL` 不同，更新 `PUBLIC_ORIGIN`（`gcloud run services update $SERVICE --update-env-vars=PUBLIC_ORIGIN=...`）與 OAuth 的 JavaScript origin。
 
-## 8. 每日排程（Cloud Scheduler）
+## 8. 排程（Cloud Scheduler，3 個 job，在每個帳單帳戶 3 個免費 job 以內）
 
-清除 30 天前稽核紀錄的 IP、7 天前的冪等紀錄與過期 session：
+| Job | 時間（Asia/Taipei） | 做什麼 |
+|---|---|---|
+| `chick-db-start` | 平日 08:45 | `chick-db` 開機（`activationPolicy: ALWAYS`），留 15 分鐘給開機 |
+| `chick-daily` | 平日 20:05 | 關門後、關機前：清除 30 天前稽核紀錄的 IP、7 天前的冪等紀錄與過期 session |
+| `chick-db-stop` | 平日 20:15 | `chick-db` 停機（`activationPolicy: NEVER`），只剩儲存費 |
 
 ```bash
 gcloud scheduler jobs create http chick-daily \
   --location=$REGION \
-  --schedule="10 0 * * *" --time-zone="Asia/Taipei" \
+  --schedule="5 20 * * 1-5" --time-zone="Asia/Taipei" \
   --uri="$SERVICE_URL/api/internal/daily" --http-method=POST \
   --headers="x-cron-secret=$(gcloud secrets versions access latest --secret=chick-cron-secret)"
 ```
+
+開關機要用 `PATCH` 呼叫 SQL Admin API。本機 gcloud 578.0.0 的 `scheduler jobs create http` 只接受 delete/get/head/post/put，所以直接呼叫 Cloud Scheduler REST API 建立（REST 的 `httpMethod` 支援 `PATCH`）：
+
+```bash
+make_db_job() {  # $1=job 名稱  $2=cron  $3=ALWAYS|NEVER
+  local body=$(printf '{"settings":{"activationPolicy":"%s"}}' "$3" | base64 | tr -d '\n')
+  curl -sS -X POST \
+    -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+    -H "x-goog-user-project: $PROJECT_ID" -H "Content-Type: application/json" \
+    "https://cloudscheduler.googleapis.com/v1/projects/$PROJECT_ID/locations/$REGION/jobs" \
+    -d @- <<EOF
+{
+  "name": "projects/$PROJECT_ID/locations/$REGION/jobs/$1",
+  "schedule": "$2",
+  "timeZone": "Asia/Taipei",
+  "retryConfig": {"retryCount": 3, "minBackoffDuration": "30s"},
+  "httpTarget": {
+    "uri": "https://sqladmin.googleapis.com/v1/projects/$PROJECT_ID/instances/$SQL_INSTANCE",
+    "httpMethod": "PATCH",
+    "headers": {"Content-Type": "application/json"},
+    "body": "$body",
+    "oauthToken": {"serviceAccountEmail": "$OPS_SA", "scope": "https://www.googleapis.com/auth/cloud-platform"}
+  }
+}
+EOF
+}
+make_db_job chick-db-start "45 8 * * 1-5" ALWAYS
+make_db_job chick-db-stop  "15 20 * * 1-5" NEVER
+gcloud scheduler jobs list --location=$REGION
+```
+
+- 開機失敗會讓 09:00 無法開門（已設重試 3 次）。手動開機：`gcloud sql instances patch $SQL_INSTANCE --activation-policy=ALWAYS`。
+- 改開放時間時，`OPEN_HOURS` 和這 3 個 job 的時間要一起改。
 
 ## 9. 驗證
 
 ```bash
 curl -s $SERVICE_URL/healthz
+curl -s $SERVICE_URL/api/status
 curl -s $SERVICE_URL/api/config | head -c 300
 ```
 
 瀏覽器打開 `$SERVICE_URL`，用 Google 帳號登入；用 `ADMIN_EMAILS` 裡的帳號登入後，頂部會出現「管理」。
+
+第一個平日晚上與隔天早上確認開關機：
+
+```bash
+# 20:15 後應為 NEVER / STOPPED；隔天 08:45 後應為 ALWAYS / RUNNABLE
+gcloud sql instances describe $SQL_INSTANCE --format='value(settings.activationPolicy,state)'
+gcloud scheduler jobs describe chick-db-stop --location=$REGION --format='value(lastAttemptTime,status)'
+```
+
+休息時段打開網頁應顯示「小雞睡覺中」，不會出現錯誤頁。
 
 ## 10. 更新版本
 
@@ -181,10 +242,10 @@ Cloud Run 換版時會送 SIGTERM：伺服器廣播 `server.draining`、把進�
 ## 11. 預算提醒（不要設 Cloud Run spend cap）
 
 ```bash
-export BILLING_ACCOUNT=$(gcloud billing projects describe $PROJECT_ID --format='value(billingAccountName)' | sed 's#billingAccounts/##')
-# 金額不帶幣別 = 用帳單帳戶的幣別；帳單是 TWD 就填 1300，是 USD 就填 40
-gcloud billing budgets create --billing-account=$BILLING_ACCOUNT \
-  --display-name=chick-baby-monthly --budget-amount=40 \
+export BILLING_ACCOUNT=$(gcloud billing projects describe $PROJECT_ID --billing-project=$PROJECT_ID --format='value(billingAccountName)' | sed 's#billingAccounts/##')
+# 金額不帶幣別 = 用帳單帳戶的幣別；帳單是 TWD 就填 650，是 USD 就填 20（最壞情境 NT$519 + 緩衝）
+gcloud billing budgets create --billing-project=$PROJECT_ID --billing-account=$BILLING_ACCOUNT \
+  --display-name=chick-baby-monthly --budget-amount=20 \
   --filter-projects=projects/$PROJECT_ID \
   --threshold-rule=percent=0.5 --threshold-rule=percent=0.9 --threshold-rule=percent=1.0 \
   --threshold-rule=percent=1.0,basis=forecasted-spend
@@ -199,5 +260,5 @@ gcloud billing budgets create --billing-account=$BILLING_ACCOUNT \
 |---|---|
 | OAuth Client ID | 第 5 步在 Console 建立後提供 |
 | 管理員 Email | 寫入 `chick-admin-emails` secret |
-| 帳單 | `silver-greens` 需要已連結帳單帳戶。預估每月約 NT$500（上班時段才有人玩）～NT$820；有人 24 小時開著分頁會到約 NT$1,760。已扣 Cloud Run instance-based 免費額度（2026-10-14 確認未被其他服務使用）；明細見 `gcp-plan.md` §0、§3 |
+| 帳單 | `silver-greens` 需要已連結帳單帳戶。平日 09:00–20:00 開放、DB 夜間與週末停機：預估每月約 **NT$334**（一般）～NT$519（開放時間內一直有人開著分頁）。已扣 Cloud Run instance-based 免費額度（2026-10-14 確認未被其他服務使用）；明細見 `gcp-plan.md` §0、§3.2 |
 | 自訂網域（選用） | `gcloud beta run domain-mappings create --service=$SERVICE --domain=...`，並加到 OAuth origins 與 `PUBLIC_ORIGIN` |
