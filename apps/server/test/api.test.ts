@@ -6,7 +6,8 @@ import { migrateToLatest } from '../src/migrations';
 import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
 import { createSolo, finish, handleInput, startStairsLoop, matches } from '../src/stairs';
-import { ALWAYS_OPEN, makeClock } from '@chick/engine';
+import { ALWAYS_OPEN, makeClock, STAIRS_PARAMS } from '@chick/engine';
+import { handleClosed } from '../src/closing';
 import { setClock } from '../src/hours';
 import { feed as feedAction } from '../src/game';
 
@@ -311,5 +312,62 @@ describe('open hours (v1.2)', () => {
     await hatchAlive(a, 'chicken', { energy: 80 });
     setClock(closingSoon());
     await expect(createSolo(db, { userId: a.id }, { userId: a.id, send: () => {} }, rid())).rejects.toMatchObject({ code: 'GAME_CLOSING' });
+  });
+});
+
+describe('review follow-ups (v1.2)', () => {
+  afterEach(() => setClock(ALWAYS_OPEN));
+  /** 開放中、在 closesAt 關門的假時鐘（毫秒精準，方便測邊界）。 */
+  const closesAtClock = (closesAt: number) => ({ ...ALWAYS_OPEN, alwaysOpen: false, isOpen: (t: number) => t < closesAt, status: (t: number) => (t < closesAt ? { open: true, closes_at: closesAt, opens_at: null } : { open: false, closes_at: null, opens_at: null }) });
+  const MAX_MS = (STAIRS_PARAMS.matchMaxTicks / STAIRS_PARAMS.tickRate) * 1000;
+
+  it('a match started just before the 19:55 cutoff is scheduled to end (by the 5-minute cap) before closing', async () => {
+    const a = await login('alice');
+    await hatchAlive(a, 'chicken', { energy: 80 });
+    const closesAt = Date.now() + MAX_MS + 3_000; // 「19:54:57」開局
+    setClock(closesAtClock(closesAt));
+    const m = await createSolo(db, { userId: a.id }, { userId: a.id, send: () => {} }, rid());
+    expect(m.startAt + MAX_MS).toBeLessThanOrEqual(closesAt);
+    await finish(m, 'quit');
+  });
+  it('refuses a match that could not finish before closing even if the phase is still "open" (start delay)', async () => {
+    const a = await login('alice');
+    await hatchAlive(a, 'chicken', { energy: 80 });
+    setClock(closesAtClock(Date.now() + MAX_MS + 200));
+    await expect(createSolo(db, { userId: a.id }, { userId: a.id, send: () => {} }, rid())).rejects.toMatchObject({ code: 'GAME_CLOSING' });
+  });
+
+  it('20:00: running matches are aborted (no coins) before sockets close, so the disconnect does not settle them', async () => {
+    const a = await login('alice');
+    await hatchAlive(a, 'chicken', { energy: 80 });
+    const log: string[] = [];
+    const m = await createSolo(db, { userId: a.id }, { userId: a.id, send: (x: any) => log.push(`conn:${x.type}${x.aborted ? ':aborted' : ''}`) }, rid());
+    m.state.players[0].floor = 9;
+    const hub = { closeAll: (msg: any, code: number) => { log.push(`closeAll:${msg.type}:${code}`); void finish(m, 'quit').then(() => log.push('finish-after-close')); } };
+    const gate = { release: async () => { log.push('release'); } };
+    await handleClosed({ db, hub, gate }, 123);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(log).toEqual(['conn:match.started', 'conn:match.ended:aborted', 'closeAll:game.closed:4423', 'release', 'finish-after-close']);
+    const row = await db.selectFrom('stair_matches').select('status').where('id', '=', m.id).executeTakeFirstOrThrow();
+    expect(row.status).toBe('aborted');
+    const led = await db.selectFrom('coin_ledger').select('reason').where('user_id', '=', a.id).execute();
+    expect(led.map((l: any) => l.reason)).toEqual(['signup']);
+  });
+
+  it('idempotency: a stored response is replayed after closing; no new audit row; new requests are GAME_CLOSED', async () => {
+    const a = await login('alice');
+    const pet = await hatchAlive(a, 'chicken', { hunger: 0 });
+    const id = rid();
+    const first = await feed(a, pet, 'worm', id);
+    expect(first.status).toBe(200);
+    const audits = async () => (await db.selectFrom('audit_log').select('id').where('request_id', '=', id).execute()).length;
+    const before = await audits();
+    setClock(closesAtClock(Date.now() - 1)); // 已關門
+    const again = await feedAction(db, { userId: a.id }, pet, 'worm', id);
+    expect(again).toMatchObject({ ok: true, balance: first.json.balance, replayed: true });
+    expect(await audits()).toBe(before);
+    await expect(feedAction(db, { userId: a.id }, pet, 'worm', rid())).rejects.toMatchObject({ code: 'GAME_CLOSED' });
+    const w = await db.selectFrom('wallets').select('balance').where('user_id', '=', a.id).executeTakeFirstOrThrow();
+    expect(w.balance).toBe(first.json.balance);
   });
 });

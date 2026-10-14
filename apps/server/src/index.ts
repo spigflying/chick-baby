@@ -3,7 +3,7 @@ import { buildApp } from './app';
 import { Bus } from './bus';
 import { env } from './env';
 import { clock } from './hours';
-import { startClosingLoop } from './closing';
+import { handleClosed, startClosingLoop } from './closing';
 import { abortAll, startStairsLoop } from './stairs';
 
 const { db } = createDb();
@@ -13,7 +13,7 @@ const { app, hub, gate } = await buildApp(db, bus);
 const loop = startStairsLoop(db);
 const closing = startClosingLoop({
   onClosing: (closes_at) => hub.broadcast({ type: 'game.closing', closes_at }),
-  onClosed: async (opens_at) => { await abortAll(db); hub.closeAll({ type: 'game.closed', opens_at }, 4423); await gate.release(); },
+  onClosed: (opens_at) => handleClosed({ db, hub, gate }, opens_at),
 });
 await app.listen({ port: env.port, host: '0.0.0.0' });
 app.log.info(`instance ${env.instanceId} ready (dev_login=${env.devLogin}, open_hours=${env.openHours || 'always'})`);

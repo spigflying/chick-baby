@@ -28,15 +28,20 @@ export async function runAction<T>(db: Db, ctx: ReqCtx, action: string, requestI
   const hash = stableHash({ action, body });
   try {
     return await db.transaction().execute(async (tx) => {
-      // 關門判斷放在寫入的 transaction 內（requirements §4.7：20:00:00 之後的寫入一律拒絕）
+      // 1) 先查已存的結果：重送已完成的請求一律回放（即使已經關門），不再寫稽核
+      const replay = async () => {
+        const prev = await tx.selectFrom('idempotency_keys').select(['request_hash', 'response']).where('user_id', '=', ctx.userId).where('request_id', '=', requestId as string).executeTakeFirst();
+        if (!prev) return null;
+        if (prev.request_hash !== hash) fail('IDEMPOTENCY_CONFLICT');
+        return { ...(prev.response as object), replayed: true } as T;
+      };
+      const stored = await replay();
+      if (stored) return stored;
+      // 2) 關門判斷放在寫入的 transaction 內（requirements §4.7：20:00:00 之後的寫入一律拒絕）
       if (!clock().isOpen(Date.now())) fail('GAME_CLOSED');
       const ins = await tx.insertInto('idempotency_keys').values({ user_id: ctx.userId, request_id: requestId, action, request_hash: hash })
         .onConflict((oc) => oc.doNothing()).returning('request_id').executeTakeFirst();
-      if (!ins) {
-        const prev = await tx.selectFrom('idempotency_keys').select(['request_hash', 'response']).where('user_id', '=', ctx.userId).where('request_id', '=', requestId as string).executeTakeFirstOrThrow();
-        if (prev.request_hash !== hash) fail('IDEMPOTENCY_CONFLICT');
-        return { ...(prev.response as object), replayed: true } as T;
-      }
+      if (!ins) { return (await replay()) as T; } // 併發的同一個請求剛寫入
       const result = await fn(tx);
       await tx.updateTable('idempotency_keys').set({ response: JSON.stringify(result) }).where('user_id', '=', ctx.userId).where('request_id', '=', requestId as string).execute();
       await audit(tx, ctx, action, 'ok', { targetType: target?.type, targetId: target?.id, detail: body, requestId: requestId as string });

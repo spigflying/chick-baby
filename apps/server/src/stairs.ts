@@ -15,14 +15,19 @@ export interface Match {
 }
 const P = STAIRS_PARAMS;
 const TICK_MS = 1000 / P.tickRate;
+/** match.started 送出後多久開始第 0 tick（讓客戶端準備）。 */
+const START_DELAY_MS = 500;
 export const matches = new Map<string, Match>();
 
 export function currentTick(m: Match, now = Date.now()) { return Math.floor((now - m.startAt) / TICK_MS); }
 
 /** 單人下樓梯：伺服器權威模擬。 */
 export async function createSolo(db: Db, ctx: ReqCtx, conn: MatchConn, requestId: unknown) {
-  const phase = phaseAt(clock(), Date.now());
+  const now = Date.now(), phase = phaseAt(clock(), now);
   if (phase !== 'open') fail(phase === 'closing' ? 'GAME_CLOSING' : 'GAME_CLOSED'); // 19:55 起不能開新局
+  // 一致性：開局延遲 + 最長 5 分鐘也必須在關門前結束（否則 19:54:59.8 開的局會跨過 20:00）
+  const closesAt = clock().status(now).closes_at;
+  if (closesAt !== null && now + START_DELAY_MS + P.matchMaxTicks * TICK_MS > closesAt) fail('GAME_CLOSING');
   for (const m of matches.values()) if (m.userId === ctx.userId && !m.ended) fail('ALREADY_IN_MATCH');
   const seed = randomSeed();
   const res = await runAction(db, ctx, 'stairs.start', requestId, {}, async (tx) => {
@@ -39,7 +44,7 @@ export async function createSolo(db: Db, ctx: ReqCtx, conn: MatchConn, requestId
   });
   if ((res as any).replayed) fail('IDEMPOTENCY_REPLAY');
   const players = [{ petId: res.pet_id, speed: res.speed, stamina: res.stamina }];
-  const m: Match = { id: res.match_id, userId: ctx.userId, petId: res.pet_id, homeId: res.home_id, conn, state: createStairs(res.seed, players), startAt: Date.now() + 500,
+  const m: Match = { id: res.match_id, userId: ctx.userId, petId: res.pet_id, homeId: res.home_id, conn, state: createStairs(res.seed, players), startAt: Date.now() + START_DELAY_MS,
     pending: [], lastSeq: 0, lastProcessedSeq: 0, late: 0, ended: false };
   matches.set(m.id, m);
   conn.send({ type: 'match.started', match_id: m.id, seed: res.seed, engine_version: ENGINE_VERSION, config_hash: stableHash(P), start_tick: 0,
