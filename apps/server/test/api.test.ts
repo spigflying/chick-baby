@@ -246,11 +246,11 @@ describe('death, archive & admin revive', () => {
     await sql`ALTER TABLE audit_log DISABLE TRIGGER USER`.execute(db);
     await sql`UPDATE audit_log SET at = now() - interval '31 days'`.execute(db);
     await sql`ALTER TABLE audit_log ENABLE TRIGGER USER`.execute(db);
-    const r = await app.inject({ method: 'POST', url: '/api/internal/daily', headers: { 'x-cron-secret': 'test-cron' } });
+    const r = await app.inject({ method: 'POST', url: '/api/internal/daily', headers: { authorization: 'Bearer dev-cron' } });
     expect(r.statusCode).toBe(200);
     const rows = await db.selectFrom('audit_log').select('ip').execute();
     expect(rows.every((x: any) => x.ip === null)).toBe(true);
-    expect((await app.inject({ method: 'POST', url: '/api/internal/daily' })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'POST', url: '/api/internal/daily' })).statusCode).toBe(401);
   });
 });
 

@@ -15,8 +15,9 @@ import { setupWs } from './ws';
 import type { Bus } from './bus';
 import { clock } from './hours';
 import { createDbGate, type DbGate } from './gate';
+import { requireCronOidc, type IdTokenVerifier } from './cron-auth';
 
-export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?: DbGate } = {}) {
+export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?: DbGate; cronVerifier?: IdTokenVerifier } = {}) {
   const gate = opts.gate ?? createDbGate(db, bus);
   const app = Fastify({ logger: opts.logger ?? true, trustProxy: true, bodyLimit: 64 * 1024 });
   await app.register(cookie);
@@ -111,8 +112,8 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
       });
     });
     // ---- 排程（Cloud Scheduler）----
-    api.post('/internal/daily', async (req) => {
-      if (!env.cronSecret || req.headers['x-cron-secret'] !== env.cronSecret) fail('FORBIDDEN');
+    // 以 Google OIDC ID token 驗證（Scheduler --oidc-service-account-email），見 cron-auth.ts
+    api.post('/internal/daily', { preHandler: (req) => requireCronOidc(req, opts.cronVerifier) }, async () => {
       try { return await g.dailyMaintenance(db); }
       // 休息時段（20:05）跑完就停止 LISTEN：20:15 資料庫關機後不要一直重連
       finally { if (!clock().isOpen(Date.now())) await gate.release(); }

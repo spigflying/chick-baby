@@ -5,7 +5,9 @@ export const env = {
   googleClientId: process.env.GOOGLE_CLIENT_ID ?? '',
   adminEmails: (process.env.ADMIN_EMAILS ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
   publicOrigins: (process.env.PUBLIC_ORIGIN ?? '').split(',').map((s) => s.trim()).filter(Boolean),
-  cronSecret: process.env.CRON_SECRET ?? '',
+  // Cloud Scheduler OIDC：audience = 服務網址；SA = 排程專用服務帳號
+  cronOidcAudience: (process.env.CRON_OIDC_AUDIENCE ?? '').trim(),
+  cronOidcSaEmail: (process.env.CRON_OIDC_SA_EMAIL ?? '').trim().toLowerCase(),
   openHours: process.env.OPEN_HOURS ?? '', // 例：mon-fri 09:00-20:00 Asia/Taipei；空 = 永遠開放
   secureCookies: process.env.NODE_ENV === 'production',
   webDist: process.env.WEB_DIST ?? '',

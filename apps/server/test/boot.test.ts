@@ -43,7 +43,7 @@ describe('boot without a database', () => {
   });
   it('the cron endpoint is not blocked by closing time (it runs at 20:05)', async () => {
     setClock(CLOSED);
-    const r = await app.inject({ method: 'POST', url: '/api/internal/daily', headers: { 'x-cron-secret': 'test-cron' } });
+    const r = await app.inject({ method: 'POST', url: '/api/internal/daily', headers: { authorization: 'Bearer dev-cron' } });
     expect(r.statusCode).toBe(503); // 過了關門檢查，只是這裡的 DB 連不上
   });
   it('a DB that accepts connections but never answers fails within the 5s connect timeout', async () => {
@@ -64,7 +64,7 @@ describe('boot without a database', () => {
     let released = 0;
     const gate = { ensure: async () => {}, release: async () => { released++; } };
     const { app: a } = await buildApp(db, bus, { logger: false, gate });
-    const daily = () => a.inject({ method: 'POST', url: '/api/internal/daily', headers: { 'x-cron-secret': 'test-cron' } });
+    const daily = () => a.inject({ method: 'POST', url: '/api/internal/daily', headers: { authorization: 'Bearer dev-cron' } });
     setClock(CLOSED);
     expect((await daily()).statusCode).toBe(500); // 這裡的 DB 連不上，排程本身失敗
     expect(released).toBe(1);
