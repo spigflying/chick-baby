@@ -5,12 +5,14 @@ import { env } from './env';
 import { clock } from './hours';
 import { handleClosed, startClosingLoop } from './closing';
 import { abortAll, startStairsLoop } from './stairs';
+import { abortArenas, startArenaLoop } from './arena';
 
 const { db } = createDb();
 const bus = new Bus();
 // 不在啟動時連資料庫：休息時段 Cloud SQL 停機，伺服器仍要能啟動（requirements §4.7）
 const { app, hub, gate } = await buildApp(db, bus);
 const loop = startStairsLoop(db);
+const arenaLoop = startArenaLoop();
 const closing = startClosingLoop({
   onClosing: (closes_at) => hub.broadcast({ type: 'game.closing', closes_at }),
   onClosed: (opens_at) => handleClosed({ db, hub, gate }, opens_at),
@@ -24,8 +26,9 @@ let shuttingDown = false;
 async function shutdown(sig: string) {
   if (shuttingDown) return; shuttingDown = true;
   app.log.info(`${sig}: draining`);
-  clearInterval(loop); clearInterval(closing.timer);
+  clearInterval(loop); clearInterval(arenaLoop); clearInterval(closing.timer);
   await abortAll(db);
+  await abortArenas();
   hub.drain();
   await app.close().catch(() => {});
   await bus.stop(); await db.destroy();

@@ -4,6 +4,7 @@ import { drawShell, SHELL_COLORS } from './shell';
 import { act, errText } from './api';
 import type { Live } from './ws';
 import { StairsClient } from './stairs';
+import { controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, type ArenaMsg, type FSnap, type Pad } from './fight';
 
 const W = 120, H = 100, GROUND = 86, HUD = 14;
 const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -32,12 +33,81 @@ export class Device {
   private timer = 0; private off: (() => void)[] = [];
   private hatchPick = 'chicken';
   guests: PresenceUser[] = []; guestExtra = 0; private walkers = new GuestWalkers();
+  // ---------- v1.4 打架模式 ----------
+  arena: { prev: ArenaMsg | null; cur: ArenaMsg; at: number } | null = null;
+  navOpen = false; private padState = new PadState(); private lastJoin = 0; private myPresence: PresenceUser | null = null;
+  private arenaFighters(): FSnap[] {
+    const a = this.arena; if (!a || Date.now() - a.at > 3500) return [];
+    return lerpFighters(a.prev, a.cur, (Date.now() - a.at) / 100);
+  }
+  private meFighter() { return this.arena?.cur.fighters.find((f) => f.u === this.ctx.me.id) ?? null; }
+  mode() {
+    const me = this.meFighter();
+    return this.stairs ? 'stairs' : controlMode({ isOwner: this.isOwner, submenuOpen: !!this.menu, navOpen: this.navOpen, inArena: !!me, inFight: !!me?.fight });
+  }
+  private sendPad() { this.ctx.live.send({ type: 'arena.input', ...this.padState.pad }); }
+  private setPad(b: keyof Pad, v: boolean) { if (this.padState.set(b, v)) this.sendPad(); }
+  /** 進家後：自己的寵物能打（活著、醒著、沒生病）就加入場地；斷線重連或負責的執行個體換人時自動重新加入。 */
+  private ensureJoined() {
+    const p = this.myPresence?.pet;
+    const ok = !!p && p.status === 'alive' && !p.sleeping && !p.sick;
+    if (!ok || this.meFighter() || Date.now() - this.lastJoin < 3000) return;
+    this.lastJoin = Date.now(); this.ctx.live.send({ type: 'arena.join' });
+  }
+  private updateControls() {
+    const m = this.mode();
+    const pet = m === 'pet' || m === 'nav';
+    (this.$('.fightbar') as HTMLElement).hidden = !pet;
+    const h = this.$('.hint'); const txt = m === 'stairs' ? '' : HINT[m as 'pet'] ?? '';
+    h.hidden = !txt; if (h.textContent !== txt) h.textContent = txt;
+    this.$('.navbtn').classList.toggle('on', this.navOpen);
+    if (m !== 'pet' && this.padState.clear()) this.sendPad();
+  }
+  onArena(m: any) {
+    if (m.type === 'arena.state') {
+      const prev = this.arena?.cur ?? null; const wasFight = !!this.meFighter()?.fight;
+      this.arena = { prev, cur: m, at: Date.now() };
+      const nowFight = !!this.meFighter()?.fight;
+      if (nowFight && !wasFight && this.isOwner) this.say('有人來挑戰！方向鍵移動、空白鍵啄');
+      this.updateControls();
+    } else if (m.type === 'arena.event' && m.kind === 'start') { this.ctx.toast(`${m.a} vs ${m.b} 開打！`); }
+    else if (m.type === 'arena.result') {
+      const nm = (id: string) => (this.arena?.cur.fighters.find((f) => f.u === id)?.name) ?? (id === this.home?.owner.id ? this.home.owner.display_name : this.guests.find((g) => g.id === id)?.display_name ?? '?');
+      this.ctx.toast(resultText(m, nm));
+    } else if (m.type === 'arena.notice') {
+      const t = NOTICE_TEXT[m.code] ?? m.code;
+      if (Date.now() - this.noticeAt > 2500) { this.noticeAt = Date.now(); this.say(t); }
+    }
+  }
+  private noticeAt = 0;
+  leaveArena() { if (this.meFighter()) this.ctx.live.send({ type: 'arena.leave' }); this.arena = null; }
+  /** 畫場上的寵物（打架模式中的寵物改由伺服器快照決定位置）。 */
+  drawArena(fs: FSnap[]) {
+    const g = this.g, f = Math.floor(this.frame / 4) % 2, hpMax = this.arena?.cur.hp_max ?? 100;
+    for (const x of fs) {
+      if (x.inv > 0 && this.frame % 2) continue; // 被打中閃爍
+      const n = speciesSprite(x.sp, f && this.arena ? 2 : 1), w = sw(n), h = sh(n);
+      const px = x.x + (x.atk > 0 ? x.dir * 2 : 0), py = x.y + 12 - h;
+      spr(g, n, px, py, x.dir > 0);
+      if (x.fight) { g.fillStyle = PAL[3]; g.fillRect(Math.round(x.x), Math.round(py) - 4, 12, 3); g.fillStyle = PAL[1]; g.fillRect(Math.round(x.x) + 1, Math.round(py) - 3, Math.round(10 * x.hp / hpMax), 1); }
+      const tagKey = x.u === this.home?.owner.id ? 'owner' : String(this.guests.findIndex((u) => u.id === x.u));
+      if (tagKey !== '-1') this.tag(tagKey, px + w / 2, py - (x.fight ? 4 : 0));
+    }
+    const fights = this.arena?.cur.fights ?? [];
+    if (fights.length) {
+      const left = Math.max(0, fights[0].left_ms - (Date.now() - (this.arena?.at ?? 0)));
+      g.fillStyle = PAL[0]; g.fillRect(W / 2 - 9, HUD + 1, 18, 7);
+      num(g, Math.ceil(left / 1000), W / 2 - 7, HUD + 2);
+    }
+  }
 
   /** v1.3：在場者的寵物同框。 */
   setPresence(users: PresenceUser[]) {
     if (!this.home) return;
     const g = guestsOf(users, this.home.owner.id);
     this.guests = g.shown; this.guestExtra = g.extra;
+    this.myPresence = users.find((u) => u.id === this.ctx.me.id) ?? null;
+    this.ensureJoined();
     const tags = this.$('.tags');
     tags.innerHTML = `<span class="tag own" data-g="owner">${esc(this.home.owner.display_name)}</span>`
       + this.guests.map((u, i) => `<span class="tag" data-g="${i}" title="${esc(u.pet ? u.pet.name : '沒有寵物')}">${esc(u.display_name)}${u.pet ? (u.pet.status === 'dead' ? '†' : '') : '·沒寵物'}</span>`).join('')
@@ -49,14 +119,16 @@ export class Device {
   private ownerCx() { if (!this.guests.length) return W / 2; const l = this.lanes()[0]; return (l.x0 + l.x1) / 2; }
   private tag(sel: string, cx: number, top: number) {
     const el = this.el.querySelector(`.tags [data-g="${sel}"]`) as HTMLElement | null; if (!el) return;
-    el.style.left = `${(cx / W) * 100}%`; el.style.top = `${(Math.max(HUD + 1, top - 7) / H) * 100}%`;
+    el.style.left = `${(Math.max(14, Math.min(W - 14, cx)) / W) * 100}%`; el.style.top = `${(Math.max(HUD + 1, top - 7) / H) * 100}%`;
   }
+  private inArena = new Set<string>();
   drawGuests() {
     const g = this.g, f = Math.floor(this.frame / 4) % 2, L = this.lanes();
     const names = this.guests.map((u) => guestSprite(u.pet, f));
     const xs = this.walkers.step(this.guests.map((u) => u.id), (i) => L[i + 1], (i) => spriteW(names[i]),
       (i) => this.frame % 3 === 0 && !!this.guests[i].pet && this.guests[i].pet!.status === 'alive' && !this.guests[i].pet!.sleeping);
     this.guests.forEach((u, i) => {
+      if (this.inArena.has(u.id)) return;
       const n = names[i], w = spriteW(n), h = spriteH(n), x = xs[i];
       const y = n === 'ghost' ? GROUND - h - 4 + (f ? 0 : 2) : GROUND - h;
       if (n) spr(g, n, x, y, this.walkers.dir(u.id) > 0 && n !== 'ghost' && n !== 'egg' && !u.pet!.sleeping);
@@ -74,6 +146,8 @@ export class Device {
       <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">◎0</span><span data-k="age">—</span></div>
       <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="menu" hidden></div></div>
       <div class="labels"></div>
+      <div class="fightbar" hidden><button data-pad="left">◀</button><button data-pad="jump">▲</button><button data-pad="attack">啄</button><button data-pad="right">▶</button><button class="navbtn">選單</button></div>
+      <p class="hint" hidden></p>
       <div class="gamebar" hidden><button data-dir="left">◀</button><button class="quit">離開</button><button data-dir="right">▶</button></div>
       <p class="msg">…</p></div></div>`;
     this.cv = this.el.querySelector('canvas.screen')!; this.g = this.cv.getContext('2d')!;
@@ -81,7 +155,7 @@ export class Device {
     this.timer = window.setInterval(() => this.loop(), 33);
     this.off.push(ctx.live.on((m) => this.onLive(m)));
   }
-  destroy() { clearInterval(this.timer); this.off.forEach((f) => f()); this.stairs?.leave(); document.removeEventListener('keydown', this.onKey); document.removeEventListener('keyup', this.onKeyUp); }
+  destroy() { this.leaveArena(); clearInterval(this.timer); this.off.forEach((f) => f()); this.stairs?.leave(); document.removeEventListener('keydown', this.onKey); document.removeEventListener('keyup', this.onKeyUp); }
   $(s: string) { return this.el.querySelector(s) as HTMLElement; }
   say(t: string) { this.$('.msg').textContent = t; }
 
@@ -158,6 +232,14 @@ export class Device {
     if ((e.target as HTMLElement)?.closest?.('input,select,textarea')) return;
     const k = e.key;
     if (this.stairs) { if (this.stairs.key(k, true)) e.preventDefault(); return; }
+    const mode = this.mode();
+    if (mode === 'pet') {
+      const b = petKey(k); if (!b) return;
+      e.preventDefault(); if (e.repeat) return;
+      if (b === 'nav') { this.navOpen = true; this.updateControls(); return; }
+      this.setPad(b, true); return;
+    }
+    if (mode === 'nav' && k === 'Escape') { this.navOpen = false; this.updateControls(); e.preventDefault(); return; }
     if (this.menu) {
       if (k === 'Escape' || k === 'Backspace') this.closeMenu();
       else if (this.menu === 'feed' && (k === 'ArrowUp' || k === 'ArrowDown')) { const n = this.ctx.cfg.foods.length; this.menuSel = (this.menuSel + (k === 'ArrowUp' ? n - 1 : 1)) % n; this.renderMenu(); }
@@ -169,7 +251,10 @@ export class Device {
     else return;
     e.preventDefault();
   };
-  private onKeyUp = (e: KeyboardEvent) => { if (this.stairs) this.stairs.key(e.key, false); };
+  private onKeyUp = (e: KeyboardEvent) => {
+    if (this.stairs) return void this.stairs.key(e.key, false);
+    const b = petKey(e.key); if (b && b !== 'nav') this.setPad(b, false);
+  };
   bind() {
     document.addEventListener('keydown', this.onKey);
     document.addEventListener('keyup', this.onKeyUp);
@@ -198,6 +283,16 @@ export class Device {
       b.addEventListener('pointerdown', set(true)); ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => b.addEventListener(ev, set(false)));
     });
     this.$('.gamebar .quit').addEventListener('click', () => this.stairs?.quit());
+    this.el.querySelectorAll<HTMLElement>('.fightbar [data-pad]').forEach((b) => {
+      const d = b.dataset.pad as keyof Pad;
+      const set = (v: boolean) => (e: Event) => { e.preventDefault(); if (this.mode() === 'pet' || !v) this.setPad(d, v); };
+      b.addEventListener('pointerdown', set(true)); ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => b.addEventListener(ev, set(false)));
+    });
+    this.$('.navbtn').addEventListener('click', () => { this.navOpen = !this.navOpen; this.updateControls(); });
+    // 滑鼠：和下樓梯一樣，左鍵按住往左、右鍵按住往右
+    this.cv.addEventListener('pointerdown', (e) => { if (this.mode() !== 'pet' || e.pointerType !== 'mouse') return; if (e.button === 0) this.setPad('left', true); else if (e.button === 2) this.setPad('right', true); });
+    window.addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') return; this.setPad('left', false); this.setPad('right', false); });
+    this.cv.addEventListener('contextmenu', (e) => { if (this.mode() === 'pet') e.preventDefault(); });
     const scr = this.$('.scr');
     scr.addEventListener('pointerdown', (e) => { if (!this.stairs || e.pointerType !== 'mouse') return; if (e.button === 0) this.stairs.setDir('left', true); else if (e.button === 2) this.stairs.setDir('right', true); });
     window.addEventListener('pointerup', (e) => { if (!this.stairs || e.pointerType !== 'mouse') return; if (e.button === 0) this.stairs.setDir('left', false); else if (e.button === 2) this.stairs.setDir('right', false); });
@@ -206,6 +301,7 @@ export class Device {
 
   activate(i: number) {
     if (this.stairs) return;
+    if (this.navOpen) { this.navOpen = false; setTimeout(() => this.updateControls()); }
     this.sel = i; this.drawCells();
     const a = this.cells[i]?.act; const p = this.pet;
     if (a === 'status') return this.openMenu('status');
@@ -238,7 +334,7 @@ export class Device {
 
   // ---------- 選單 ----------
   openMenu(m: 'feed' | 'status' | 'hatch') { this.menu = m; this.menuSel = m === 'feed' ? (this.isOwner ? 0 : 1) : 0; this.renderMenu(); }
-  closeMenu() { this.menu = null; this.renderMenu(); }
+  closeMenu() { this.menu = null; this.navOpen = false; this.renderMenu(); this.updateControls(); }
   renderMenu() {
     const el = this.$('.menu');
     if (!this.menu) { el.hidden = true; return; }
@@ -296,6 +392,7 @@ export class Device {
 
   // ---------- 即時事件 ----------
   onLive(m: any) {
+    if (typeof m.type === 'string' && m.type.startsWith('arena.')) { if (this.home && m.home_id === this.home.id) this.onArena(m); return; }
     if (m.type === 'pet.updated' && this.home && m.home_id === this.home.id) {
       const ev = m.event;
       const mine = ev?.actor?.id === this.ctx.me.id;
@@ -366,8 +463,13 @@ export class Device {
     g.fillStyle = PAL[2]; g.fillRect(x + 13, y + 4, f, 4);
   }
   draw() {
+    const fs = this.arenaFighters(); this.inArena = new Set(fs.map((x) => x.u));
+    // 只有自己一隻在場上時不接管主人寵物（讓一般動畫照常）；有兩隻以上才由伺服器位置接管
+    if (this.inArena.size < 2) this.inArena = new Set();
     this.drawMain();
     this.drawGuests();
+    if (this.inArena.size) this.drawArena(fs.filter((x) => this.inArena.has(x.u)));
+    if (this.sub % 15 === 0) { this.ensureJoined(); this.updateControls(); }
     const more = this.el.querySelector('.tags .more') as HTMLElement | null;
     if (more) { more.style.right = '1%'; more.style.top = `${((HUD + 1) / H) * 100}%`; }
   }
@@ -390,6 +492,12 @@ export class Device {
       return;
     }
     const name1 = speciesSprite(p.species, 1), pw = sw(name1), ph = sh(name1), baseY = GROUND - ph;
+    if (this.inArena.has(this.home?.owner.id)) {
+      // 打架中由場地快照畫主人寵物；進行中的餵食／清潔動畫直接收尾
+      if (this.anim) this.finishAnim();
+      if (p.poop) for (let i = 0; i < p.poop; i++) { const q = poopXY(i); spr(g, 'poop', q.x, q.y); }
+      return;
+    }
     let alt = f, py = baseY, flip = this.petDir > 0;
     const a = this.anim;
     if (a && a.type === 'eat') {

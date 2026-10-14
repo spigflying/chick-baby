@@ -1,6 +1,7 @@
 import { phaseAt, type Phase } from '@chick/engine';
 import { clock } from './hours';
 import { abortAll } from './stairs';
+import { abortArenas } from './arena';
 import type { Db } from './db';
 
 export interface ClosingHandlers {
@@ -30,6 +31,7 @@ export function startClosingLoop(h: ClosingHandlers, now: () => number = Date.no
  */
 export async function handleClosed(deps: { db: Db; hub: { closeAll(msg: unknown, code: number): void }; gate: { release(): Promise<void> } }, opensAt: number | null) {
   await abortAll(deps.db);
+  await abortArenas(); // v1.4：對戰取消，不轉帳
   deps.hub.closeAll({ type: 'game.closed', opens_at: opensAt }, 4423);
   await deps.gate.release();
 }

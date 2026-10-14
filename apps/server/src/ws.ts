@@ -6,6 +6,7 @@ import { env } from './env';
 import { AppError } from './errors';
 import { canEnter, currentPet, feed, getHome, ownerAction, viewHome } from './game';
 import { PresenceStore, petSummary } from './presence';
+import { initArena, onArenaBus, onPresenceChange } from './arena';
 import { rateLimit } from './core';
 import { createSolo, currentTick, finish, handleInput, matches, type Match } from './stairs';
 import { publicPet, rowToState } from './pets';
@@ -29,8 +30,16 @@ function broadcastPresence(homeId: string) {
 }
 
 export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
+  initArena({ db, bus, presence });
   bus.on(async (m) => {
     try {
+      if (typeof m.t === 'string' && m.t.startsWith('arena.')) {
+        onArenaBus(m);
+        const { t, home, ...rest } = m;
+        if (t === 'arena.notice') { for (const c of inHome(home)) if (c.user.id === m.user) send(c, { type: t, home_id: home, code: m.code }); }
+        else if (t === 'arena.state' || t === 'arena.event' || t === 'arena.result') for (const c of inHome(home)) send(c, { type: t, home_id: home, ...rest });
+        return;
+      }
       if (m.t === 'pet') {
         const targets = inHome(m.home); const visiting = presence.hasPet(m.pet);
         if (!targets.length && !visiting) return;
@@ -38,7 +47,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
         const pub = publicPet(row, rowToState(row));
         for (const c of targets) send(c, { type: 'pet.updated', home_id: m.home, pet: pub, event: m.ev ?? null });
         // 這隻寵物的主人正在拜訪別人家：同步更新那些家的在場寵物（每個執行個體都收到同一則 NOTIFY，結果一致）
-        if (visiting) for (const h of presence.updatePet(m.pet, petSummary(pub))) broadcastPresence(h);
+        if (visiting) for (const h of presence.updatePet(m.pet, petSummary(pub))) { broadcastPresence(h); onPresenceChange(h); }
       } else if (m.t === 'wallet') {
         const targets = [...conns].filter((c) => c.user.id === m.user); if (!targets.length) return;
         const w = await db.selectFrom('wallets').select('balance').where('user_id', '=', m.user).executeTakeFirst();
@@ -49,6 +58,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
       } else if (m.t === 'presence') {
         presence.set(m.home, m.key, m.on ? m.user : null);
         broadcastPresence(m.home);
+        onPresenceChange(m.home);
       }
     } catch (e) { app.log.error(e); }
   });
@@ -74,7 +84,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
     if (phaseAt(clock(), Date.now()) === 'closing') send(c, { type: 'game.closing', closes_at: clock().status(Date.now()).closes_at });
     socket.on('message', async (raw) => {
       let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
-      const isInput = msg?.type === 'match.input';
+      const isInput = msg?.type === 'match.input' || msg?.type === 'arena.input';
       if (!rateLimit(`ws:${c.id}:${isInput ? 'in' : 'other'}`, isInput ? 35 : 20, 1000)) {
         if (!isInput || Math.random() < 0.1) send(c, { type: 'error', code: 'RATE_LIMITED', request_id: msg?.request_id });
         return;
@@ -92,6 +102,17 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             break;
           }
           case 'home.leave': leaveHome(c); break;
+          // v1.4 打架模式：意圖一律經過 NOTIFY 交給負責這個家的執行個體
+          case 'arena.join': case 'arena.leave': {
+            if (!c.homeId) throw new AppError('NOT_IN_HOME');
+            await bus.publish({ t: msg.type, home: c.homeId, user: c.user.id });
+            break;
+          }
+          case 'arena.input': {
+            if (!c.homeId) return;
+            await bus.publish({ t: 'arena.in', home: c.homeId, user: c.user.id, left: !!msg.left, right: !!msg.right, jump: !!msg.jump, attack: !!msg.attack });
+            break;
+          }
           case 'pet.action': {
             const r = msg.action === 'feed' ? await feed(db, ctx, String(msg.pet_id), msg.food_id, msg.request_id)
               : await ownerAction(db, ctx, String(msg.pet_id), msg.action, msg.request_id);

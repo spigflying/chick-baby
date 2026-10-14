@@ -121,6 +121,27 @@ const migrations: Record<string, Migration> = {
       await sql`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`.execute(db);
     },
   },
+  '0002_fights': {
+    async up(db: Kysely<unknown>) {
+      await sql`
+      ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+      ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight'));
+      CREATE TABLE fights (
+        id uuid PRIMARY KEY, home_id uuid NOT NULL REFERENCES homes(id),
+        a_user_id uuid NOT NULL REFERENCES users(id), b_user_id uuid NOT NULL REFERENCES users(id),
+        a_pet_id uuid NOT NULL REFERENCES pets(id), b_pet_id uuid NOT NULL REFERENCES pets(id),
+        status text NOT NULL CHECK (status IN ('playing','done','aborted')),
+        winner_user_id uuid REFERENCES users(id), transfer int NOT NULL DEFAULT 0, a_hp int, b_hp int, reason text,
+        instance_id text, started_at timestamptz NOT NULL DEFAULT now(), ended_at timestamptz
+      );
+      CREATE INDEX fights_pair ON fights (LEAST(a_user_id, b_user_id), GREATEST(a_user_id, b_user_id), ended_at);
+      `.execute(db);
+    },
+    async down(db: Kysely<unknown>) {
+      await sql`DROP TABLE fights; ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+        ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin'));`.execute(db);
+    },
+  },
 };
 
 const provider: MigrationProvider = { getMigrations: async () => migrations };

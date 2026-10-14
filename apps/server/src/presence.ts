@@ -34,5 +34,8 @@ export class PresenceStore {
     }
     return hit;
   }
+  /** 這個家目前有連線的執行個體（排序後）；對戰由最小的那個執行個體負責模擬。 */
+  instances(home: string): string[] { return [...new Set([...(this.homes.get(home)?.keys() ?? [])].map((k) => k.slice(0, k.lastIndexOf(':'))))].sort(); }
+  homesList() { return [...this.homes.keys()]; }
   hasPet(petId: string) { for (const m of this.homes.values()) for (const u of m.values()) if (u.pet?.id === petId) return true; return false; }
 }
