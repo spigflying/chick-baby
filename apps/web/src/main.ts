@@ -4,9 +4,9 @@ import { api, act, errText, ApiError } from './api';
 import { Live } from './ws';
 import { Device } from './device';
 import { drawShell } from './shell';
-import { spriteCanvas, speciesSprite, SPECIES_LABEL } from './sprites';
+import { spriteCanvas, speciesSprite, SPECIES_LABEL, PAL, spr, sw, sh } from './sprites';
 import { watchIdle } from './idle';
-import { formatCountdown, formatOpensAt } from './sleep';
+import { formatCountdown, formatOpensAt, closedLine, loadPetCache, savePetCache, sleepSprite } from './sleep';
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -15,7 +15,7 @@ const app = $('#app');
 let cfg: any; let me: any = null; let live: Live | null = null; let device: Device | null = null; let presence: any[] = []; let presenceSeen = false;
 let wallet = 0;
 let idleOff: (() => void) | null = null;
-let sleepTimer = 0;
+let sleepTimer = 0; let sleepAnim = 0;
 
 function toast(t: string) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.append(d); setTimeout(() => d.remove(), 2600); }
 function nav(path: string, replace = false) { if (replace) history.replaceState(null, '', path); else history.pushState(null, '', path); void route(); }
@@ -200,13 +200,28 @@ function sleepPage(st: { opens_at: number | null; server_time?: number }) {
   live?.stop(); live = null; idleOff?.(); idleOff = null; device?.destroy(); device = null;
   $('#bar').hidden = true;
   const skew = st.server_time ? st.server_time - Date.now() : 0; // 伺服器時間 − 本地時間
+  // v1.5：蛋殼畫面＋自己的寵物在睡覺（從 localStorage 快取畫；不打 API、不開 WebSocket）
+  const sp = sleepSprite(loadPetCache(localStorage));
   app.innerHTML = `<main class="page"><div class="device" id="sleepDev"><canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div>
-    <div class="lcd"><div class="lcd-top"><span>💤</span><span>休息中</span></div><div class="scr" style="display:flex;justify-content:center;gap:8%;padding:12% 0;background:var(--g3)" id="sleepPets"></div>
-    <p class="msg">小雞睡覺中 💤 平日 09:00–20:00 開放</p></div></div></div>
+    <div class="lcd"><div class="lcd-top"><span>${esc(sp.name || '小雞')}</span><span>💤</span></div><div class="scr"><canvas class="screen" id="sleepScr" width="120" height="100"></canvas></div>
+    <p class="msg" id="closedLine">${esc(closedLine(st.opens_at))}</p></div></div></div>
     <div class="panel"><h2>小雞睡覺中</h2><p>${st.opens_at ? `下次開放：<b>${esc(formatOpensAt(st.opens_at))}</b>` : '目前沒有排定的開放時間'}</p>
-    <p id="countdown" style="font-size:1.6em"></p><p class="muted">休息時段時間是暫停的：寵物不會餓、不會生病。</p></div></main>`;
+    <p id="countdown" style="font-size:1.6em"></p><p class="muted">平日 09:00–20:00 開放。休息時段時間是暫停的：寵物不會餓、不會生病。</p></div></main>`;
   drawShell(document.querySelector('#sleepDev canvas.shell') as HTMLCanvasElement);
-  for (const s of ['chicken', 'duck', 'penguin', 'dino']) { const c = spriteCanvas(speciesSprite(s, 's'), 1); c.style.height = '34%'; c.style.minHeight = '28px'; c.title = SPECIES_LABEL[s]; $('#sleepPets').append(c); }
+  const cv = document.getElementById('sleepScr') as HTMLCanvasElement, g = cv.getContext('2d')!;
+  let fr = 0;
+  const draw = () => {
+    if (!cv.isConnected) { clearInterval(sleepAnim); return; }
+    const f = Math.floor(fr++ / 8) % 2, GROUND = 86;
+    g.fillStyle = PAL[2]; g.fillRect(0, 0, 120, 100); // 夜間：關燈的背景
+    g.fillStyle = PAL[1]; g.fillRect(0, GROUND, 120, 1);
+    for (let i = 0; i < 120; i += 6) g.fillRect(i, GROUND + 2 + ((i / 6) % 2), 2, 1);
+    const w = sw(sp.sprite), h = sh(sp.sprite), x = Math.round(60 - w / 2), y = GROUND - h;
+    spr(g, sp.sprite, x, y + (sp.egg ? 0 : f));
+    // Zzz 往上飄
+    for (let k = 0; k < 3; k++) { const t = (fr + k * 16) % 48; spr(g, 'z', x + w + 2 + k * 4 + Math.round(Math.sin(t / 6)), y - 4 - t / 2.4); }
+  };
+  clearInterval(sleepAnim); draw(); sleepAnim = window.setInterval(draw, 66);
   clearInterval(sleepTimer);
   const opensAt = st.opens_at; if (!opensAt) return;
   const tick = () => {
@@ -261,7 +276,7 @@ async function boot() {
   const st = await api('GET', '/status').catch(() => null);
   if (st && !st.open) return sleepPage(st); // 休息時段：不連資料庫、不開 WebSocket
   cfg = cfg ?? await api('GET', '/config');
-  try { me = await api('GET', '/me'); setWallet(me.wallet.balance); startLive(); }
+  try { me = await api('GET', '/me'); setWallet(me.wallet.balance); savePetCache(localStorage, me.pet); startLive(); }
   catch (e) {
     if (e instanceof ApiError && e.code === 'GAME_CLOSED') return goSleep();
     if (!(e instanceof ApiError && e.status === 401)) toast(errText(e)); me = null;

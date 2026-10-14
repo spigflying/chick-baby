@@ -3,6 +3,7 @@ import { PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, F
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
 import { drawShell, SHELL_COLORS } from './shell';
 import { act, api, errText } from './api';
+import { savePetCache } from './sleep';
 import type { Live } from './ws';
 import { StairsClient } from './stairs';
 import { controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
@@ -259,6 +260,7 @@ export class Device {
   setPet(p: any) {
     const prevSpecies = this.pet?.species;
     this.pet = p;
+    if (this.isOwner) savePetCache(localStorage, p); // 休息時段的畫面用
     if (p && prevSpecies && prevSpecies !== p.species) { const sc = SHELL_COLORS[p.species]; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim); }
     this.buildCells(); this.renderTop(); if (this.menu === 'status') this.renderMenu();
     const ot = this.el.querySelector('.tags [data-g="owner"]'); if (ot && this.home) ot.textContent = this.ownerAway ? '主人外出中' : this.pet?.name ?? this.home.owner.display_name;
