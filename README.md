@@ -7,7 +7,7 @@
 
 ## 多人版（M1，開發中）
 
-規格：[`docs/requirements.md`](docs/requirements.md) v1.1。根目錄的 `index.html / script.js / style.css` 是單機原型（GitHub Pages），多人版放在 pnpm monorepo：
+規格：[`docs/requirements.md`](docs/requirements.md) v1.2（平日 09:00–20:00 開放，其他時間「夜間睡覺」、時間凍結）。根目錄的 `index.html / script.js / style.css` 是單機原型（GitHub Pages），多人版放在 pnpm monorepo：
 
 | 路徑 | 內容 |
 |---|---|
@@ -25,6 +25,7 @@ pnpm dev                        # server :8080 + web :5173（Vite 代理 /api、
 ```
 
 打開 http://localhost:5173 ，用「開發用登入」輸入任意名字（`dev-admin` 為管理員）。
+本機預設永遠開放；在 `apps/server/.env` 設 `OPEN_HOURS=mon-fri 09:00-20:00 Asia/Taipei` 可以試開放時間與睡覺畫面。
 要測 Google 登入：在 `.env` 填 `GOOGLE_CLIENT_ID`，並把 `http://localhost:5173` 加到 OAuth 用戶端的 JavaScript origins。
 
 ```bash
