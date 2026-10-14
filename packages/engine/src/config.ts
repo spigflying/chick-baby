@@ -6,6 +6,8 @@ export const GAME = {
   startCoins: 20,
   decay: { hunger: 0.8, happiness: 0.6, energy: 0.5, cleanliness: 0.4 },
   sleepEnergyGain: 2,
+  /** 每次開門（休息 → 開放）時精力設成這個值；null = 不補（requirements §4.7 早安）。 */
+  morningEnergy: 100 as number | null,
   poop: { minHunger: 70, chancePerMin: 0.02, afterFeedChance: 0.3, minIntervalMs: 10 * 60_000, max: 3, cleanPerPoopPerMin: 0.3 },
   sick: { dirtyBelow: 25, dirtyForMs: 30 * 60_000, chancePerMin: 0.05, hungryBelow: 15 },
   health: { lowBelow: 20, perLowPerMin: -0.6, sickPerMin: -0.8, recoverPerMin: 0.3 },

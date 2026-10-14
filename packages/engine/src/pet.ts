@@ -2,6 +2,7 @@ import { GAME, type GameConfig } from './config';
 import { FOOD_BY_ID, type Food } from './foods';
 import { SPECIES, type SpeciesId } from './species';
 import { nextFloat, type Rng } from './rng';
+import { ALWAYS_OPEN, type Clock } from './hours';
 
 export type PetStatus = 'egg' | 'alive' | 'dead';
 export type Personality = '溫和' | '貪吃' | '活潑' | '懶散' | '勇敢' | '機靈';
@@ -50,54 +51,71 @@ export function updatePersonality(p: PetState) {
   p.personality = r;
 }
 
-function tryPoop(p: PetState, at: number, chance: number, rng: Rng, cfg: GameConfig, events: SimEvent[]) {
+function tryPoop(p: PetState, at: number, chance: number, rng: Rng, cfg: GameConfig, events: SimEvent[], clock: Clock) {
   if (p.hunger < cfg.poop.minHunger || p.poop >= cfg.poop.max) return;
-  if (p.lastPoopAt !== null && at - p.lastPoopAt < cfg.poop.minIntervalMs) return;
+  if (p.lastPoopAt !== null && clock.elapsed(p.lastPoopAt, at) < cfg.poop.minIntervalMs) return;
   if (nextFloat(rng) < chance) { p.poop++; p.lastPoopAt = at; events.push({ type: 'poop', at }); }
+}
+
+/** 早安：開門時自動醒來、精力回到 cfg.morningEnergy。 */
+function morning(p: PetState, at: number, cfg: GameConfig, events: SimEvent[]) {
+  p.sleeping = false;
+  if (cfg.morningEnergy !== null) p.energy = cfg.morningEnergy;
+  events.push({ type: 'wake', at, payload: { reason: 'morning' } });
+}
+
+/** 一個模擬步（最多 1 分鐘）：結束於 t，長度 stepMs。 */
+function step(p: PetState, t: number, stepMs: number, rng: Rng, cfg: GameConfig, events: SimEvent[], clock: Clock) {
+  const ts = cfg.timeScale, m = stepMs / MIN;
+  const sleep = p.sleeping, d = cfg.decay;
+  p.hunger = clamp(p.hunger - d.hunger * m * ts * (sleep ? 0.5 : 1));
+  p.happiness = clamp(p.happiness - d.happiness * m * ts * (sleep ? 0.3 : 1));
+  p.energy = clamp(p.energy + (sleep ? cfg.sleepEnergyGain : -d.energy) * m * ts);
+  p.cleanliness = clamp(p.cleanliness - (d.cleanliness + p.poop * cfg.poop.cleanPerPoopPerMin) * m * ts);
+  tryPoop(p, t, cfg.poop.chancePerMin * m * ts, rng, cfg, events, clock);
+  if (sleep && p.energy >= 100) { p.sleeping = false; events.push({ type: 'wake', at: t, payload: { auto: true } }); }
+  // 骯髒持續時間（只算開放時間）
+  if (p.cleanliness < cfg.sick.dirtyBelow) { if (p.dirtySince === null) p.dirtySince = t; } else p.dirtySince = null;
+  if (!p.sick) {
+    const dirtyLong = p.dirtySince !== null && clock.elapsed(p.dirtySince, t) >= cfg.sick.dirtyForMs;
+    const hungry = p.hunger < cfg.sick.hungryBelow;
+    const chance = cfg.sick.chancePerMin * m * ts;
+    if ((dirtyLong && nextFloat(rng) < chance) || (hungry && nextFloat(rng) < chance)) { p.sick = true; events.push({ type: 'sick', at: t }); }
+  }
+  const lows = [p.hunger, p.happiness, p.energy, p.cleanliness].filter((v) => v < cfg.health.lowBelow).length;
+  let dh = lows * cfg.health.perLowPerMin + (p.sick ? cfg.health.sickPerMin : 0);
+  if (!lows && !p.sick) dh = cfg.health.recoverPerMin;
+  p.health = clamp(p.health + dh * m * ts);
+  if (p.health <= 0) {
+    p.status = 'dead'; p.diedAt = t; p.sleeping = false;
+    p.deathCause = p.sick ? 'illness' : p.hunger < cfg.health.lowBelow ? 'starvation' : 'neglect';
+    events.push({ type: 'death', at: t, payload: { cause: p.deathCause } });
+  }
 }
 
 /**
  * 把寵物狀態結算到 `to`（離線衰減）。以 1 分鐘為步長；所有每分鐘的速率/機率乘 timeScale。
- * 蛋期間不衰減，到 eggSeconds 自動孵化。
+ * 只在 clock 的開放時間內計時（休息時段時間凍結）；每跨過一次開門時間就觸發早安。
+ * 蛋期間不衰減，累計 eggSeconds 開放秒數後自動孵化。
  */
-export function simulate(p: PetState, to: number, rng: Rng, cfg: GameConfig = GAME): SimEvent[] {
+export function simulate(p: PetState, to: number, rng: Rng, cfg: GameConfig = GAME, clock: Clock = ALWAYS_OPEN): SimEvent[] {
   const events: SimEvent[] = [];
   if (p.status === 'dead' || to <= p.lastSimulatedAt) return events;
   if (p.status === 'egg') {
-    const hatchAt = p.bornAt + cfg.eggSeconds * 1000;
+    const hatchAt = clock.addOpen(p.bornAt, cfg.eggSeconds * 1000);
     if (to < hatchAt) { p.lastSimulatedAt = to; return events; }
     p.status = 'alive'; p.hatchedAt = hatchAt; p.lastSimulatedAt = Math.max(p.lastSimulatedAt, hatchAt);
     events.push({ type: 'hatch', at: hatchAt });
   }
-  const ts = cfg.timeScale;
-  let t = p.lastSimulatedAt;
-  while (t < to && p.status === 'alive') {
-    const stepMs = Math.min(MIN, to - t); const m = stepMs / MIN; t += stepMs;
-    const sleep = p.sleeping, d = cfg.decay;
-    p.hunger = clamp(p.hunger - d.hunger * m * ts * (sleep ? 0.5 : 1));
-    p.happiness = clamp(p.happiness - d.happiness * m * ts * (sleep ? 0.3 : 1));
-    p.energy = clamp(p.energy + (sleep ? cfg.sleepEnergyGain : -d.energy) * m * ts);
-    p.cleanliness = clamp(p.cleanliness - (d.cleanliness + p.poop * cfg.poop.cleanPerPoopPerMin) * m * ts);
-    tryPoop(p, t, cfg.poop.chancePerMin * m * ts, rng, cfg, events);
-    if (sleep && p.energy >= 100) { p.sleeping = false; events.push({ type: 'wake', at: t, payload: { auto: true } }); }
-    // 骯髒持續時間
-    if (p.cleanliness < cfg.sick.dirtyBelow) { if (p.dirtySince === null) p.dirtySince = t; } else p.dirtySince = null;
-    if (!p.sick) {
-      const dirtyLong = p.dirtySince !== null && t - p.dirtySince >= cfg.sick.dirtyForMs;
-      const hungry = p.hunger < cfg.sick.hungryBelow;
-      const chance = cfg.sick.chancePerMin * m * ts;
-      if ((dirtyLong && nextFloat(rng) < chance) || (hungry && nextFloat(rng) < chance)) { p.sick = true; events.push({ type: 'sick', at: t }); }
-    }
-    const lows = [p.hunger, p.happiness, p.energy, p.cleanliness].filter((v) => v < cfg.health.lowBelow).length;
-    let dh = lows * cfg.health.perLowPerMin + (p.sick ? cfg.health.sickPerMin : 0);
-    if (!lows && !p.sick) dh = cfg.health.recoverPerMin;
-    p.health = clamp(p.health + dh * m * ts);
-    if (p.health <= 0) {
-      p.status = 'dead'; p.diedAt = t; p.sleeping = false;
-      p.deathCause = p.sick ? 'illness' : p.hunger < cfg.health.lowBelow ? 'starvation' : 'neglect';
-      events.push({ type: 'death', at: t, payload: { cause: p.deathCause } });
-    }
+  const from = p.lastSimulatedAt;
+  const openings = clock.openingsIn(from, to);
+  let oi = 0;
+  for (const [a, b] of clock.segments(from, to)) {
+    while (oi < openings.length && openings[oi] <= a) { if (p.status === 'alive') morning(p, openings[oi], cfg, events); oi++; }
+    let t = a;
+    while (t < b && p.status === 'alive') { const stepMs = Math.min(MIN, b - t); t += stepMs; step(p, t, stepMs, rng, cfg, events, clock); }
   }
+  for (; oi < openings.length; oi++) if (p.status === 'alive') morning(p, openings[oi], cfg, events);
   p.lastSimulatedAt = to;
   return events;
 }
@@ -120,12 +138,12 @@ export function checkFeed(p: PetState, food: Food | undefined, ctx: FeedContext,
   return null;
 }
 /** 套用食物效果（v1.1：不降低清潔）。 */
-export function applyFood(p: PetState, food: Food, at: number, rng: Rng, cfg: GameConfig = GAME): SimEvent[] {
+export function applyFood(p: PetState, food: Food, at: number, rng: Rng, cfg: GameConfig = GAME, clock: Clock = ALWAYS_OPEN): SimEvent[] {
   const events: SimEvent[] = [];
   p.hunger = clamp(p.hunger + food.hunger); p.happiness = clamp(p.happiness + food.happiness); p.health = clamp(p.health + food.health);
   grow(p, 'weight', food.weight); grow(p, 'strength', food.strength); grow(p, 'speed', food.speed); grow(p, 'stamina', food.stamina);
   p.counters.feeds++; if (food.snack) p.counters.snacks++;
-  tryPoop(p, at, cfg.poop.afterFeedChance, rng, cfg, events);
+  tryPoop(p, at, cfg.poop.afterFeedChance, rng, cfg, events, clock);
   updatePersonality(p);
   return events;
 }
