@@ -5,6 +5,7 @@ import { Device } from './device';
 import { drawShell } from './shell';
 import { spriteCanvas, speciesSprite, SPECIES_LABEL } from './sprites';
 import { watchIdle } from './idle';
+import { formatCountdown, formatOpensAt } from './sleep';
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -13,6 +14,7 @@ const app = $('#app');
 let cfg: any; let me: any = null; let live: Live | null = null; let device: Device | null = null; let presence: any[] = [];
 let wallet = 0;
 let idleOff: (() => void) | null = null;
+let sleepTimer = 0;
 
 function toast(t: string) { const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.append(d); setTimeout(() => d.remove(), 2600); }
 function nav(path: string, replace = false) { if (replace) history.replaceState(null, '', path); else history.pushState(null, '', path); void route(); }
@@ -190,6 +192,29 @@ async function adminPage() {
   document.querySelectorAll<HTMLElement>('[data-u]').forEach((b) => b.onclick = () => void showPets(b.dataset.u!, b.dataset.n!));
 }
 
+// ---------- 休息時段（requirements §4.7）----------
+function sleepPage(st: { opens_at: number | null; server_time?: number }) {
+  live?.stop(); live = null; idleOff?.(); idleOff = null; device?.destroy(); device = null;
+  $('#bar').hidden = true;
+  const skew = st.server_time ? st.server_time - Date.now() : 0; // 伺服器時間 − 本地時間
+  app.innerHTML = `<main class="page"><div class="device" id="sleepDev"><canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div>
+    <div class="lcd"><div class="lcd-top"><span>💤</span><span>休息中</span></div><div class="scr" style="display:flex;justify-content:center;gap:8%;padding:12% 0;background:var(--g3)" id="sleepPets"></div>
+    <p class="msg">小雞睡覺中 💤 平日 09:00–20:00 開放</p></div></div></div>
+    <div class="panel"><h2>小雞睡覺中</h2><p>${st.opens_at ? `下次開放：<b>${esc(formatOpensAt(st.opens_at))}</b>` : '目前沒有排定的開放時間'}</p>
+    <p id="countdown" style="font-size:1.6em"></p><p class="muted">休息時段時間是暫停的：寵物不會餓、不會生病。</p></div></main>`;
+  drawShell(document.querySelector('#sleepDev canvas.shell') as HTMLCanvasElement);
+  for (const s of ['chicken', 'duck', 'penguin', 'dino']) { const c = spriteCanvas(speciesSprite(s, 's'), 1); c.style.height = '34%'; c.style.minHeight = '28px'; c.title = SPECIES_LABEL[s]; $('#sleepPets').append(c); }
+  clearInterval(sleepTimer);
+  const opensAt = st.opens_at; if (!opensAt) return;
+  const tick = () => {
+    const left = opensAt - (Date.now() + skew);
+    const el = document.getElementById('countdown'); if (el) el.textContent = formatCountdown(left);
+    if (left <= 0) { clearInterval(sleepTimer); setTimeout(() => location.reload(), Math.random() * 20_000); } // 分散重新整理，避免同時湧入
+  };
+  tick(); sleepTimer = window.setInterval(tick, 1000);
+}
+async function goSleep() { try { sleepPage(await api('GET', '/status')); } catch { sleepPage({ opens_at: null }); } }
+
 // ---------- 路由 ----------
 async function route() {
   if (!me) return loginPage();
@@ -210,6 +235,7 @@ function startLive() {
   live = new Live();
   live.onStatus = (s) => {
     if (s === 'unauthorized') { me = null; void route(); }
+    else if (s === 'closed') void goSleep();
     else if (s === 'paused') toast('閒置中，已暫停連線；回來點一下畫面就會繼續');
   };
   live.on((m) => {
@@ -217,14 +243,20 @@ function startLive() {
     else if (m.type === 'home.state' && device?.home && m.home.id === device.home.id) device.setHome(m);
     else if (m.type === 'home.kicked' && device?.home?.id === m.home_id) { toast('主人變更了存取設定，你被請出去了'); nav('/'); }
     else if (m.type === 'wallet.updated') setWallet(m.balance);
+    else if (m.type === 'game.closing') toast('小雞 5 分鐘後要睡覺囉～');
   });
   live.start();
   idleOff?.(); idleOff = watchIdle(live);
 }
 async function boot() {
+  const st = await api('GET', '/status').catch(() => null);
+  if (st && !st.open) return sleepPage(st); // 休息時段：不連資料庫、不開 WebSocket
   cfg = cfg ?? await api('GET', '/config');
   try { me = await api('GET', '/me'); setWallet(me.wallet.balance); startLive(); }
-  catch (e) { if (!(e instanceof ApiError && e.status === 401)) toast(errText(e)); me = null; }
+  catch (e) {
+    if (e instanceof ApiError && e.code === 'GAME_CLOSED') return goSleep();
+    if (!(e instanceof ApiError && e.status === 401)) toast(errText(e)); me = null;
+  }
   await route();
 }
 void boot();

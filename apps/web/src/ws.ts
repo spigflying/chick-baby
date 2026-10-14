@@ -12,7 +12,7 @@ export class Live {
   private samples: { rtt: number; off: number }[] = [];
   private stopped = false;
   private timer: number | undefined;
-  onStatus: (s: 'online' | 'offline' | 'unauthorized' | 'paused') => void = () => {};
+  onStatus: (s: 'online' | 'offline' | 'unauthorized' | 'paused' | 'closed', info?: { opens_at: number | null }) => void = () => {};
   private paused = false;
   static PROACTIVE_MS = 50 * 60_000;
 
@@ -57,6 +57,7 @@ export class Live {
       } else if (m.type === 'time.pong') this.pong(m);
       else if (m.type === 'server.draining') { setTimeout(() => { if (this.ws === ws) this.reconnect('draining'); }, Math.random() * 500); }
       else if (m.type === 'error' && m.code === 'UNAUTHORIZED') { this.stopped = true; this.onStatus('unauthorized'); }
+      else if (m.type === 'game.closed' || (m.type === 'error' && m.code === 'GAME_CLOSED')) { this.stopped = true; this.onStatus('closed', { opens_at: m.opens_at ?? null }); } // 休息時段：不自動重連
       for (const h of this.handlers) h(m);
     };
     ws.onclose = () => {

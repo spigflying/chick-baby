@@ -26,5 +26,6 @@ export const ERR: Record<string, string> = {
   FORBIDDEN: '沒有權限（可能被拒絕進入）', NOT_FOUND: '找不到', RATE_LIMITED: '太快了，休息一下', ALREADY_HAS_PET: '已經有寵物了', ALREADY_IN_MATCH: '已經在遊戲中',
   UNAUTHORIZED: '請先登入', BAD_REQUEST: '輸入有誤', IDEMPOTENCY_CONFLICT: '重複的請求', INTERNAL: '伺服器出錯了', NO_PET: '還沒有寵物',
   OWNER_HAS_LIVING_PET: '主人已經有活著的寵物', NOT_DEAD: '牠還活著',
+  GAME_CLOSED: '小雞睡覺中，平日 09:00–20:00 開放', GAME_CLOSING: '快關門了，不能開新的一局', DB_UNAVAILABLE: '伺服器暖機中，請稍後再試',
 };
 export const errText = (e: unknown) => e instanceof ApiError ? (ERR[e.code] ?? e.message ?? e.code) : String((e as any)?.message ?? e);
