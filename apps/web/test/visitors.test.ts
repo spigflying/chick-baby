@@ -49,3 +49,11 @@ describe('poop layout handles rose tea (23 max)', () => {
     expect(new Set(ps.map((p) => `${p.x},${p.y}`)).size).toBe(23);
   });
 });
+
+describe('owner away label (v1.4)', () => {
+  it('device module exposes ownerAway handling via setPresence', async () => {
+    const src = (await import('node:fs')).readFileSync(new URL('../src/device.ts', import.meta.url), 'utf8');
+    expect(src).toContain("'主人外出中'");
+    expect(src).toMatch(/this\.ownerAway = ownerAway && !this\.isOwner/);
+  });
+});

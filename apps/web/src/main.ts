@@ -244,7 +244,7 @@ function startLive() {
   live.on((m) => {
     if (m.type === 'home.presence' && device?.home && m.home_id === device.home.id) {
       const d = presenceDiff(presenceSeen ? presence : null, m.users, me.user.id);
-      presence = m.users; presenceSeen = true; renderPresence(); device.setPresence(m.users);
+      presence = m.users; presenceSeen = true; renderPresence(); device.setPresence(m.users, !!m.owner_away);
       const msg = [...d.joined.map((n) => `${n} 來了`), ...d.left.map((n) => `${n} 離開了`)].join('、');
       if (msg) toast(msg);
       if (d.joined.length || d.left.length) blip(d.joined.length > 0);

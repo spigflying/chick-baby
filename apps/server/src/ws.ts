@@ -5,7 +5,7 @@ import { COOKIE, sessionUser } from './auth';
 import { env } from './env';
 import { AppError } from './errors';
 import { canEnter, currentPet, feed, getHome, ownerAction, viewHome } from './game';
-import { PresenceStore, petSummary } from './presence';
+import { PresenceStore, petSummary, PRESENCE_REFRESH_MS, type PresenceUser } from './presence';
 import { initArena, onArenaBus, onPresenceChange } from './arena';
 import { rateLimit } from './core';
 import { createSolo, currentTick, finish, handleInput, matches, type Match } from './stairs';
@@ -16,7 +16,7 @@ import { phaseAt } from '@chick/engine';
 import { clock } from './hours';
 import type { DbGate } from './gate';
 
-interface Conn { id: number; ws: WebSocket; user: { id: string; display_name: string; avatar_url: string | null }; homeId: string | null; connectedAt: number; match: Match | null; ip: string; ua: string }
+interface Conn { presenceUser?: PresenceUser; id: number; ws: WebSocket; user: { id: string; display_name: string; avatar_url: string | null }; homeId: string | null; connectedAt: number; match: Match | null; ip: string; ua: string }
 const conns = new Set<Conn>();
 // 在場名單：home → (instance:conn) → user；透過 NOTIFY 在所有執行個體間同步
 const presence = new PresenceStore();
@@ -26,7 +26,15 @@ function send(c: Conn, msg: unknown) { if (c.ws.readyState === 1) c.ws.send(JSON
 function inHome(homeId: string) { return [...conns].filter((c) => c.homeId === homeId); }
 function broadcastPresence(homeId: string) {
   const users = presence.users(homeId);
-  for (const c of inHome(homeId)) send(c, { type: 'home.presence', home_id: homeId, users });
+  // v1.4：主人在別人家（而且沒有分頁在自己家）→ 寵物跟著主人外出，自己家顯示「主人外出中」（不透露在誰家）
+  const owner_away = presence.ownerAway(homeId);
+  for (const c of inHome(homeId)) send(c, { type: 'home.presence', home_id: homeId, users, owner_away });
+}
+/** 某人的位置變了：除了那個家，也重送他自己家的狀態（外出中／回來了）。 */
+function presenceChanged(homes: string[], userIds: string[]) {
+  const all = new Set(homes);
+  for (const u of userIds) { const h = presence.homeOf(u); if (h) all.add(h); }
+  for (const h of all) { broadcastPresence(h); onPresenceChange(h); }
 }
 
 export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
@@ -47,7 +55,9 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
         const pub = publicPet(row, rowToState(row));
         for (const c of targets) send(c, { type: 'pet.updated', home_id: m.home, pet: pub, event: m.ev ?? null });
         // 這隻寵物的主人正在拜訪別人家：同步更新那些家的在場寵物（每個執行個體都收到同一則 NOTIFY，結果一致）
-        if (visiting) for (const h of presence.updatePet(m.pet, petSummary(pub))) { broadcastPresence(h); onPresenceChange(h); }
+        const sum = petSummary(pub);
+        for (const c of conns) if (c.presenceUser && c.presenceUser.pet?.id === m.pet) c.presenceUser = { ...c.presenceUser, pet: sum }; // 心跳也帶最新的寵物
+        if (visiting) for (const h of presence.updatePet(m.pet, sum)) { broadcastPresence(h); onPresenceChange(h); }
       } else if (m.t === 'wallet') {
         const targets = [...conns].filter((c) => c.user.id === m.user); if (!targets.length) return;
         const w = await db.selectFrom('wallets').select('balance').where('user_id', '=', m.user).executeTakeFirst();
@@ -56,18 +66,32 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
         const home = await getHome(db, m.home); if (!home) return;
         for (const c of inHome(m.home)) if (!(await canEnter(db, home, c.user.id))) { leaveHome(c); send(c, { type: 'home.kicked', home_id: m.home }); }
       } else if (m.t === 'presence') {
-        presence.set(m.home, m.key, m.on ? m.user : null);
-        broadcastPresence(m.home);
-        onPresenceChange(m.home);
+        if (m.owner) presence.setOwner(m.home, m.owner);
+        const uid = m.user?.id ?? m.uid;
+        if (m.refresh) { if (presence.touch(m.home, m.key, m.user)) presenceChanged([m.home], [uid]); }
+        else { presence.set(m.home, m.key, m.on ? m.user : null); presenceChanged([m.home], uid ? [uid] : []); }
       }
     } catch (e) { app.log.error(e); }
   });
 
   function leaveHome(c: Conn) {
     if (!c.homeId) return;
-    const home = c.homeId; c.homeId = null;
-    void bus.publish({ t: 'presence', home, key: `${env.instanceId}:${c.id}`, on: false });
+    const home = c.homeId; c.homeId = null; c.presenceUser = undefined;
+    void bus.publish({ t: 'presence', home, key: `${env.instanceId}:${c.id}`, on: false, uid: c.user.id });
   }
+
+  // 在場心跳：每 30 秒重送自己這個執行個體的連線（新啟動的執行個體因此也會知道）；
+  // 75 秒沒刷新的連線視為已離開（執行個體當掉或 SIGTERM 時 NOTIFY 沒送出）。
+  const hb = setInterval(() => {
+    for (const c of conns) if (c.homeId && c.presenceUser) {
+      const home = presence.ownerOf(c.homeId);
+      void bus.publish({ t: 'presence', home: c.homeId, owner: home ?? undefined, key: `${env.instanceId}:${c.id}`, on: true, refresh: true, user: c.presenceUser }).catch(() => {});
+    }
+  }, PRESENCE_REFRESH_MS);
+  hb.unref();
+  const sweep = setInterval(() => { const hit = presence.sweep(); if (hit.length) presenceChanged([...hit, ...new Set([...conns].map((c) => c.homeId).filter((h): h is string => !!h))], []); }, 15_000);
+  sweep.unref();
+  app.addHook('onClose', async () => { clearInterval(hb); clearInterval(sweep); });
 
   app.get('/ws', { websocket: true }, async (socket, req) => {
     const now = Date.now();
@@ -98,7 +122,9 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             leaveHome(c); c.homeId = view.home.id;
             send(c, { type: 'home.state', ...view });
             const pet = petSummary(view.home.is_owner ? view.pet : await currentPet(db, c.user.id));
-            await bus.publish({ t: 'presence', home: c.homeId, key: `${env.instanceId}:${c.id}`, on: true, user: { ...c.user, pet } });
+            presence.setOwner(view.home.id, view.home.owner.id);
+            c.presenceUser = { ...c.user, pet };
+            await bus.publish({ t: 'presence', home: c.homeId, owner: view.home.owner.id, key: `${env.instanceId}:${c.id}`, on: true, user: c.presenceUser });
             break;
           }
           case 'home.leave': leaveHome(c); break;

@@ -102,15 +102,18 @@ export class Device {
   }
 
   /** v1.3：在場者的寵物同框。 */
-  setPresence(users: PresenceUser[]) {
+  ownerAway = false;
+  setPresence(users: PresenceUser[], ownerAway = false) {
     if (!this.home) return;
+    // v1.4：主人在別人家 → 寵物跟著出門；自己家只顯示「主人外出中」（自己看自己家不會發生）
+    this.ownerAway = ownerAway && !this.isOwner;
     const g = guestsOf(users, this.home.owner.id);
     this.guests = g.shown; this.guestExtra = g.extra;
     this.myPresence = users.find((u) => u.id === this.ctx.me.id) ?? null;
     this.ensureJoined();
     const tags = this.$('.tags');
     // 名牌：寵物用主人取的寵物名；滑過顯示主人的暱稱（使用者自訂的 display_name，不是 Google 名稱）
-    tags.innerHTML = `<span class="tag own" data-g="owner" title="${esc(this.home.owner.display_name)}">${esc(this.pet?.name ?? this.home.owner.display_name)}</span>`
+    tags.innerHTML = `<span class="tag own" data-g="owner" title="${esc(this.home.owner.display_name)}">${this.ownerAway ? '主人外出中' : esc(this.pet?.name ?? this.home.owner.display_name)}</span>`
       + this.guests.map((u, i) => `<span class="tag" data-g="${i}" title="${esc(u.display_name)}">${u.pet ? esc(u.pet.name) + (u.pet.status === 'dead' ? '†' : '') : esc(u.display_name) + '·沒寵物'}</span>`).join('')
       + (this.guestExtra ? `<span class="tag more">+${this.guestExtra}</span>` : '');
   }
@@ -174,7 +177,7 @@ export class Device {
     this.pet = p;
     if (p && prevSpecies && prevSpecies !== p.species) { const sc = SHELL_COLORS[p.species]; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim); }
     this.buildCells(); this.renderTop(); if (this.menu === 'status') this.renderMenu();
-    const ot = this.el.querySelector('.tags [data-g="owner"]'); if (ot && this.home) ot.textContent = this.pet?.name ?? this.home.owner.display_name;
+    const ot = this.el.querySelector('.tags [data-g="owner"]'); if (ot && this.home) ot.textContent = this.ownerAway ? '主人外出中' : this.pet?.name ?? this.home.owner.display_name;
   }
 
   // ---------- 圖示列 ----------
@@ -313,6 +316,7 @@ export class Device {
     if (p.status === 'egg') return this.say('蛋蛋還在孵化中…');
     if (p.status === 'dead') return this.say(`${p.name} 去當小天使了…`);
     if (this.anim) return this.say(this.anim.type === 'clean' ? '正在洗澎澎，等一下～' : '正在吃東西，等一下～');
+    if (a === 'feed' && this.ownerAway) return this.say('主人帶寵物出門了，等牠回來再餵吧');
     if (a === 'feed') { if (p.sleeping) return this.say('噓…牠在睡覺，先叫醒牠吧。'); return this.openMenu('feed'); }
     if (a === 'play') return this.startStairs();
     void this.ownerAction(a);
@@ -484,6 +488,12 @@ export class Device {
     g.fillStyle = PAL[3]; g.fillRect(0, HUD - 1, W, 1);
     g.fillStyle = PAL[1]; g.fillRect(0, GROUND, W, 1);
     for (let i = 0; i < W; i += 6) g.fillRect(i, GROUND + 2 + ((i / 6) % 2), 2, 1);
+    if (this.ownerAway && p && p.status !== 'dead') {
+      if (this.anim) this.finishAnim();
+      for (let i = 0; i < p.poop; i++) { const q = poopXY(i); spr(g, 'poop', q.x, q.y); }
+      this.drawOwnerTag(cx, GROUND - 6);
+      return;
+    }
     if (!p) { spr(g, 'egg', cx - 6, GROUND - 12); g.fillStyle = PAL[0]; g.fillRect(cx - 3, GROUND - 9, 6, 5); spr(g, 'z', cx + 8, GROUND - 22 - f * 2); this.drawOwnerTag(cx, GROUND - 12); return; }
     if (p.status === 'dead') { spr(g, 'ghost', cx - 5, HUD + 22 + (f ? 0 : 2)); spr(g, 'tomb', cx - 4, GROUND - 8); this.drawOwnerTag(cx, HUD + 22); return; }
     if (p.status === 'egg') {

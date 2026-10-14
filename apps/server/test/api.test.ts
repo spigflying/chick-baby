@@ -518,3 +518,39 @@ describe('names (v1.4)', () => {
     expect((await again.call('GET', '/api/me')).json.user.display_name).toBe('班森');
   });
 });
+
+describe('pet follows its owner (v1.4)', () => {
+  async function openWs(c: Client) {
+    const msgs: any[] = [];
+    const ws = await app.injectWS('/ws', { headers: { cookie: c.cookie }, socket: { remoteAddress: '127.0.0.1' } } as any, { onInit: (s) => s.on('message', (d) => msgs.push(JSON.parse(String(d)))) });
+    const wait = async (pred: (m: any) => boolean, what = '') => {
+      for (let i = 0; i < 150; i++) { const m = [...msgs].reverse().find(pred); if (m) return m; await new Promise((r) => setTimeout(r, 20)); }
+      throw new Error('timeout ' + what + ': ' + JSON.stringify(msgs.slice(-4)));
+    };
+    await wait((m) => m.type === 'hello');
+    return { ws, msgs, wait, send: (m: any) => ws.send(JSON.stringify(m)) };
+  }
+  it('A visiting B: A is not in their own home and it shows owner_away; returning flips it back live', async () => {
+    const a = await login('A'), b = await login('B'), c = await login('C');
+    await hatchAlive(a); await hatchAlive(b);
+    const homeA = (await a.call('GET', '/api/me')).json.home.id, homeB = (await b.call('GET', '/api/me')).json.home.id;
+    const wa = await openWs(a), wc = await openWs(c);
+    wc.send({ type: 'home.join', home_id: homeA });
+    await wc.wait((m) => m.type === 'home.presence' && m.home_id === homeA && m.owner_away === false, 'offline owner = at home');
+    wa.send({ type: 'home.join', home_id: homeB });
+    const away = await wc.wait((m) => m.type === 'home.presence' && m.home_id === homeA && m.owner_away === true, 'away');
+    expect(away.users.map((u: any) => u.id)).toEqual([c.id]);
+    // 第二個分頁回到自己家 → 不算外出
+    const wa2 = await openWs(a);
+    wa2.send({ type: 'home.join', home_id: homeA });
+    const back = await wc.wait((m) => m.type === 'home.presence' && m.home_id === homeA && m.owner_away === false && m.users.some((u: any) => u.id === a.id), 'back');
+    expect(back.users.map((u: any) => u.id).sort()).toEqual([a.id, c.id].sort());
+    wa2.ws.terminate();
+    await wc.wait((m) => m.type === 'home.presence' && m.home_id === homeA && m.owner_away === true && !m.users.some((u: any) => u.id === a.id), 'away again');
+    const mark = wc.msgs.length;
+    wa.ws.terminate(); // 離線 → 寵物在家
+    await wc.wait((m) => wc.msgs.indexOf(m) >= mark && m.type === 'home.presence' && m.home_id === homeA && m.owner_away === false, 'offline');
+    wc.ws.terminate();
+    await new Promise((r) => setTimeout(r, 300));
+  });
+});

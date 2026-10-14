@@ -5,7 +5,7 @@ export const GAME = {
   eggSeconds: 60,
   startCoins: 20,
   decay: { hunger: 0.8, happiness: 0.6, energy: 0.5, cleanliness: 0.4 },
-  sleepEnergyGain: 2,
+  sleepEnergyGain: 120, // v1.4：× timeScale(1/12) = 每實際分鐘 +10，0 → 100 約 10 分鐘
   /** 每次開門（休息 → 開放）時精力設成這個值；null = 不補（requirements §4.7 早安）。 */
   morningEnergy: 100 as number | null,
   poop: { afterFeedChance: 0.7, max: 3, cleanPerPoopPerMin: 0.3 },

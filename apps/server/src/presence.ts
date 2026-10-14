@@ -11,25 +11,68 @@ export function petSummary(p: PublicPet | null | undefined): PetSummary | null {
 }
 
 /** 依連線鍵（instance:conn）存放；同一使用者多個分頁只算一次，以最新加入的為準，並依加入順序排列。 */
+export const PRESENCE_TTL_MS = 75_000;
+export const PRESENCE_REFRESH_MS = 30_000;
+type Entry = { user: PresenceUser; at: number };
 export class PresenceStore {
-  private homes = new Map<string, Map<string, PresenceUser>>();
-  set(home: string, key: string, user: PresenceUser | null) {
+  private homes = new Map<string, Map<string, Entry>>();
+  private owners = new Map<string, string>(); // home → owner user id（不會變）
+  setOwner(home: string, owner: string) { this.owners.set(home, owner); }
+  ownerOf(home: string) { return this.owners.get(home) ?? null; }
+  set(home: string, key: string, user: PresenceUser | null, now = Date.now()) {
     let m = this.homes.get(home);
     if (!m) this.homes.set(home, (m = new Map()));
+    const had = m.get(key);
     m.delete(key);
-    if (user) m.set(key, user); else if (!m.size) this.homes.delete(home);
+    // 心跳刷新同一條連線時保留原本的加入順序
+    if (user) m.set(key, { user, at: now }); else if (!m.size) this.homes.delete(home);
+    void had;
+  }
+  /** 心跳：只更新時間（加入順序不變）；不存在就新增。 */
+  touch(home: string, key: string, user: PresenceUser, now = Date.now()) {
+    const m = this.homes.get(home); const e = m?.get(key);
+    if (e) { e.at = now; e.user = { ...user, pet: e.user.pet ?? user.pet }; return false; }
+    this.set(home, key, user, now); return true;
+  }
+  /** 清掉太久沒刷新的連線（執行個體當掉、SIGTERM 沒送出離開等）；回傳受影響的家。 */
+  sweep(now = Date.now(), ttl = PRESENCE_TTL_MS): string[] {
+    const hit: string[] = [];
+    for (const [home, m] of this.homes) {
+      let ch = false;
+      for (const [k, e] of m) if (now - e.at > ttl) { m.delete(k); ch = true; }
+      if (!m.size) this.homes.delete(home);
+      if (ch) hit.push(home);
+    }
+    return hit;
   }
   users(home: string): PresenceUser[] {
     const out = new Map<string, PresenceUser>();
-    for (const u of this.homes.get(home)?.values() ?? []) { out.delete(u.id); out.set(u.id, u); }
+    for (const { user: u } of this.homes.get(home)?.values() ?? []) { out.delete(u.id); out.set(u.id, u); }
     return [...out.values()];
   }
+  /** 使用者目前在哪些家（多個分頁可能在不同家）。 */
+  whereIs(userId: string): string[] {
+    const out: string[] = [];
+    for (const [home, m] of this.homes) for (const e of m.values()) if (e.user.id === userId) { out.push(home); break; }
+    return out;
+  }
+  /**
+   * 主人外出中：主人正在別人家、而且沒有任何分頁在自己家。
+   * 主人在自己家或離線 → 寵物在家（照常顯示）。
+   */
+  ownerAway(home: string): boolean {
+    const owner = this.ownerOf(home); if (!owner) return false;
+    const at = this.whereIs(owner);
+    return at.length > 0 && !at.includes(home);
+  }
+  /** 這個使用者自己的家（如果這個執行個體知道）。 */
+  homeOf(userId: string): string | null { for (const [h, o] of this.owners) if (o === userId) return h; return null; }
   /** 寵物狀態變了：更新所有家裡帶著這隻寵物的人；回傳受影響的家。 */
   updatePet(petId: string, pet: PetSummary | null): string[] {
     const hit: string[] = [];
     for (const [home, m] of this.homes) {
       let changed = false;
-      for (const [k, u] of m) if (u.pet?.id === petId) { m.set(k, { ...u, pet }); changed = true; }
+      for (const e of m.values()) if (e.user.pet?.id === petId) { e.user = { ...e.user, pet }; changed = true; }
       if (changed) hit.push(home);
     }
     return hit;
@@ -37,5 +80,5 @@ export class PresenceStore {
   /** 這個家目前有連線的執行個體（排序後）；對戰由最小的那個執行個體負責模擬。 */
   instances(home: string): string[] { return [...new Set([...(this.homes.get(home)?.keys() ?? [])].map((k) => k.slice(0, k.lastIndexOf(':'))))].sort(); }
   homesList() { return [...this.homes.keys()]; }
-  hasPet(petId: string) { for (const m of this.homes.values()) for (const u of m.values()) if (u.pet?.id === petId) return true; return false; }
+  hasPet(petId: string) { for (const m of this.homes.values()) for (const e of m.values()) if (e.user.pet?.id === petId) return true; return false; }
 }

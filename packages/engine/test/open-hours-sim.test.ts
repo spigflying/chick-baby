@@ -34,7 +34,7 @@ describe('simulate with open hours', () => {
     expect(q.status).toBe('dead');
   });
   it('morning: wakes up with full energy once per opening', () => {
-    const p = alivePet(tpe('2026-10-12T19:50:00'), { energy: 30, sleeping: true });
+    const p = alivePet(tpe('2026-10-12T19:58:00'), { energy: 30, sleeping: true }); // v1.4：睡 2 分鐘 +20，不會先睡飽自己醒
     const ev = simulate(p, tpe('2026-10-13T09:05:00'), createRng(4), GAME, clock);
     expect(p.sleeping).toBe(false);
     expect(p.energy).toBeCloseTo(100 - 0.5 * 5 * GAME.timeScale, 6);
@@ -54,10 +54,10 @@ describe('simulate with open hours', () => {
     expect(ev1.some((e) => e.type === 'wake')).toBe(true);
   });
   it('morningEnergy null keeps energy but still wakes', () => {
-    const p = alivePet(tpe('2026-10-12T19:50:00'), { energy: 30, sleeping: true });
+    const p = alivePet(tpe('2026-10-12T19:58:00'), { energy: 30, sleeping: true });
     simulate(p, tpe('2026-10-13T09:00:00'), createRng(7), { ...GAME, morningEnergy: null }, clock);
     expect(p.sleeping).toBe(false);
-    expect(p.energy).toBeCloseTo(30 + 2 * 10 * GAME.timeScale, 6);
+    expect(p.energy).toBeCloseTo(30 + GAME.sleepEnergyGain * 2 * GAME.timeScale, 6);
   });
   it('egg hatches after 60 open seconds, across the night', () => {
     const p = newPet('duck', tpe('2026-10-12T19:59:30'));

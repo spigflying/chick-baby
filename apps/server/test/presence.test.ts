@@ -28,3 +28,27 @@ describe('PresenceStore', () => {
     expect(petSummary(null)).toBeNull();
   });
 });
+
+describe('owner away (v1.4)', () => {
+  it('owner visiting elsewhere is away; at home in any tab or offline is not', () => {
+    const s = new PresenceStore();
+    s.setOwner('hA', 'A'); s.setOwner('hB', 'B');
+    expect(s.ownerAway('hA')).toBe(false); // 離線 → 寵物在家
+    s.set('hB', 'i:1', u('A'));
+    expect(s.ownerAway('hA')).toBe(true);
+    expect(s.users('hA').map((x) => x.id)).not.toContain('A');
+    s.set('hA', 'i:2', u('A')); // 另一個分頁在自己家
+    expect(s.ownerAway('hA')).toBe(false);
+    s.set('hA', 'i:2', null); s.set('hB', 'i:1', null);
+    expect(s.ownerAway('hA')).toBe(false);
+    expect(s.homeOf('A')).toBe('hA'); expect(s.whereIs('A')).toEqual([]);
+  });
+  it('stale entries (dead instance) expire; heartbeats keep them and keep join order', () => {
+    const s = new PresenceStore();
+    s.set('h', 'dead:1', u('a'), 0); s.set('h', 'live:1', u('b'), 0);
+    expect(s.touch('h', 'live:1', u('b'), 60_000)).toBe(false);
+    expect(s.touch('h', 'new:1', u('c'), 60_000)).toBe(true); // 新執行個體從心跳得知
+    expect(s.sweep(80_000)).toEqual(['h']);
+    expect(s.users('h').map((x) => x.id)).toEqual(['b', 'c']);
+  });
+});
