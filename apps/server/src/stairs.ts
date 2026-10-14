@@ -1,10 +1,11 @@
-import { applyStairsResult, checkStairsStart, cloneStairs, createStairs, ENGINE_VERSION, setInput, STAIRS_PARAMS, stepStairs, type StairsState } from '@chick/engine';
+import { applyStairsResult, checkStairsStart, phaseAt, cloneStairs, createStairs, ENGINE_VERSION, setInput, STAIRS_PARAMS, stepStairs, type StairsState } from '@chick/engine';
 import type { Db } from './db';
 import { changeBalance, lockWallets, notify, runAction, type ReqCtx } from './core';
 import { fail } from './errors';
 import { insertEvents, lockPet, publicPet, savePet, settle } from './pets';
 import { randomSeed, stableHash } from './util';
 import { env } from './env';
+import { clock } from './hours';
 
 export interface MatchConn { userId: string; send: (msg: unknown) => void }
 interface PendingInput { tick: number; seq: number; left: boolean; right: boolean }
@@ -20,6 +21,8 @@ export function currentTick(m: Match, now = Date.now()) { return Math.floor((now
 
 /** 單人下樓梯：伺服器權威模擬。 */
 export async function createSolo(db: Db, ctx: ReqCtx, conn: MatchConn, requestId: unknown) {
+  const phase = phaseAt(clock(), Date.now());
+  if (phase !== 'open') fail(phase === 'closing' ? 'GAME_CLOSING' : 'GAME_CLOSED'); // 19:55 起不能開新局
   for (const m of matches.values()) if (m.userId === ctx.userId && !m.ended) fail('ALREADY_IN_MATCH');
   const seed = randomSeed();
   const res = await runAction(db, ctx, 'stairs.start', requestId, {}, async (tx) => {

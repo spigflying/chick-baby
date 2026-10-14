@@ -1,6 +1,7 @@
 import { sql, type Db, type Tx } from './db';
 import { AppError, fail } from './errors';
 import { isUuid, stableHash } from './util';
+import { clock } from './hours';
 
 export interface ReqCtx { userId: string; ip?: string | null; ua?: string | null }
 export type Notice = { t: 'pet'; home: string; pet: string; ev?: unknown } | { t: 'wallet'; user: string } | { t: 'access'; home: string };
@@ -27,6 +28,8 @@ export async function runAction<T>(db: Db, ctx: ReqCtx, action: string, requestI
   const hash = stableHash({ action, body });
   try {
     return await db.transaction().execute(async (tx) => {
+      // 關門判斷放在寫入的 transaction 內（requirements §4.7：20:00:00 之後的寫入一律拒絕）
+      if (!clock().isOpen(Date.now())) fail('GAME_CLOSED');
       const ins = await tx.insertInto('idempotency_keys').values({ user_id: ctx.userId, request_id: requestId, action, request_hash: hash })
         .onConflict((oc) => oc.doNothing()).returning('request_id').executeTakeFirst();
       if (!ins) {

@@ -1,4 +1,5 @@
 import * as engine from '@chick/engine';
+import { clock } from './hours';
 import { applyFood, applyOwnerAction, checkFeed, foodById, createRng, GAME, isSpecies, newPet, revive as reviveState, SPECIES, type OwnerAction } from '@chick/engine';
 import { sql, type Db, type Tx } from './db';
 import { changeBalance, lockWallets, notify, rateLimit, runAction, type ReqCtx } from './core';
@@ -207,7 +208,7 @@ export async function feed(db: Db, ctx: ReqCtx, petId: string, foodId: unknown, 
     const counts = isOwner ? { today_pet_total: 0, today_mine: 0 } : await visitorCounts(tx, petId, ctx.userId);
     const err = checkFeed(state, food, { isOwner, visitorCountPet: counts.today_pet_total, visitorCountMine: counts.today_mine, balance: wallet.balance });
     if (err) { await savePet(tx, petId, state); fail(err); }
-    const ev = applyFood(state, food!, Date.now(), createRng(randomSeed()));
+    const ev = applyFood(state, food!, Date.now(), createRng(randomSeed()), GAME, clock());
     let balance = wallet.balance;
     if (food!.price > 0) balance = await changeBalance(tx, ctx.userId, -food!.price, 'feed', { type: 'pet', id: petId });
     if (!isOwner) {
@@ -287,7 +288,7 @@ export async function adminRevive(db: Db, ctx: ReqCtx, petId: string, requestId:
 
 export function publicConfig() {
   const { FOODS, STAIRS_PARAMS, ENGINE_VERSION } = engine;
-  return { species: Object.values(SPECIES), foods: FOODS, game: { timeScale: GAME.timeScale, eggSeconds: GAME.eggSeconds, feed: GAME.feed, stairsMinEnergy: GAME.stairsMinEnergy }, stairs: STAIRS_PARAMS, engine_version: ENGINE_VERSION, dev_login: env.devLogin, google_client_id: env.googleClientId };
+  return { species: Object.values(SPECIES), foods: FOODS, game: { timeScale: GAME.timeScale, eggSeconds: GAME.eggSeconds, feed: GAME.feed, stairsMinEnergy: GAME.stairsMinEnergy }, stairs: STAIRS_PARAMS, engine_version: ENGINE_VERSION, dev_login: env.devLogin, google_client_id: env.googleClientId, open_hours: env.openHours || null };
 }
 
 export async function dailyMaintenance(db: Db) {

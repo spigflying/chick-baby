@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { createDb } from '../src/db';
@@ -6,6 +6,9 @@ import { migrateToLatest } from '../src/migrations';
 import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
 import { createSolo, finish, handleInput, startStairsLoop, matches } from '../src/stairs';
+import { ALWAYS_OPEN, makeClock } from '@chick/engine';
+import { setClock } from '../src/hours';
+import { feed as feedAction } from '../src/game';
 
 const { db } = createDb();
 const bus = new Bus();
@@ -276,5 +279,37 @@ describe('stairs (server-authoritative)', () => {
     const a = await login('alice');
     await hatchAlive(a, 'chicken', { energy: 5 });
     await expect(createSolo(db, { userId: a.id }, { userId: a.id, send: () => {} }, rid())).rejects.toThrow('TOO_TIRED');
+  });
+});
+
+describe('open hours (v1.2)', () => {
+  afterEach(() => setClock(ALWAYS_OPEN));
+  const CLOSED = makeClock({ days: [], openMin: 0, closeMin: 1, offsetMin: 480 });
+  /** 一個「現在是 12:00，12:03 關門」的時鐘：一定落在快關門（關門前 5 分鐘內）。 */
+  function closingSoon() {
+    const utcMin = Math.floor((Date.now() % 86_400_000) / 60_000);
+    return makeClock({ days: [0, 1, 2, 3, 4, 5, 6], openMin: 0, closeMin: 12 * 60 + 3, offsetMin: 12 * 60 - utcMin });
+  }
+
+  it('closed: HTTP answers 423 GAME_CLOSED and the transaction-level check rejects WS writes without side effects', async () => {
+    const a = await login('alice');
+    const pet = await hatchAlive(a, 'chicken', { hunger: 0 });
+    setClock(CLOSED);
+    const r = await feed(a, pet, 'rice');
+    expect(r.status).toBe(423);
+    expect(r.json.error).toBe('GAME_CLOSED');
+    // WebSocket 的 pet.action 直接呼叫 game.feed → runAction，不經過 HTTP hook
+    await expect(feedAction(db, { userId: a.id }, pet, 'worm', rid())).rejects.toMatchObject({ code: 'GAME_CLOSED' });
+    const w = await db.selectFrom('wallets').select('balance').where('user_id', '=', a.id).executeTakeFirstOrThrow();
+    expect(w.balance).toBe(20);
+    const feeds = await db.selectFrom('pet_events').select('id').where('pet_id', '=', pet).where('type', '=', 'feed').execute();
+    expect(feeds).toHaveLength(0);
+  });
+
+  it('closing (last 5 minutes): cannot start a new stairs match', async () => {
+    const a = await login('alice');
+    await hatchAlive(a, 'chicken', { energy: 80 });
+    setClock(closingSoon());
+    await expect(createSolo(db, { userId: a.id }, { userId: a.id, send: () => {} }, rid())).rejects.toMatchObject({ code: 'GAME_CLOSING' });
   });
 });

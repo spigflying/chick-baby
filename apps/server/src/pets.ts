@@ -1,4 +1,5 @@
 import { createRng, simulate, GAME, type PetState, type SimEvent } from '@chick/engine';
+import { clock } from './hours';
 import { randomSeed } from './util';
 import type { Tx } from './db';
 
@@ -28,7 +29,7 @@ const r1 = (v: number) => Math.round(v * 10) / 10;
 export function publicPet(row: any, s: PetState) {
   return {
     id: row.id, owner_id: row.owner_id, name: row.name, species: s.speciesId, status: s.status,
-    born_at: s.bornAt, hatched_at: s.hatchedAt, hatch_at: s.bornAt + GAME.eggSeconds * 1000,
+    born_at: s.bornAt, hatched_at: s.hatchedAt, hatch_at: clock().addOpen(s.bornAt, GAME.eggSeconds * 1000),
     hunger: r1(s.hunger), happiness: r1(s.happiness), energy: r1(s.energy), cleanliness: r1(s.cleanliness), health: r1(s.health),
     poop: s.poop, sick: s.sick, sleeping: s.sleeping,
     strength: s.strength, speed: s.speed, stamina: s.stamina, weight: s.weight, personality: s.personality, best_floor: s.bestFloor,
@@ -49,7 +50,7 @@ export async function insertEvents(tx: Tx, petId: string, events: { type: string
 /** 結算到現在（離線衰減），寫入系統事件；row 必須已上鎖。 */
 export async function settle(tx: Tx, row: any, now = Date.now()): Promise<{ state: PetState; events: SimEvent[] }> {
   const s = rowToState(row);
-  const events = simulate(s, now, createRng(randomSeed()));
+  const events = simulate(s, now, createRng(randomSeed()), GAME, clock());
   await insertEvents(tx, row.id, events.map((e) => ({ type: e.type, payload: e.payload, at: e.at })));
   return { state: s, events };
 }
