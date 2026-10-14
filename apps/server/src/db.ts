@@ -10,7 +10,8 @@ export type Db = Kysely<DB>;
 export type Tx = Transaction<DB>;
 
 export function createDb(url = env.databaseUrl) {
-  const pool = new pg.Pool({ connectionString: url, max: 10 });
+  // Cloud SQL f1-micro 只有 25 條連線：2 個執行個體 × 8 + 2 條 LISTEN = 18
+  const pool = new pg.Pool({ connectionString: url, max: 8, connectionTimeoutMillis: 5000 });
   return { db: new Kysely<DB>({ dialect: new PostgresDialect({ pool }) }), pool };
 }
 export { sql };

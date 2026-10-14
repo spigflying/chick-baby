@@ -10,6 +10,9 @@ import { createSolo, currentTick, finish, handleInput, matches, type Match } fro
 import { publicPet, rowToState } from './pets';
 import type { Bus } from './bus';
 import { publicUser } from './util';
+import { phaseAt } from '@chick/engine';
+import { clock } from './hours';
+import type { DbGate } from './gate';
 
 interface Conn { id: number; ws: WebSocket; user: { id: string; display_name: string; avatar_url: string | null }; homeId: string | null; connectedAt: number; match: Match | null; ip: string; ua: string }
 const conns = new Set<Conn>();
@@ -25,7 +28,7 @@ function broadcastPresence(homeId: string) {
   for (const c of inHome(homeId)) send(c, { type: 'home.presence', home_id: homeId, users: uniq });
 }
 
-export function setupWs(app: FastifyInstance, db: Db, bus: Bus) {
+export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
   bus.on(async (m) => {
     try {
       if (m.t === 'pet') {
@@ -54,6 +57,9 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus) {
   }
 
   app.get('/ws', { websocket: true }, async (socket, req) => {
+    const now = Date.now();
+    if (!clock().isOpen(now)) { socket.send(JSON.stringify({ type: 'error', code: 'GAME_CLOSED', opens_at: clock().status(now).opens_at })); socket.close(4423, 'closed'); return; }
+    try { await gate.ensure(); } catch { socket.send(JSON.stringify({ type: 'error', code: 'DB_UNAVAILABLE' })); socket.close(1013, 'db unavailable'); return; }
     const origin = req.headers.origin;
     const host = req.headers.host;
     const okOrigin = !origin || env.publicOrigins.includes(origin) || origin === `http://${host}` || origin === `https://${host}`;
@@ -62,6 +68,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus) {
     const c: Conn = { id: ++seq, ws: socket, user: publicUser(u), homeId: null, connectedAt: Date.now(), match: null, ip: req.ip, ua: String(req.headers['user-agent'] ?? '') };
     conns.add(c);
     send(c, { type: 'hello', user: c.user, server_time: Date.now(), instance: env.instanceId });
+    if (phaseAt(clock(), Date.now()) === 'closing') send(c, { type: 'game.closing', closes_at: clock().status(Date.now()).closes_at });
     socket.on('message', async (raw) => {
       let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
       const isInput = msg?.type === 'match.input';
@@ -116,6 +123,9 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus) {
   return {
     /** SIGTERM：請所有客戶端重連到其他執行個體 */
     drain() { for (const c of conns) { send(c, { type: 'server.draining' }); } for (const c of conns) c.ws.close(4000, 'draining'); },
+    broadcast(msg: unknown) { for (const c of conns) send(c, msg); },
+    /** 關門：送出最後一則訊息後關閉所有連線（客戶端不會自動重連）。 */
+    closeAll(msg: unknown, code: number) { for (const c of conns) send(c, msg); for (const c of conns) c.ws.close(code, 'closed'); },
     count: () => conns.size,
   };
 }

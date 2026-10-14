@@ -13,8 +13,11 @@ import * as g from './game';
 import { audit, rateLimit } from './core';
 import { setupWs } from './ws';
 import type { Bus } from './bus';
+import { clock } from './hours';
+import { createDbGate, type DbGate } from './gate';
 
-export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean } = {}) {
+export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?: DbGate } = {}) {
+  const gate = opts.gate ?? createDbGate(db, bus);
   const app = Fastify({ logger: opts.logger ?? true, trustProxy: true, bodyLimit: 64 * 1024 });
   await app.register(cookie);
   await app.register(rateLimitPlugin, { global: true, max: 300, timeWindow: '1 minute', errorResponseBuilder: () => ({ statusCode: 429, error: 'RATE_LIMITED' }) });
@@ -33,6 +36,16 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean } = {}
   app.get('/healthz', async () => ({ ok: true, instance: env.instanceId }));
 
   await app.register(async (api) => {
+    // ---- 開放時間與資料庫閘門（requirements §4.7）----
+    api.get('/status', async () => { const now = Date.now(); return { ...clock().status(now), server_time: now }; });
+    const NO_DB = new Set(['/api/status', '/api/config']);
+    api.addHook('onRequest', async (req, reply) => {
+      const url = req.url.split('?')[0];
+      if (NO_DB.has(url)) return;
+      const now = Date.now();
+      if (url !== '/api/internal/daily' && !clock().isOpen(now)) return reply.code(423).send({ error: 'GAME_CLOSED', opens_at: clock().status(now).opens_at });
+      try { await gate.ensure(); } catch (e) { req.log.warn({ err: e }, 'database unavailable'); return reply.code(503).send({ error: 'DB_UNAVAILABLE' }); }
+    });
     // ---- 登入 ----
     api.post('/auth/google', { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } }, async (req, reply) => {
       const { credential } = (req.body ?? {}) as any;
@@ -100,11 +113,13 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean } = {}
     // ---- 排程（Cloud Scheduler）----
     api.post('/internal/daily', async (req) => {
       if (!env.cronSecret || req.headers['x-cron-secret'] !== env.cronSecret) fail('FORBIDDEN');
-      return g.dailyMaintenance(db);
+      try { return await g.dailyMaintenance(db); }
+      // 休息時段（20:05）跑完就停止 LISTEN：20:15 資料庫關機後不要一直重連
+      finally { if (!clock().isOpen(Date.now())) await gate.release(); }
     });
   }, { prefix: '/api' });
 
-  const hub = setupWs(app, db, bus);
+  const hub = setupWs(app, db, bus, gate);
 
   // 靜態前端（正式環境單一容器）
   const webDist = env.webDist || path.resolve(process.cwd(), '../web/dist');
@@ -116,5 +131,5 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean } = {}
     });
   }
   void rateLimit;
-  return { app, hub };
+  return { app, hub, gate };
 }
