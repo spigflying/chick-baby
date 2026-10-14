@@ -29,12 +29,15 @@ beforeEach(async () => {
 });
 
 type Client = { cookie: string; id: string; call: (method: string, url: string, body?: any) => Promise<{ status: number; json: any }> };
+let ipSeq = 0;
 async function login(name: string): Promise<Client> {
-  const r = await app.inject({ method: 'POST', url: '/api/auth/dev', payload: { name } });
+  // 每位測試使用者用不同的來源 IP，避免全域頻率限制（每 IP 每分鐘 300）在整份測試累積
+  const remoteAddress = `10.9.${Math.floor(++ipSeq / 250) % 250}.${ipSeq % 250 + 1}`;
+  const r = await app.inject({ method: 'POST', url: '/api/auth/dev', payload: { name }, remoteAddress });
   expect(r.statusCode).toBe(200);
   const cookie = String(r.headers['set-cookie']).split(';')[0];
   const call = async (method: string, url: string, body?: any) => {
-    const res = await app.inject({ method: method as any, url, payload: body, headers: { cookie } });
+    const res = await app.inject({ method: method as any, url, payload: body, headers: { cookie }, remoteAddress });
     return { status: res.statusCode, json: res.body ? JSON.parse(res.body) : null };
   };
   const me = await call('GET', '/api/me');

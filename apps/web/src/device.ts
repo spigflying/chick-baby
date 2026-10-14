@@ -2,10 +2,10 @@ import { TopTip, tipText, type TopKey } from './topTip';
 import { PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID } from './sprites';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
 import { drawShell, SHELL_COLORS } from './shell';
-import { act, errText } from './api';
+import { act, api, errText } from './api';
 import type { Live } from './ws';
 import { StairsClient } from './stairs';
-import { controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, type ArenaMsg, type FSnap, type Pad } from './fight';
+import { controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
 
 const W = 120, H = 100, GROUND = 86, HUD = 14;
 const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -27,7 +27,7 @@ export class Device {
   home: any = null; pet: any = null; visitor: any = null;
   isOwner = false;
   cells: Cell[] = []; sel = 0;
-  menu: null | 'feed' | 'status' | 'hatch' | 'result' = null; menuSel = 0; menuHtml = '';
+  menu: null | 'feed' | 'status' | 'hatch' | 'result' | 'shop' = null; menuSel = 0; menuHtml = '';
   frame = 0; petX = 42; petDir = 1; anim: any = null; fxT = 0; fxKind: string | null = null;
   busy = false;
   stairs: StairsClient | null = null;
@@ -37,16 +37,22 @@ export class Device {
   // ---------- v1.4 打架模式 ----------
   arena: { prev: ArenaMsg | null; cur: ArenaMsg; at: number } | null = null;
   navOpen = false; private padState = new PadState(); private lastJoin = 0; private myPresence: PresenceUser | null = null;
+  // v1.5：決勝瞬間凍結、結算畫面、打擊特效、道具
+  frozen = false; private frozenAt = 0; result: ResultMsg | null = null; private resultTimer = 0;
+  equip: string | null = null; myItems: Record<string, number> = {};
+  private fxSwings: { u: string; kind: string; t: number }[] = []; private fxHits: { u: string; dmg: number; t: number }[] = [];
   private arenaFighters(): FSnap[] {
-    const a = this.arena; if (!a || Date.now() - a.at > 3500) return [];
+    const a = this.arena; if (!a || (Date.now() - a.at > 3500 && !this.frozen)) return [];
+    if (this.frozen) return a.cur.fighters;
     return lerpFighters(a.prev, a.cur, (Date.now() - a.at) / 100);
   }
   private meFighter() { return this.arena?.cur.fighters.find((f) => f.u === this.ctx.me.id) ?? null; }
   mode() {
     const me = this.meFighter();
-    return this.stairs ? 'stairs' : controlMode({ isOwner: this.isOwner, submenuOpen: !!this.menu, navOpen: this.navOpen, inArena: !!me, inFight: !!me?.fight });
+    return this.stairs ? 'stairs' : controlMode({ isOwner: this.isOwner, submenuOpen: !!this.menu, navOpen: this.navOpen, inArena: !!me, inFight: !!me?.fight, visitors: this.guests.length > 0 });
   }
-  private sendPad() { this.ctx.live.send({ type: 'arena.input', ...this.padState.pad }); }
+  private sendPad() { this.ctx.live.send({ type: 'arena.input', ...this.padState.pad, equip: this.equip }); }
+  cycleEquip() { const n = nextEquip(this.myItems, this.equip); if (n && n !== this.equip) { this.equip = n; this.sendPad(); this.updateControls(); } }
   private setPad(b: keyof Pad, v: boolean) { if (this.padState.set(b, v)) this.sendPad(); }
   /** 進家後：自己的寵物能打（活著、醒著、沒生病）就加入場地；斷線重連或負責的執行個體換人時自動重新加入。 */
   private ensureJoined() {
@@ -58,7 +64,9 @@ export class Device {
   private updateControls() {
     const m = this.mode();
     const pet = m === 'pet' || m === 'nav';
-    (this.$('.fightbar') as HTMLElement).hidden = !pet;
+    (this.$('.fightbar') as HTMLElement).hidden = !showFightbar(m);
+    const hud = this.$('.itemhud'); const ht = pet ? itemHud(this.equip, this.myItems, this.arena?.cur.ammo ?? 0) : '';
+    hud.hidden = !ht; if (hud.textContent !== ht) hud.textContent = ht;
     const h = this.$('.hint'); const txt = m === 'stairs' ? '' : HINT[m as 'pet'] ?? '';
     h.hidden = !txt; if (h.textContent !== txt) h.textContent = txt;
     this.$('.navbtn').classList.toggle('on', this.navOpen);
@@ -66,40 +74,115 @@ export class Device {
   }
   onArena(m: any) {
     if (m.type === 'arena.state') {
+      if (this.frozen && !m.frozen && Date.now() - this.frozenAt < 8000) return; // 結算畫面關掉前保持凍結
       const prev = this.arena?.cur ?? null; const wasFight = !!this.meFighter()?.fight;
-      this.arena = { prev, cur: m, at: Date.now() };
+      const fx = diffFx(prev?.fighters, m.fighters), now = Date.now();
+      for (const x of fx.swings) this.fxSwings.push({ ...x, t: now });
+      for (const x of fx.hits) this.fxHits.push({ ...x, t: now });
+      if (fx.hits.length) this.shake();
+      this.arena = { prev: m.frozen ? m : prev, cur: m, at: now };
+      const me = m.fighters.find((f: FSnap) => f.u === this.ctx.me.id);
+      if (me) { this.myItems = me.items ?? {}; if (!this.equip || !(this.myItems[this.equip] > 0)) this.equip = me.eq ?? nextEquip(this.myItems, null); }
+      if (m.frozen && !this.frozen) { this.frozen = true; this.frozenAt = now; this.draw(true); }
       const nowFight = !!this.meFighter()?.fight;
       if (nowFight && !wasFight && this.isOwner) this.say('有人來挑戰！方向鍵移動、空白鍵啄');
       this.updateControls();
-    } else if (m.type === 'arena.event' && m.kind === 'start') { this.ctx.toast(`${m.a} vs ${m.b} 開打！`); }
+    } else if (m.type === 'arena.event' && m.kind === 'start') { this.ctx.toast(`${(m.names ?? [m.a, m.b]).join(' vs ')} 混戰開打！`); }
+    else if (m.type === 'arena.event' && m.kind === 'ko') { if (m.user === this.ctx.me.id) this.say('被打倒了…觀戰中'); }
     else if (m.type === 'arena.result') {
       const nm = (id: string) => (this.arena?.cur.fighters.find((f) => f.u === id)?.name) ?? (id === this.home?.owner.id ? this.home.owner.display_name : this.guests.find((g) => g.id === id)?.display_name ?? '?');
       this.ctx.toast(resultText(m, nm));
+      this.showResult(m);
     } else if (m.type === 'arena.notice') {
       const t = NOTICE_TEXT[m.code] ?? m.code;
       if (Date.now() - this.noticeAt > 2500) { this.noticeAt = Date.now(); this.say(t); }
     }
   }
   private noticeAt = 0;
+  private shake() { const c = this.cv; c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake'); }
+  /** 結算畫面：彩帶橫幅＋自己的金幣變化；輸家另外顯示「你輸了」與數據。點一下／按鍵／6 秒後關閉。 */
+  showResult(r: ResultMsg) {
+    const v = resultView(r, this.ctx.me.id);
+    if (!v) { this.unfreeze(); return; }
+    this.result = r;
+    if (!this.frozen) { this.frozen = true; this.frozenAt = Date.now(); }
+    const el = this.$('.fightres');
+    el.className = `fightres ${v.role}`; el.hidden = false;
+    el.innerHTML = `<canvas class="confetti" width="120" height="100"></canvas><div class="ribbon"><span>${esc(v.banner)}</span></div>`
+      + (v.coin ? `<div class="coin">${esc(v.coin)}</div>` : '')
+      + (v.lostLine ? `<div class="lost">${esc(v.lostLine)}</div>` : '')
+      + (v.stats.length ? `<div class="stats">${v.stats.map(([k, x]) => `<div><b>${esc(k)}</b><span>${esc(x)}</span></div>`).join('')}</div>` : '')
+      + '<div class="tap">點一下或按任意鍵繼續</div>';
+    this.confettiT = 0; this.drawConfetti();
+    clearTimeout(this.resultTimer); this.resultTimer = window.setTimeout(() => this.dismissResult(), RESULT_AUTO_MS);
+    if (r.parts.some((p) => p.u === this.ctx.me.id)) void this.refreshItems();
+  }
+  private confettiT = 0;
+  private drawConfetti() {
+    const c = this.el.querySelector('.fightres canvas.confetti') as HTMLCanvasElement | null; if (!c || !this.result) return;
+    const g = c.getContext('2d')!; g.clearRect(0, 0, 120, 100);
+    const cols = ['#ffffff', '#ffd23f', '#ee4266', '#3bceac', PAL[3]];
+    for (let i = 0; i < 40; i++) { const x = (i * 37 + Math.sin(i + this.confettiT / 6) * 6) % 120, y = ((i * 23) % 100 + this.confettiT * (0.6 + (i % 5) * 0.2)) % 100; g.fillStyle = cols[i % cols.length]; g.fillRect(Math.round(x), Math.round(y), i % 3 ? 2 : 1, i % 2 ? 2 : 1); }
+    this.confettiT++;
+  }
+  dismissResult() {
+    if (!this.result) return;
+    clearTimeout(this.resultTimer); this.result = null; this.$('.fightres').hidden = true; this.unfreeze();
+  }
+  private unfreeze() { this.frozen = false; }
+  async refreshItems() { try { const r = await api('GET', '/items'); this.myItems = r.items ?? {}; if (this.equip && !(this.myItems[this.equip] > 0)) this.equip = nextEquip(this.myItems, null); this.updateControls(); if (this.menu === 'shop') this.renderMenu(); } catch { /* 下次 */ } }
   leaveArena() { if (this.meFighter()) this.ctx.live.send({ type: 'arena.leave' }); this.arena = null; }
   /** 畫場上的寵物（打架模式中的寵物改由伺服器快照決定位置）。 */
   drawArena(fs: FSnap[]) {
     const g = this.g, f = Math.floor(this.frame / 4) % 2, hpMax = this.arena?.cur.hp_max ?? 100;
+    const now = Date.now();
+    this.fxSwings = this.fxSwings.filter((s) => now - s.t < (s.kind === 'beam' ? 300 : 150));
+    this.fxHits = this.fxHits.filter((s) => now - s.t < 700);
     for (const x of fs) {
-      if (x.inv > 0 && this.frame % 2) continue; // 被打中閃爍
-      const n = speciesSprite(x.sp, f && this.arena ? 2 : 1), w = sw(n), h = sh(n);
-      const px = x.x + (x.atk > 0 ? x.dir * 2 : 0), py = x.y + 12 - h;
+      const flash = this.fxHits.some((h) => h.u === x.u && now - h.t < 120);
+      if (x.inv > 0 && !flash && this.frame % 2 && !this.frozen) continue; // 無敵中閃爍
+      const n = speciesSprite(x.sp, f && this.arena && !x.out ? 2 : 1), w = sw(n), h = sh(n);
+      const px = x.x + (x.atk > 0 && x.sw !== 'beam' ? x.dir * 2 : 0), py = x.y + 12 - h;
+      if (x.out) g.globalAlpha = 0.35;
+      if ((x.chg ?? 0) > 0) { g.fillStyle = this.frame % 2 ? '#ffffff' : '#ffd23f'; const r = 2 + Math.floor((x.chg ?? 0) / 8); g.fillRect(Math.round(px) - r, Math.round(py) - r, w + r * 2, h + r * 2); }
       spr(g, n, px, py, x.dir > 0);
+      if (flash) this.whiteOut(n, px, py, x.dir > 0);
+      g.globalAlpha = 1;
+      for (const s of this.fxSwings) if (s.u === x.u) this.drawSwing(s.kind, x, now - s.t);
       if (x.fight) { g.fillStyle = PAL[3]; g.fillRect(Math.round(x.x), Math.round(py) - 4, 12, 3); g.fillStyle = PAL[1]; g.fillRect(Math.round(x.x) + 1, Math.round(py) - 3, Math.round(10 * x.hp / hpMax), 1); }
       const tagKey = x.u === this.home?.owner.id ? 'owner' : String(this.guests.findIndex((u) => u.id === x.u));
       if (tagKey !== '-1') this.tag(tagKey, px + w / 2, py - (x.fight ? 4 : 0));
     }
+    for (const p of this.arena?.cur.proj ?? []) spr(g, 'poop', Math.round(p.x) - 3, Math.round(p.y) - 2);
+    for (const hh of this.fxHits) { const x = fs.find((q) => q.u === hh.u); if (!x) continue; const k = (now - hh.t) / 700; this.drawDmg(hh.dmg, x.x + 1, x.y - 16 - k * 10); }
     const fights = this.arena?.cur.fights ?? [];
     if (fights.length) {
       const left = Math.max(0, fights[0].left_ms - (Date.now() - (this.arena?.at ?? 0)));
       g.fillStyle = PAL[0]; g.fillRect(W / 2 - 9, HUD + 1, 18, 7);
       num(g, Math.ceil(left / 1000), W / 2 - 7, HUD + 2);
     }
+  }
+  /** 被打中：整隻變白。 */
+  private whiteOut(n: string, x: number, y: number, flip: boolean) {
+    const t = document.createElement('canvas'); t.width = sw(n); t.height = sh(n);
+    const tg = t.getContext('2d')!; spr(tg, n, 0, 0, flip); tg.globalCompositeOperation = 'source-in'; tg.fillStyle = '#ffffff'; tg.fillRect(0, 0, t.width, t.height);
+    this.g.drawImage(t, Math.round(x), Math.round(y));
+  }
+  /** 揮擊視覺：啄＝白色弧線（範圍 14px）、上啄＝頭頂弧線、長劍＝大弧線（42px）、龜派氣功＝橫越場地的光束。 */
+  private drawSwing(kind: string, x: FSnap, ms: number) {
+    const g = this.g, cx = x.x + 6, cy = x.y + 6, d = x.dir;
+    const arc = (r: number, a0: number, a1: number, col: string, th = 1) => {
+      g.fillStyle = col;
+      for (let a = a0; a <= a1; a += 0.08) for (let k = 0; k < th; k++) g.fillRect(Math.round(cx + Math.cos(a) * (r - k) * d), Math.round(cy + Math.sin(a) * (r - k)), 1, 1);
+    };
+    if (kind === 'peck') { const r = 8 + 12 * Math.min(1, ms / 50); arc(r + 1, -1.0, 1.0, PAL[3], 1); arc(r, -1.0, 1.0, '#ffffff', 2); }
+    else if (kind === 'up') { g.fillStyle = '#ffffff'; for (let i = -6; i <= 6; i++) g.fillRect(Math.round(cx + i), Math.round(x.y - 2 - Math.sqrt(36 - i * i) * 0.8), 1, 2); }
+    else if (kind === 'sword') { arc(42, -1.0, 0.7, PAL[3], 1); arc(40, -1.0, 0.7, '#ffffff', 2); }
+    else if (kind === 'beam') { const x0 = d > 0 ? cx + 6 : 0, x1 = d > 0 ? W : cx - 6; g.fillStyle = PAL[3]; g.fillRect(Math.round(x0), Math.round(cy - 4), Math.round(x1 - x0), 8); g.fillStyle = '#ffffff'; g.fillRect(Math.round(x0), Math.round(cy - 2), Math.round(x1 - x0), 4); }
+  }
+  private drawDmg(n: number, x: number, y: number) {
+    const g = this.g; g.fillStyle = '#ffffff'; g.fillRect(Math.round(x) - 1, Math.round(y) - 1, 4 + String(n).length * 4 + 1, 7);
+    g.fillStyle = PAL[3]; g.fillRect(Math.round(x), Math.round(y) + 2, 2, 1); num(g, n, Math.round(x) + 3, Math.round(y));
   }
 
   /** v1.3：在場者的寵物同框。 */
@@ -149,9 +232,9 @@ export class Device {
     this.el.className = 'device';
     this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
       <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">◎0</span><span data-k="age">—</span></div><div class="toptip" role="tooltip" hidden></div>
-      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="menu" hidden></div></div>
+      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div></div>
       <div class="labels"></div>
-      <div class="fightbar" hidden><button data-pad="left">◀</button><button data-pad="jump">▲</button><button data-pad="attack">啄</button><button data-pad="right">▶</button><button class="navbtn">選單</button></div>
+      <div class="fightbar" hidden><button data-pad="left">◀</button><button data-pad="jump">▲</button><button data-pad="attack">啄</button><button data-pad="upAtk">上啄</button><button data-pad="item">道具</button><button data-pad="right">▶</button><button class="navbtn">選單</button></div>
       <p class="hint" hidden></p>
       <div class="gamebar" hidden><button data-dir="left">◀</button><button class="quit">離開</button><button data-dir="right">▶</button></div>
       <p class="msg">…</p></div></div>`;
@@ -191,9 +274,9 @@ export class Device {
       else cells = [
         { act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'play', icon: 'i_play', label: '樓梯' },
         p.sleeping ? { act: 'wake', icon: 'i_wake', label: '起床' } : { act: 'sleep', icon: 'i_sleep', label: '睡覺' },
-        { act: 'clean', icon: 'i_wash', label: '清潔' }, { act: 'doctor', icon: 'i_doc', label: '醫生' }, { act: 'status', icon: 'i_stat', label: '狀態' }];
+        { act: 'clean', icon: 'i_wash', label: '清潔' }, { act: 'doctor', icon: 'i_doc', label: '醫生' }, { act: 'shop', icon: 'i_shop', label: '道具' }, { act: 'status', icon: 'i_stat', label: '狀態' }];
     } else if (!p || p.status !== 'alive') cells = [{ act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'home', icon: 'i_home', label: '回家' }];
-    else cells = [{ act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'home', icon: 'i_home', label: '回家' }];
+    else cells = [{ act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'shop', icon: 'i_shop', label: '道具' }, { act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'home', icon: 'i_home', label: '回家' }];
     const key = cells.map((c) => c.act).join(',');
     const box = this.$('.labels');
     if (box.dataset.key === key) return;
@@ -263,18 +346,20 @@ export class Device {
     if ((e.target as HTMLElement)?.closest?.('input,select,textarea')) return;
     const k = e.key;
     if (this.stairs) { if (this.stairs.key(k, true)) e.preventDefault(); return; }
+    if (this.result) { e.preventDefault(); if (!e.repeat) this.dismissResult(); return; }
     const mode = this.mode();
     if (mode === 'pet') {
       const b = petKey(k); if (!b) return;
       e.preventDefault(); if (e.repeat) return;
       if (b === 'nav') { this.navOpen = true; this.updateControls(); return; }
+      if (b === 'cycle') { this.cycleEquip(); return; }
       this.setPad(b, true); return;
     }
     if (mode === 'nav' && k === 'Escape') { this.navOpen = false; this.updateControls(); e.preventDefault(); return; }
     if (this.menu) {
       if (k === 'Escape' || k === 'Backspace') this.closeMenu();
-      else if (this.menu === 'feed' && (k === 'ArrowUp' || k === 'ArrowDown')) { const n = this.ctx.cfg.foods.length; this.menuSel = (this.menuSel + (k === 'ArrowUp' ? n - 1 : 1)) % n; this.renderMenu(); }
-      else if (k === 'Enter' || k === ' ') { if (this.menu === 'feed') this.chooseFood(this.ctx.cfg.foods[this.menuSel]); else this.closeMenu(); }
+      else if ((this.menu === 'feed' || this.menu === 'shop') && (k === 'ArrowUp' || k === 'ArrowDown')) { const n = this.menu === 'feed' ? this.ctx.cfg.foods.length : ITEM_ORDER.length; this.menuSel = (this.menuSel + (k === 'ArrowUp' ? n - 1 : 1)) % n; this.renderMenu(); }
+      else if (k === 'Enter' || k === ' ') { if (this.menu === 'feed') this.chooseFood(this.ctx.cfg.foods[this.menuSel]); else if (this.menu === 'shop') void this.buyItem(ITEM_ORDER[this.menuSel]); else this.closeMenu(); }
       else return;
     } else if (k === 'ArrowLeft') { this.sel = (this.sel + this.cells.length - 1) % this.cells.length; this.drawCells(); }
     else if (k === 'ArrowRight') { this.sel = (this.sel + 1) % this.cells.length; this.drawCells(); }
@@ -284,7 +369,7 @@ export class Device {
   };
   private onKeyUp = (e: KeyboardEvent) => {
     if (this.stairs) return void this.stairs.key(e.key, false);
-    const b = petKey(e.key); if (b && b !== 'nav') this.setPad(b, false);
+    const b = petKey(e.key); if (b && b !== 'nav' && b !== 'cycle') this.setPad(b, false);
   };
   bind() {
     document.addEventListener('keydown', this.onKey);
@@ -305,9 +390,11 @@ export class Device {
         return;
       }
       if (this.menu === 'result') { this.endStairsView(); return; }
+      if (this.menu === 'shop') { const it = t.closest('.mi') as HTMLElement | null; if (!it) return; const i = +it.dataset.i!; if (i < 0) return this.closeMenu(); this.menuSel = i; return void this.buyItem(ITEM_ORDER[i]); }
       this.closeMenu();
     });
     this.cv.addEventListener('click', () => { if (!this.stairs && this.menu) this.closeMenu(); });
+    this.$('.fightres').addEventListener('click', () => this.dismissResult());
     this.el.querySelectorAll<HTMLElement>('.gamebar [data-dir]').forEach((b) => {
       const d = b.dataset.dir as 'left' | 'right';
       const set = (v: boolean) => (e: Event) => { e.preventDefault(); this.stairs?.setDir(d, v); };
@@ -336,6 +423,7 @@ export class Device {
     this.sel = i; this.drawCells();
     const a = this.cells[i]?.act; const p = this.pet;
     if (a === 'status') return this.openMenu('status');
+    if (a === 'shop') { if (this.meFighter()?.fight) return this.say('對戰中不能買道具'); this.openMenu('shop'); void this.refreshItems(); return; }
     if (a === 'home') return this.ctx.goHome();
     if (a === 'hatch') return this.openMenu('hatch');
     if (!p) return;
@@ -365,7 +453,7 @@ export class Device {
   fx(k: string) { this.fxKind = k; this.fxT = 6; }
 
   // ---------- 選單 ----------
-  openMenu(m: 'feed' | 'status' | 'hatch') { this.menu = m; this.menuSel = m === 'feed' ? (this.isOwner ? 0 : 1) : 0; this.renderMenu(); }
+  openMenu(m: 'feed' | 'status' | 'hatch' | 'shop') { this.menu = m; this.menuSel = m === 'feed' ? (this.isOwner ? 0 : 1) : 0; this.renderMenu(); }
   closeMenu() { this.menu = null; this.navOpen = false; this.renderMenu(); this.updateControls(); }
   renderMenu() {
     const el = this.$('.menu');
@@ -380,6 +468,11 @@ export class Device {
       }).join('') +
         (this.isOwner ? '' : `<div class="note">今天你餵了 ${v?.today_mine ?? 0}/${f.visitorDailyPerVisitorPerPet}・全部訪客 ${v?.today_pet_total ?? 0}/${f.visitorDailyPerPet}</div>`) +
         '<div class="mi back" data-i="-1">✕ 關閉</div>';
+    } else if (this.menu === 'shop') {
+      el.innerHTML = `<div class="mt">— 道具店 —  ◎${coins}</div>` + ITEM_ORDER.map((id, i) => {
+        const it = ITEM_INFO[id], own = this.myItems[id] ?? 0;
+        return `<div class="mi${i === this.menuSel ? ' on' : ''}${it.price > coins ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(it.name)}<small>${it.fights}場</small>${own ? `<small>有${own}場</small>` : ''}</span><em>◎${it.price}</em></div>`;
+      }).join('') + `<div class="note">${esc(ITEM_INFO[ITEM_ORDER[this.menuSel]]?.desc ?? '')}・Z 使用、X 切換</div><div class="mi back" data-i="-1">✕ 關閉</div>`;
     } else if (this.menu === 'status') {
       if (!p) { el.innerHTML = '<div class="mt">— 狀態 —</div><p>還沒有寵物。</p><div class="mi back">✕ 關閉</div>'; return; }
       const row = (k: string, v: unknown) => `<div><b>${k}</b><span>${v}</span></div>`;
@@ -409,6 +502,15 @@ export class Device {
       const sc = SHELL_COLORS[r.pet.species]; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim);
       this.say(`${r.pet.name} 的蛋來了！一分鐘內就會孵化～`);
     } catch (e) { this.say(errText(e)); }
+  }
+  async buyItem(id: string) {
+    if (this.busy) return; this.busy = true;
+    try {
+      const r = await act('POST', '/items/buy', { item_id: id });
+      this.ctx.setWallet(r.balance); this.myItems = r.items ?? this.myItems; if (!this.equip) this.equip = id;
+      this.renderMenu(); this.renderTop(); this.say(`買了 ${ITEM_INFO[id].name}！可用 ${r.fights_left} 場`);
+    } catch (e) { this.say(errText(e)); }
+    finally { this.busy = false; }
   }
   async chooseFood(f: any) {
     if (this.busy || !this.pet) return;
@@ -494,7 +596,8 @@ export class Device {
     g.fillStyle = PAL[0]; g.fillRect(x + 13, y + 4, n, 4);
     g.fillStyle = PAL[2]; g.fillRect(x + 13, y + 4, f, 4);
   }
-  draw() {
+  draw(force = false) {
+    if (this.frozen && !force) { if (this.result) this.drawConfetti(); if (Date.now() - this.frozenAt > 8000 && !this.result) this.unfreeze(); return; } // 決勝瞬間：暫停畫面
     const fs = this.arenaFighters(); this.inArena = new Set(fs.map((x) => x.u));
     // 只有自己一隻在場上時不接管主人寵物（讓一般動畫照常）；有兩隻以上才由伺服器位置接管
     if (this.inArena.size < 2) this.inArena = new Set();
