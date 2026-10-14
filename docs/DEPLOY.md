@@ -1,6 +1,6 @@
 # 部署到 Cloud Run（專案 `silver-greens`）
 
-> 本文件只列步驟，**尚未執行**。採用 [`gcp-plan.md`](gcp-plan.md) 的**方案 A**：Cloud Run + Cloud SQL `db-f1-micro`，都在 `asia-east1`；遊戲只在**平日 09:00–20:00** 開放（[`requirements.md`](requirements.md) §4.7），其他時間 Cloud SQL 由排程停機。
+> 2026-10-14 已依本文件部署完成（服務網址 `https://chick-baby-704427759894.asia-east1.run.app`）。採用 [`gcp-plan.md`](gcp-plan.md) 的**方案 A**：Cloud Run + Cloud SQL `db-f1-micro`，都在 `asia-east1`；遊戲只在**平日 09:00–20:00** 開放（[`requirements.md`](requirements.md) §4.7），其他時間 Cloud SQL 由排程停機。
 > 專案 `silver-greens` 屬於個人帳號 **`spigflying@gmail.com`**；所有指令都在第 0 步建立的 gcloud configuration 下執行，不要用公司帳號。
 > 根目錄的靜態原型（GitHub Pages）不受影響；Cloud Run 服務的是 `apps/web` + `apps/server`。
 
@@ -235,13 +235,15 @@ make_db_job chick-db-stop  "15 20 * * 1-5" NEVER
 gcloud scheduler jobs list --location=$REGION
 ```
 
+- 手動測試停機→開機時，等停機操作完成（`state=STOPPED`）再觸發 `chick-db-start`，否則第一次會回 409（`invalidState`，重試會成功）。2026-10-14 實測：開機後到應用程式能連上約 13 分鐘（期間 state 顯示 `MAINTENANCE`，即停機期間略過的維護在開機時套用），這段時間 `/api/internal/daily` 會回 500。自訂角色 `cloudsql.instances.get` + `cloudsql.instances.update` 已足夠，不需追加權限。
 - 開機失敗會讓 09:00 無法開門（已設重試 3 次）。手動開機：`gcloud sql instances patch $SQL_INSTANCE --activation-policy=ALWAYS`。
 - 改開放時間時，`OPEN_HOURS` 和這 3 個 job 的時間要一起改。
 
 ## 9. 驗證
 
 ```bash
-curl -s $SERVICE_URL/healthz
+# 注意：Cloud Run 保留以 z 結尾的路徑（/healthz 等），外部呼叫會被 Google 前端回 404，不會到程式；
+# /healthz 只能給容器內部探針用。外部驗證請用 /api/status。
 curl -s $SERVICE_URL/api/status
 curl -s $SERVICE_URL/api/config | head -c 300
 ```
