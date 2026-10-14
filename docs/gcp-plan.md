@@ -110,6 +110,7 @@ flowchart LR
 |---|---|---|
 | Cloud Run CPU + 記憶體 | 遊戲伺服器：API、WebSocket、下樓梯遊戲迴圈、靜態網頁 | $10.26 − 免費額度 $4.86 = **$5.40（NT$174）** |
 | Cloud SQL f1-micro | 資料庫主機，只在平日開機 | 250 h × $0.0105 = **$2.62（NT$84）** |
+| Cloud SQL 閒置 IPv4 | 關機時公開 IP 仍計費（$0.01/h，見 DEPLOY.md 第 3 步） | ~480 h × $0.01 ≈ **$4.8**（用 `--no-assign-ip` 可免） |
 | Cloud SQL SSD 10 GB | 資料庫儲存（最低 10 GB），停機時照收 | $1.70（NT$55） |
 | Cloud SQL 備份 | 自動備份 + PITR | ~$0.08（NT$3） |
 | 其他 | 映像儲存、對外流量 | ~$0.6（NT$19） |
@@ -200,7 +201,7 @@ Cloud Scheduler 共 3 個 job，剛好在每個帳單帳戶 3 個免費 job 以�
 |---|---|
 | Cloud Run 服務 | `chick-baby`（網址預計為 `https://chick-baby-704427759894.asia-east1.run.app`，以 `gcloud run services describe` 為準） |
 | Cloud SQL | instance `chick-db`、database `chick`、user `chick` |
-| 服務帳號 | `chick-run@silver-greens.iam.gserviceaccount.com`（Cloud Run）、`chick-sql-ops@silver-greens.iam.gserviceaccount.com`（DB 開關機，`roles/cloudsql.editor`） |
+| 服務帳號 | `chick-run@silver-greens.iam.gserviceaccount.com`（Cloud Run）、`chick-sql-ops@silver-greens.iam.gserviceaccount.com`（DB 開關機，自訂角色 `chickSqlStartStop`：`cloudsql.instances.get`/`update`） |
 | Artifact Registry | `asia-east1-docker.pkg.dev/silver-greens/chick/server` |
 | Cloud Scheduler | `chick-db-start`、`chick-daily`、`chick-db-stop` |
 | Secret Manager | 見 §7 |

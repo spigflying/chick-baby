@@ -57,8 +57,17 @@ gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$RUN_
 
 # 資料庫開關機用（Cloud Scheduler 以它的 OAuth token 呼叫 SQL Admin API）
 gcloud iam service-accounts create chick-sql-ops --display-name="chick-baby Cloud SQL start/stop"
-gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$OPS_SA --role=roles/cloudsql.editor
+# 最小權限：自訂角色只含開關機（instances.patch 的 activationPolicy）所需權限，不用 roles/cloudsql.editor
+gcloud iam roles create chickSqlStartStop --project=$PROJECT_ID \
+  --title="chick-baby Cloud SQL start/stop" \
+  --permissions=cloudsql.instances.get,cloudsql.instances.update --stage=GA
+gcloud projects add-iam-policy-binding $PROJECT_ID --member=serviceAccount:$OPS_SA \
+  --role=projects/$PROJECT_ID/roles/chickSqlStartStop
 ```
+
+- `cloudsql.instances.update` 是 SQL Admin API `instances.patch`（改 `activationPolicy`）需要的權限；`cloudsql.instances.get` 讓排查時可讀狀態。
+- **建立第 8 步 Cloud Scheduler job 的人**，需要對 `chick-sql-ops` 有 `roles/iam.serviceAccountUser`（才能把 job 設成以它的身分取得 OAuth token）。專案 Owner 已內含；否則先授予：
+  `gcloud iam service-accounts add-iam-policy-binding $OPS_SA --member=user:<你的帳號> --role=roles/iam.serviceAccountUser`
 
 ## 3. Cloud SQL（PostgreSQL 16）
 
@@ -68,7 +77,8 @@ gcloud sql instances create $SQL_INSTANCE \
   --edition=ENTERPRISE --tier=db-f1-micro --storage-size=10GB --storage-auto-increase \
   --backup-start-time=04:00 --enable-point-in-time-recovery \
   --retained-backups-count=7 --retained-transaction-log-days=7 \
-  --availability-type=zonal
+  --availability-type=zonal \
+  --maintenance-window-day=WED --maintenance-window-hour=5
 gcloud sql databases create $DB_NAME --instance=$SQL_INSTANCE
 export DB_PASS=$(openssl rand -base64 24 | tr -d '/+=')
 gcloud sql users create $DB_USER --instance=$SQL_INSTANCE --password="$DB_PASS"
@@ -76,6 +86,8 @@ gcloud sql users create $DB_USER --instance=$SQL_INSTANCE --password="$DB_PASS"
 
 - 備份時間 `04:00` UTC = 台北 12:00，**一定要在開機期間**（平日 08:45–20:15）；自動備份保留 7 份、PITR 7 天，不需要另外的備份 Job。
 - 建立後 instance 會一直開著，直到第 8 步的 `chick-db-stop` 第一次執行。
+- 維護時段 `WED 05:00` UTC = 台北週三 13:00，放在開機期間、避開 04:00 UTC 備份。官方說明：instance 在排定維護時若是關機狀態，該次維護會略過，**下次啟動時會自動套用最新維護版本**——所以每天 08:45 開機偶爾會比較久，這也是開機排在 09:00 前 15 分鐘的原因之一。<https://cloud.google.com/sql/docs/postgres/maintenance>
+- **關機不是零成本**：官方文件寫明「Stopping an instance suspends instance charges… charges for storage and IP addresses continue to apply」，價格頁列「IPv4 addresses while idle：$0.01/小時」。Cloud SQL 預設會配公開 IPv4，關機約 ~480 小時/月 ≈ **US$4.8/月**（未含在 gcp-plan 的估算內）。若不需要公開 IP，可建立時加 `--no-assign-ip` 改用 Private IP（需 VPC/Private Service Access 設定），由 Benson 決定。<https://cloud.google.com/sql/docs/postgres/start-stop-restart-instance>、<https://cloud.google.com/sql/pricing>
 - `--edition=ENTERPRISE` 不能省：shared-core（`db-f1-micro`）只有 Enterprise 版能用。
 - `--availability-type=zonal`：SSD 為 $0.17/GB-月；HA（regional）會讓 instance 與儲存都變兩倍。
 - f1-micro 預設 `max_connections = 25`，見上方「部署前要先完成的程式改動」第 2 點。
