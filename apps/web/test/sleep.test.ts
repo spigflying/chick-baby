@@ -33,10 +33,14 @@ describe('closed-hours egg screen (v1.5)', () => {
   });
 });
 describe('chicken hair strand (v1.5)', () => {
-  it('replaces the comb with a 1px sprout curled at the tip, in every chicken frame', () => {
+  it('replaces the comb with a 1px sprout on a rounded dome, in every chicken frame', () => {
     for (const [k, o] of [['chicken_1', 0], ['chicken_2', 1], ['chicken_s', 1]] as const) {
       const r = S[k].slice(o);
       expect(r.slice(0, 2)).toEqual(['.......33.......', '.......3........']);
+      // 圓頂：上方三列外框寬度 5 → 7 → 9 逐列變寬（不是平頂），呆毛在圓頂正中央
+      const span = (row: string) => [row.indexOf('3'), row.lastIndexOf('3')];
+      expect(r.slice(2, 5).map((row) => span(row)[1] - span(row)[0] + 1)).toEqual([5, 7, 9]);
+      const [a, b] = span(r[2]); expect(r[1].indexOf('3')).toBe((a + b) / 2);
       expect(r.slice(0, 2).join('')).not.toContain('2'); // 沒有雞冠的填色
     }
     expect(S.duck_1[0]).not.toContain('3.3'); // 其他物種沒動
