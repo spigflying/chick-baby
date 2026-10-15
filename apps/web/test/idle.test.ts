@@ -15,3 +15,21 @@ describe('shouldPause', () => {
     expect(shouldPause({ hiddenSince: 0, lastActivity: 0, inMatch: true }, 10 * IDLE.idleMs)).toBe(false);
   });
 });
+
+describe('watchIdle', () => {
+  it('listens for activity in the capture phase, so controls that stopPropagation (fight pad, top bar) still count and resume a paused connection', async () => {
+    const calls: { type: string; opts: unknown }[] = [];
+    const target = () => ({ addEventListener: (type: string, _f: unknown, opts?: unknown) => calls.push({ type, opts }), removeEventListener: () => {} });
+    const g = globalThis as any;
+    const saved = { window: g.window, document: g.document };
+    g.window = { ...target(), setInterval: () => 0, clearInterval: () => {} };
+    g.document = { ...target(), hidden: false };
+    try {
+      const { watchIdle } = await import('../src/idle');
+      watchIdle({ isPaused: false, inMatch: false, pause() {}, resume() {} } as any)();
+    } finally { g.window = saved.window; g.document = saved.document; }
+    const activity = calls.filter((c) => c.type !== 'visibilitychange');
+    expect(activity.map((c) => c.type).sort()).toEqual(['keydown', 'pointerdown', 'touchstart']);
+    for (const c of activity) expect(c.opts).toMatchObject({ capture: true });
+  });
+});

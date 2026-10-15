@@ -17,8 +17,10 @@ export function watchIdle(live: Live, cfg: IdleConfig = IDLE): () => void {
   const wake = () => { s.lastActivity = Date.now(); if (live.isPaused) live.resume(); };
   const onVis = () => { if (document.hidden) s.hiddenSince = Date.now(); else { s.hiddenSince = null; wake(); } };
   const events = ['pointerdown', 'keydown', 'touchstart'] as const;
+  // capture：打架控制鈕／上方狀態列的 pointerdown 會 stopPropagation，冒泡階段收不到 → 只按控制鈕會被當成閒置、暫停後也按不醒
+  const opts = { passive: true, capture: true };
   document.addEventListener('visibilitychange', onVis);
-  events.forEach((e) => window.addEventListener(e, wake, { passive: true }));
+  events.forEach((e) => window.addEventListener(e, wake, opts));
   const timer = window.setInterval(() => { s.inMatch = live.inMatch; if (!live.isPaused && shouldPause(s, Date.now(), cfg)) live.pause(); }, 5000);
-  return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVis); events.forEach((e) => window.removeEventListener(e, wake)); };
+  return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVis); events.forEach((e) => window.removeEventListener(e, wake, opts)); };
 }
