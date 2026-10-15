@@ -4,7 +4,7 @@ import { api, act, errText, ApiError } from './api';
 import { Live } from './ws';
 import { Device } from './device';
 import { drawShell } from './shell';
-import { spriteCanvas, speciesSprite, SPECIES_LABEL, PAL, spr, sw, sh } from './sprites';
+import { coinHtml, spriteCanvas, speciesSprite, SPECIES_LABEL, PAL, spr, sw, sh } from './sprites';
 import { watchIdle } from './idle';
 import { createUpdater, SEEN_KEY } from './update';
 import { PET_CACHE_KEY } from './sleep';
@@ -34,11 +34,11 @@ function renderBar() {
   bar.hidden = false;
   const p = location.pathname;
   const link = (href: string, t: string, on: boolean) => `<a data-nav href="${href}" class="${on ? 'on' : ''}">${t}</a>`;
-  bar.innerHTML = `<span class="who">🐣 <b>${esc(me.user.display_name)}</b></span><span class="coin" id="barCoins">◎${wallet}</span><span>分享碼 <span class="code">${esc(me.user.share_code)}</span></span>
+  bar.innerHTML = `<span class="who">🐣 <b>${esc(me.user.display_name)}</b></span><span class="coin" id="barCoins">${coinHtml(wallet)}</span><span>分享碼 <span class="code">${esc(me.user.share_code)}</span></span>
     <nav>${link('/', '我的家', p === '/')}${link('/visit', '去拜訪', p === '/visit' || p.startsWith('/home/'))}${link('/settings', '家的設定', p === '/settings')}${me.user.role === 'admin' ? link('/admin', '管理', p === '/admin') : ''}<a href="#" id="logout">登出</a></nav>`;
   $('#logout').onclick = async (e) => { e.preventDefault(); await api('POST', '/auth/logout'); live?.stop(); live = null; idleOff?.(); idleOff = null; me = null; nav('/', true); };
 }
-function setWallet(n: number) { wallet = n; const c = document.getElementById('barCoins'); if (c) c.textContent = '◎' + n; device?.renderTop(); }
+function setWallet(n: number) { wallet = n; const c = document.getElementById('barCoins'); if (c) c.innerHTML = coinHtml(n); device?.renderTop(); }
 
 // ---------- 登入 ----------
 async function loginPage() {
