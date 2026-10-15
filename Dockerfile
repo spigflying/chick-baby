@@ -9,7 +9,11 @@ COPY packages/engine/package.json packages/engine/
 RUN pnpm install --frozen-lockfile
 COPY packages packages
 COPY apps apps
-RUN pnpm --filter @chick/engine test \
+# 部署前把不需要 Postgres 的測試都跑過（server 其餘測試要資料庫，本機用 docker compose 跑）
+RUN pnpm -r typecheck \
+ && pnpm --filter @chick/engine test \
+ && pnpm --filter @chick/web test \
+ && pnpm --filter @chick/server exec vitest run test/boot.test.ts test/closing.test.ts test/presence.test.ts test/http-hardening.test.ts \
  && pnpm --filter @chick/web build \
  && pnpm --filter @chick/server build \
  && pnpm --filter @chick/server deploy --prod --legacy /out

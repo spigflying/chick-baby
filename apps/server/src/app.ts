@@ -11,6 +11,7 @@ import { AppError, fail } from './errors';
 import { authHook, COOKIE, createSession, destroySession, requireAdmin, verifyGoogle } from './auth';
 import * as g from './game';
 import { audit, rateLimit } from './core';
+import { isUuid } from './util';
 import { setupWs } from './ws';
 import { buyItem, itemCatalog, listItems } from './items';
 import { inFight } from './arena';
@@ -21,10 +22,21 @@ import { requireCronOidc, type IdTokenVerifier } from './cron-auth';
 
 export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?: DbGate; cronVerifier?: IdTokenVerifier } = {}) {
   const gate = opts.gate ?? createDbGate(db, bus);
-  const app = Fastify({ logger: opts.logger ?? true, trustProxy: true, bodyLimit: 64 * 1024 });
+  // Cloud Run（網域對應、沒有負載平衡器）：只信任緊鄰的那一層，req.ip = Google 附加在 X-Forwarded-For 最右邊的真實來源。
+  // trustProxy: true 會取最左邊（客戶端自己填的）→ 可偽造 IP 繞過限流、汙染稽核紀錄。
+  const app = Fastify({ logger: opts.logger ?? true, trustProxy: (_addr: string, hop: number) => hop === 0, bodyLimit: 64 * 1024 });
   await app.register(cookie);
   await app.register(rateLimitPlugin, { global: true, max: 300, timeWindow: '1 minute', errorResponseBuilder: () => ({ statusCode: 429, error: 'RATE_LIMITED' }) });
   await app.register(websocket, { options: { maxPayload: 16 * 1024 } });
+  // 安全標頭：禁止被 iframe 嵌入（點擊劫持騙買道具）、禁止 MIME 猜測；正式環境（HTTPS）加 HSTS
+  app.addHook('onSend', async (_req, reply, payload) => {
+    reply.header('x-frame-options', 'DENY');
+    reply.header('content-security-policy', "frame-ancestors 'none'; base-uri 'self'; object-src 'none'");
+    reply.header('x-content-type-options', 'nosniff');
+    reply.header('referrer-policy', 'strict-origin-when-cross-origin');
+    if (env.secureCookies) reply.header('strict-transport-security', 'max-age=15552000');
+    return payload;
+  });
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof AppError) return reply.status(err.status).send({ error: err.code, message: err.message !== err.code ? err.message : undefined });
@@ -42,6 +54,11 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
     // ---- 開放時間與資料庫閘門（requirements §4.7）----
     api.get('/status', async () => { const now = Date.now(); return { ...clock().status(now), server_time: now }; });
     const NO_DB = new Set(['/api/status', '/api/config']);
+    // 路徑上的 :id 都是 uuid 欄位：格式不對直接 400，不要丟給 Postgres 變成 500（還會寫 error log）
+    api.addHook('onRequest', async (req, reply) => {
+      const id = (req.params as { id?: unknown } | undefined)?.id;
+      if (id !== undefined && !isUuid(id)) return reply.code(400).send({ error: 'BAD_REQUEST' });
+    });
     api.addHook('onRequest', async (req, reply) => {
       const url = req.url.split('?')[0];
       if (NO_DB.has(url)) return;
@@ -130,7 +147,12 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
   // 靜態前端（正式環境單一容器）
   const webDist = env.webDist || path.resolve(process.cwd(), '../web/dist');
   if (existsSync(webDist)) {
-    await app.register(fastifyStatic, { root: webDist, wildcard: false });
+    // 建置時已先壓好 .br/.gz（apps/web/scripts/compress.mjs）；/assets/ 檔名帶 hash → 長快取，其餘（index.html）每次重新驗證
+    const assets = `${path.sep}assets${path.sep}`;
+    await app.register(fastifyStatic, {
+      root: webDist, wildcard: false, preCompressed: true, cacheControl: false,
+      setHeaders: (res, file) => res.setHeader('cache-control', file.includes(assets) ? 'public, max-age=31536000, immutable' : 'no-cache'),
+    });
     app.setNotFoundHandler((req, reply) => {
       if (req.method === 'GET' && !req.url.startsWith('/api') && !req.url.startsWith('/ws')) return reply.sendFile('index.html');
       return reply.status(404).send({ error: 'NOT_FOUND' });

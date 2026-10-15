@@ -11,7 +11,7 @@ import { rateLimit } from './core';
 import { createSolo, currentTick, finish, handleInput, matches, type Match } from './stairs';
 import { publicPet, rowToState } from './pets';
 import type { Bus } from './bus';
-import { publicUser } from './util';
+import { isUuid, publicUser } from './util';
 import { phaseAt } from '@chick/engine';
 import { clock } from './hours';
 import type { DbGate } from './gate';
@@ -119,6 +119,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
         switch (msg.type) {
           case 'time.ping': send(c, { type: 'time.pong', t0: msg.t0, server_time: Date.now(), server_tick: c.match ? currentTick(c.match) : null }); break;
           case 'home.join': {
+            if (!isUuid(msg.home_id)) throw new AppError('BAD_REQUEST');
             const view = await viewHome(db, String(msg.home_id), c.user.id);
             leaveHome(c); c.homeId = view.home.id;
             send(c, { type: 'home.state', ...view });
@@ -141,6 +142,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             break;
           }
           case 'pet.action': {
+            if (!isUuid(msg.pet_id)) throw new AppError('BAD_REQUEST');
             const r = msg.action === 'feed' ? await feed(db, ctx, String(msg.pet_id), msg.food_id, msg.request_id)
               : await ownerAction(db, ctx, String(msg.pet_id), msg.action, msg.request_id);
             send(c, { type: 'action.result', request_id: msg.request_id, ...r });
