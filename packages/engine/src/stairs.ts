@@ -5,7 +5,7 @@ export const STAIRS_PARAMS = {
   tickRate: 30, snapshotEvery: 2, inputBufferTicks: 3,
   width: 96, height: 90, top: 10,
   platW: 24, gap: 16, maxStepX: 44,
-  gravity: 0.2, maxFall: 2.6, bounceVy: -3.2, conveyorSpeed: 0.7,
+  gravity: 0.2, maxFall: 2.6, bounceVy: -2.2, // 原本 -3.2 會彈回上一層；見 test/stairs-bounce.test.ts conveyorSpeed: 0.7,
   scrollBase: 0.25, scrollPerFloor: 0.006, scrollMaxExtra: 0.35,
   spikeDamage: 4, ceilingDamage: 4, invulnTicks: 30, fragileTicks: 12,
   boxW: 12, boxH: 14,
