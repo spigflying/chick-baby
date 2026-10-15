@@ -1,7 +1,8 @@
 import { TopTip, tipText, type TopKey } from './topTip';
 import { PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID } from './sprites';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
-import { drawShell, SHELL_COLORS } from './shell';
+import { drawShell, SHELL_COLORS, eggE, EGG_SAFE_E } from './shell';
+import { fitWidth } from './eggfit';
 import { act, api, errText } from './api';
 import { savePetCache } from './sleep';
 import type { Live } from './ws';
@@ -325,9 +326,45 @@ export class Device {
       <div class="gamebar" hidden><button data-dir="left">◀</button><button class="quit">離開</button><button data-dir="right">▶</button></div>
       <p class="msg">…</p></div></div>`;
     this.cv = this.el.querySelector('canvas.screen')!; this.g = this.cv.getContext('2d')!;
-    this.bind(); this.bindTopTip();
+    this.bind(); this.bindTopTip(); this.bindFit();
     this.timer = window.setInterval(() => this.loop(), 33);
     this.off.push(ctx.live.on((m) => this.onLive(m)));
+  }
+  /** 讓蛋殼永遠包住畫面：依內容實際高度，二分搜尋畫面寬度（佔蛋寬的比例），直到四個角都在彩色邊以內。 */
+  private fitRaf = 0;
+  private bindFit() {
+    const go = () => { cancelAnimationFrame(this.fitRaf); this.fitRaf = requestAnimationFrame(() => this.fitEgg()); };
+    let lastH = -1; // 只看 .lcd 高度變化（顯示／隱藏按鈕列）；蛋本身的大小改變不再觸發，避免來回震盪
+    const ro = new ResizeObserver(() => { const h = this.$('.lcd').offsetHeight; if (h !== lastH) { lastH = h; go(); } });
+    ro.observe(this.$('.lcd')); window.addEventListener('resize', go);
+    this.off.push(() => { ro.disconnect(); window.removeEventListener('resize', go); });
+  }
+  private shellSc: { palette: string[]; rim: string } | null = null; private shellK = 1;
+  paintShell(sc: { palette: string[]; rim: string }) { this.shellSc = sc; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim, Math.round(56 * this.shellK)); }
+  fitEgg() {
+    // 先縮畫面（不小於蛋寬 55%，再窄按鈕文字會折行）；還放不下（例如手機的戰鬥按鈕）就把蛋拉高，最多 1.8 倍
+    for (let k = 1; k <= 1.8001; k += 0.1) {
+      if (Math.abs(k - this.shellK) > 1e-6) { this.shellK = k; this.el.style.aspectRatio = `40/${(56 * k).toFixed(1)}`; if (this.shellSc) this.paintShell(this.shellSc); }
+      if (this.fitInner(k >= 1.79 ? 0.3 : 0.55)) return;
+    }
+  }
+  private fitInner(min: number): boolean {
+    const inner = this.$('.inner'), dev = this.el;
+    const D = dev.getBoundingClientRect(); if (!D.width) return true;
+
+    const fits = (w: number) => {
+      inner.style.left = inner.style.right = `${((1 - w) / 2) * 100}%`;
+      // 垂直置中在蛋最寬的地方（0.54），但不高過原本的 26.5%
+      inner.style.top = `${Math.max(26.5 / this.shellK, 54 - (inner.offsetHeight / D.height) * 50)}%`;
+      for (const el of [this.$('.brand'), this.$('.lcd')]) {
+        const r = el.getBoundingClientRect(), pad = el.classList.contains('lcd') ? 8 : 0; // .lcd 的外框陰影 4+4px
+        for (const [x, y] of [[r.left - pad, r.top - pad], [r.right + pad, r.top - pad], [r.left - pad, r.bottom + pad], [r.right + pad, r.bottom + pad]])
+          if (eggE((x - D.left) / D.width, (y - D.top) / D.height) > EGG_SAFE_E) return false;
+      }
+      return true;
+    };
+    const w = fitWidth(fits, undefined, min);
+    return fits(w);
   }
   destroy() { this.leaveArena(); clearInterval(this.timer); this.off.forEach((f) => f()); this.stairs?.leave(); document.removeEventListener('keydown', this.onKey); document.removeEventListener('keyup', this.onKeyUp); }
   $(s: string) { return this.el.querySelector(s) as HTMLElement; }
@@ -338,7 +375,7 @@ export class Device {
     this.home = view.home; this.isOwner = !!view.home.is_owner; this.visitor = view.visitor;
     this.setPet(view.pet);
     const sc = SHELL_COLORS[this.pet?.species ?? 'chicken'];
-    drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim);
+    this.paintShell(sc);
     this.$('.brand').textContent = this.isOwner ? 'CHICK♥BABY' : `${view.home.owner.display_name} 的家`;
     if (first) this.say(this.isOwner ? (this.pet ? `歡迎回家！` : '還沒有寵物，點「孵蛋」選一隻吧！') : `來 ${view.home.owner.display_name} 家玩～`);
   }
@@ -346,7 +383,7 @@ export class Device {
     const prevSpecies = this.pet?.species;
     this.pet = p;
     if (this.isOwner) savePetCache(localStorage, p); // 休息時段的畫面用
-    if (p && prevSpecies && prevSpecies !== p.species) { const sc = SHELL_COLORS[p.species]; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim); }
+    if (p && prevSpecies && prevSpecies !== p.species) { const sc = SHELL_COLORS[p.species]; this.paintShell(sc); }
     this.buildCells(); this.renderTop(); if (this.menu === 'status') this.renderMenu();
     const ot = this.el.querySelector('.tags [data-g="owner"]'); if (ot && this.home) ot.textContent = this.ownerAway ? '主人外出中' : this.pet?.name ?? this.home.owner.display_name;
   }
@@ -612,7 +649,7 @@ export class Device {
     try {
       const r = await act('POST', '/pets', { species: this.hatchPick, name });
       this.closeMenu(); this.setPet(r.pet); this.petX = 42;
-      const sc = SHELL_COLORS[r.pet.species]; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim);
+      const sc = SHELL_COLORS[r.pet.species]; this.paintShell(sc);
       this.say(`${r.pet.name} 的蛋來了！一分鐘內就會孵化～`);
     } catch (e) { this.say(errText(e)); }
   }
