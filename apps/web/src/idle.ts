@@ -21,6 +21,6 @@ export function watchIdle(live: Live, cfg: IdleConfig = IDLE): () => void {
   const opts = { passive: true, capture: true };
   document.addEventListener('visibilitychange', onVis);
   events.forEach((e) => window.addEventListener(e, wake, opts));
-  const timer = window.setInterval(() => { s.inMatch = live.inMatch; if (!live.isPaused && shouldPause(s, Date.now(), cfg)) live.pause(); }, 5000);
+  const timer = window.setInterval(() => { s.inMatch = live.inMatch || live.inFight; if (!live.isPaused && shouldPause(s, Date.now(), cfg)) live.pause(); }, 5000);
   return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVis); events.forEach((e) => window.removeEventListener(e, wake, opts)); };
 }

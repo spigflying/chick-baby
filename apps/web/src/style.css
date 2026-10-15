@@ -123,3 +123,26 @@ canvas.screen.shake{animation:shake .15s steps(3)}
   .fightbar [data-pad="left"]{grid-area:l}.fightbar [data-pad="jump"]{grid-area:j}.fightbar [data-pad="right"]{grid-area:r}
   .fightbar [data-pad="attack"]{grid-area:a}.fightbar [data-pad="upAtk"]{grid-area:u}.fightbar [data-pad="item"]{grid-area:i}.fightbar .navbtn{grid-area:n}
 }
+
+/* v1.6 發起戰鬥／邀請／排名／排行榜 */
+.fightbar .fightgo{grid-column:1/-1;background:#ee4266;color:#fff;font-size:clamp(11px,3vw,15px)}
+.fightbar .fightgo.off{opacity:.5}
+.fightstat{margin:0;padding:1px 4px;font-size:clamp(9px,2.4vw,12px);color:var(--g3);background:var(--g0);text-align:center}
+.playing .fightstat{display:none}
+.invite{position:absolute;left:8%;right:8%;top:18%;background:var(--g3);color:var(--g0);border:3px solid #ee4266;box-shadow:3px 3px 0 var(--g0);padding:4px 6px;text-align:center;font-size:clamp(10px,2.8vw,14px);z-index:3}
+.invite .ib{display:flex;gap:6px;justify-content:center;margin:4px 0}
+.invite button{all:unset;cursor:pointer;padding:4px 12px;min-height:32px;background:var(--g0);color:var(--g3);-webkit-tap-highlight-color:transparent}
+.invite button[data-acc="1"]{background:#ee4266;color:#fff}
+.invite .ic{font-size:.8em;opacity:.8}
+.fightres .rank{position:relative;width:auto;min-width:70%;background:var(--g3);color:var(--g0);border:2px solid var(--g0);font-size:.8em}
+.fightres .rank th,.fightres .rank td{padding:0 3px;text-align:center;border:0}
+.fightres .rank tr.me{background:#ffd23f}
+.fightres .net{position:relative;font-weight:bold;color:#ffd23f;text-shadow:1px 1px 0 #0f380f}
+.menu .brow small{opacity:.7}
+.menu .brow.mine{background:var(--g1);color:var(--g3)}
+.menu .brow.me{border-top:2px dashed var(--g0);margin-top:2px}
+.menu .go{justify-content:center;margin-top:3px}
+@media (pointer:coarse){ .fightbar{grid-template-areas:"l l l j j j j j j r r r" "a a a u u u i i i n n n" "g g g g g g g g g g g g"} .fightbar .fightgo{grid-area:g} }
+.menu .brow{font-size:.9em}
+.menu .brow span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.menu .brow em{white-space:nowrap}

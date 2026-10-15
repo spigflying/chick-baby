@@ -50,7 +50,7 @@ export function itemHud(eq: string | null, items: Record<string, number> | undef
 
 export interface FSnap { u: string; pet: string; sp: string; name: string; x: number; y: number; dir: 1 | -1; atk: number; inv: number; hp: number; fight: string | null;
   out?: boolean; sw?: string | null; sn?: number; hn?: number; hd?: number; chg?: number; eq?: string | null; items?: Record<string, number>; slip?: boolean }
-export interface ArenaMsg { tick: number; server_time: number; fighters: FSnap[]; fights: { id: string; parts: string[]; left_ms: number }[]; hp_max: number; frozen?: boolean; proj?: { x: number; y: number }[]; ammo?: number }
+export interface ArenaMsg { tick: number; server_time: number; fighters: FSnap[]; fights: { id: string; parts: string[]; left_ms: number }[]; hp_max: number; frozen?: boolean; cooldown_ms?: number; invite?: { id: string; from: string; to: string[]; left_ms: number } | null; proj?: { x: number; y: number }[]; ammo?: number }
 /** 兩個快照之間線性插值（新加入的直接用最新位置）。 */
 export function lerpFighters(prev: ArenaMsg | null, cur: ArenaMsg, t: number): FSnap[] {
   const k = Math.max(0, Math.min(1, t));
@@ -64,14 +64,49 @@ export const NOTICE_TEXT: Record<string, string> = {
   GAME_CLOSED: '休息時間，不能打架',
   NOT_ELIGIBLE: '寵物要醒著、沒生病才能打架',
   ARENA_FULL: '場上太擠了',
+  FIGHT_BUSY: '已經有人發起或正在打架',
+  NO_OPPONENT: '場上沒有可以一起打的寵物',
+  NOT_ENOUGH: '參戰的不到 2 隻，取消',
+  OWNER_OFFLINE: '主人離線，不能打架',
+  OWNER_AWAY: '主人外出中，不能打架',
+  OWNER_SLEEPING: '主人的寵物在睡覺，不能打架',
+  OWNER_SICK: '主人的寵物生病了，不能打架',
 };
+// ---------- v1.6 能不能打 ----------
+export type PetLite = { status: string; sleeping: boolean; sick: boolean } | null | undefined;
+/** 單隻寵物的資格：null = 可以打，否則是原因。 */
+export function petBlock(p: PetLite, who: '你' | '主人' = '你'): string | null {
+  const s = who === '你' ? '你的寵物' : '主人的寵物';
+  if (!p) return who === '你' ? '你還沒有寵物' : '主人沒有寵物';
+  if (p.status === 'egg') return `${s}還是蛋`;
+  if (p.status === 'dead') return `${s}已經死了`;
+  if (p.sleeping) return `${s}在睡覺，不能打架`;
+  if (p.sick) return `${s}生病了，不能打架`;
+  return null;
+}
+/** 發起戰鬥的阻擋原因（依序：主人外出／離線／睡覺／生病 → 自己寵物 → 冷卻 → 對手）。null = 可以發起。 */
+export function fightBlocker(o: { isOwner: boolean; ownerPresent: boolean; ownerAway: boolean; ownerPet: PetLite; myPet: PetLite; cooldownMs: number; opponents: number; busy?: boolean }): string | null {
+  if (!o.isOwner) {
+    if (o.ownerAway) return NOTICE_TEXT.OWNER_AWAY;
+    if (!o.ownerPresent) return NOTICE_TEXT.OWNER_OFFLINE;
+    const ob = petBlock(o.ownerPet, '主人');
+    if (ob) return o.ownerPet?.sleeping ? NOTICE_TEXT.OWNER_SLEEPING : o.ownerPet?.sick ? NOTICE_TEXT.OWNER_SICK : ob;
+  }
+  const mb = petBlock(o.myPet); if (mb) return mb;
+  if (o.busy) return NOTICE_TEXT.FIGHT_BUSY;
+  if (o.cooldownMs > 0) return `剛打完，還要休息 ${Math.ceil(o.cooldownMs / 1000)} 秒`;
+  if (o.opponents < 1) return NOTICE_TEXT.NO_OPPONENT;
+  return null;
+}
+export const INVITE_MS = 10_000;
+export const inviteSecs = (leftMs: number) => Math.max(0, Math.ceil(leftMs / 1000));
 export function resultText(r: { winner: string | null; amount: number; reason: string }, name: (id: string) => string) {
   if (r.reason === 'cancel') return '對戰取消（不轉帳）';
   if (!r.winner) return '平手！不轉帳';
   return `${name(r.winner)} 贏了！拿走 ◎${r.amount}${r.reason === 'forfeit' ? '（對手離開）' : ''}`;
 }
 /** 手機（觸控）的提示：沒有鍵盤，用螢幕按鈕。 */
-export const TOUCH_HINT = '按住 ◀ ▶ 移動・▲ 跳・啄／上啄／道具（龜派氣功按住 1 秒）・選單 開動作列';
+export const TOUCH_HINT = '按住 ◀ ▶ 移動・▲ 跳・啄／上啄／道具（龜派氣功按住 1 秒）・發起戰鬥・選單 開動作列';
 export const hintFor = (m: ControlMode, touch: boolean) => (m === 'pet' && touch ? TOUCH_HINT : m === 'nav' && touch ? '點下方圖示選動作・再按「選單」或任一控制鈕返回' : HINT[m]);
 /** 控制鈕按下：動作列（nav）開著時直接回到寵物控制，不要吞掉這一下（手機沒有 Esc）。 */
 export function padPress(mode: string, down: boolean): { exitNav: boolean; apply: boolean } {
@@ -80,17 +115,29 @@ export function padPress(mode: string, down: boolean): { exitNav: boolean; apply
   return { exitNav: false, apply: mode === 'pet' };
 }
 export const HINT: Record<ControlMode, string> = {
-  pet: '←→ 移動　↑ 跳　空白 啄　↑+空白 上啄　Z 道具　X 換　Enter 選單',
+  pet: '←→ 移動　↑ 跳　空白 啄　↑+空白 上啄　Z 道具　X 換　F 發起戰鬥　Enter 選單',
   nav: '←→ 選擇　Enter 確定　Esc 返回',
   menu: '',
 };
 
 // ---------- v1.5 結算畫面 ----------
-export interface ResultPart { u: string; name: string; dmg: number; hits: number; taken: number; hp: number; out: boolean; forfeit: boolean; delta: number }
-export interface ResultMsg { fight: string; winner: string | null; winner_name: string | null; losers: string[]; draw: boolean; amount: number; reason: string; parts: ResultPart[] }
-export interface ResultView { banner: string; winner: string | null; role: 'winner' | 'loser' | 'draw' | 'spectator'; coin: string | null; lostLine: string | null; stats: [string, string][] }
-const sign = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `${n}` : '±0');
+export interface ResultPart { u: string; name: string; dmg: number; hits: number; taken: number; hp: number; out: boolean; forfeit: boolean; delta: number; transfer?: number; pool?: number }
+export interface ResultMsg { fight: string; winner: string | null; winner_name: string | null; losers: string[]; draw: boolean; amount: number; reason: string; parts: ResultPart[]; pool?: number }
+export interface ResultView { banner: string; winner: string | null; role: 'winner' | 'loser' | 'draw' | 'spectator'; coin: string | null; lostLine: string | null; stats: [string, string][]; rows: RankRow[]; net: string | null }
+export const sign = (n: number) => (n > 0 ? `+${n}` : n < 0 ? `${n}` : '±0');
 /** 每個人看到的結算畫面：彩帶橫幅（贏家寵物名（暱稱））＋自己的金幣變化；輸家多一行「你輸了」與數據；觀眾只看橫幅。 */
+export interface RankRow { rank: number; u: string; name: string; score: number; pool: number; transfer: number; me: boolean }
+/** v1.6 排名：依攻擊分數（總傷害）由高到低；同分同名次。 */
+export function ranking(r: ResultMsg, me: string): RankRow[] {
+  const rows = [...r.parts].sort((a, b) => b.dmg - a.dmg || a.name.localeCompare(b.name));
+  let rank = 0;
+  return rows.map((p, i) => { if (i === 0 || p.dmg !== rows[i - 1].dmg) rank = i + 1; return { rank, u: p.u, name: p.name, score: p.dmg, pool: p.pool ?? 0, transfer: p.transfer ?? p.delta, me: p.u === me }; });
+}
+export const coinStr = (n: number) => `◎${sign(n)}`;
+/** 結算畫面輸入：前 3 秒忽略點擊與按鍵（顯示倒數），之後點／按鍵關閉，約 8 秒自動關。 */
+export const RESULT_LOCK_MS = 3000;
+export function resultInput(elapsedMs: number): 'locked' | 'dismiss' { return elapsedMs < RESULT_LOCK_MS ? 'locked' : 'dismiss'; }
+export const lockSecs = (elapsedMs: number) => Math.max(0, Math.ceil((RESULT_LOCK_MS - elapsedMs) / 1000));
 export function resultView(r: ResultMsg, me: string): ResultView | null {
   if (r.reason === 'cancel') return null;
   const mine = r.parts.find((p) => p.u === me);
@@ -98,11 +145,11 @@ export function resultView(r: ResultMsg, me: string): ResultView | null {
   const role: ResultView['role'] = !mine ? 'spectator' : r.draw || !r.winner ? 'draw' : r.winner === me ? 'winner' : 'loser';
   const coin = mine ? `◎${sign(mine.delta)}` : null;
   const stats: [string, string][] = role === 'loser' && mine ? [
-    ['造成傷害', String(mine.dmg)], ['命中次數', String(mine.hits)], ['被打次數', String(mine.taken)], ['剩餘 HP', String(mine.hp)], ['損失金幣', `◎${-mine.delta}`],
+    ['造成傷害', String(mine.dmg)], ['命中次數', String(mine.hits)], ['被打次數', String(mine.taken)], ['剩餘 HP', String(mine.hp)],
   ] : [];
-  return { banner, winner: r.winner_name, role, coin, lostLine: role === 'loser' ? '你輸了' : null, stats };
+  return { banner, winner: r.winner_name, role, coin, lostLine: role === 'loser' ? '你輸了' : null, stats, rows: ranking(r, me), net: mine ? `你的變化 ${coin}` : null };
 }
-export const RESULT_AUTO_MS = 6000;
+export const RESULT_AUTO_MS = 8000;
 /** 快照之間的特效偵測：揮擊次數（sn）變了 → 畫弧線；被打次數（hn）變了 → 白閃＋飄字＋震動。 */
 export function diffFx(prev: FSnap[] | undefined, cur: FSnap[]) {
   const old = new Map((prev ?? []).map((f) => [f.u, f]));

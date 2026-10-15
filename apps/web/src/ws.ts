@@ -6,6 +6,9 @@ export class Live {
   connectedAt = 0;
   attempt = 0;
   inMatch = false;
+  /** v1.6：打架中／邀請中／結算畫面 → 算活躍（不暫停、不主動重連）。 */
+  inFight = false;
+  get busy() { return this.inMatch || this.inFight; }
   homeId: string | null = null;
   offset = 0; // 伺服器時間 − 本地時間
   rtt = 0;
@@ -19,15 +22,15 @@ export class Live {
   start() {
     this.stopped = false; this.open();
     this.timer = window.setInterval(() => {
-      if (this.ws?.readyState === 1 && !this.inMatch && Date.now() - this.connectedAt > Live.PROACTIVE_MS) this.reconnect('proactive');
-      if (this.inMatch && this.ws?.readyState === 1) this.ping();
+      if (this.ws?.readyState === 1 && !this.busy && Date.now() - this.connectedAt > Live.PROACTIVE_MS) this.reconnect('proactive');
+      if (this.busy && this.ws?.readyState === 1) this.ping();
     }, 10_000);
   }
   stop() { this.stopped = true; clearInterval(this.timer); this.ws?.close(); }
   get isPaused() { return this.paused; }
   /** 閒置或分頁隱藏：關閉連線且不自動重連，直到 resume()。比賽中不暫停。 */
   pause() {
-    if (this.paused || this.stopped || this.inMatch) return;
+    if (this.paused || this.stopped || this.busy) return;
     this.paused = true; const w = this.ws; this.ws = null; w?.close(1000, 'idle');
     this.onStatus('paused');
   }

@@ -6,9 +6,11 @@ import { act, api, errText } from './api';
 import { savePetCache } from './sleep';
 import type { Live } from './ws';
 import { StairsClient } from './stairs';
-import { hintFor, padPress, controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
+import { boardHtml, type Board } from './board';
+import { fightBlocker, inviteSecs, resultInput, lockSecs, coinStr, hintFor, padPress, controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
 
 const W = 120, H = 100, GROUND = 86, HUD = 14;
+const MARK = '#ee4266'; // 自己的標記：和綠色螢幕對比
 const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 
 export interface Ctx {
@@ -28,7 +30,7 @@ export class Device {
   home: any = null; pet: any = null; visitor: any = null;
   isOwner = false;
   cells: Cell[] = []; sel = 0;
-  menu: null | 'feed' | 'status' | 'hatch' | 'result' | 'shop' = null; menuSel = 0; menuHtml = '';
+  menu: null | 'feed' | 'status' | 'hatch' | 'result' | 'shop' | 'board' = null; menuSel = 0; menuHtml = '';
   frame = 0; petX = 42; petDir = 1; anim: any = null; fxT = 0; fxKind: string | null = null;
   busy = false;
   stairs: StairsClient | null = null;
@@ -39,7 +41,8 @@ export class Device {
   arena: { prev: ArenaMsg | null; cur: ArenaMsg; at: number } | null = null;
   navOpen = false; private padState = new PadState(); private lastJoin = 0; private myPresence: PresenceUser | null = null;
   // v1.5：決勝瞬間凍結、結算畫面、打擊特效、道具
-  frozen = false; private frozenAt = 0; result: ResultMsg | null = null; private resultTimer = 0;
+  frozen = false; private frozenAt = 0; result: ResultMsg | null = null; private resultTimer = 0; private resultAt = 0; private lockTimer = 0;
+  invite: { id: string; from: string; from_name: string; to: string[]; until: number; answered: boolean } | null = null; private inviteTimer = 0;
   equip: string | null = null; myItems: Record<string, number> = {};
   private fxSwings: { u: string; kind: string; t: number }[] = []; private fxHits: { u: string; dmg: number; t: number }[] = [];
   private arenaFighters(): FSnap[] {
@@ -71,7 +74,52 @@ export class Device {
     const h = this.$('.hint'); const txt = m === 'stairs' ? '' : hintFor(m as 'pet', matchMedia('(pointer:coarse)').matches) ?? '';
     h.hidden = !txt; if (h.textContent !== txt) h.textContent = txt;
     this.$('.navbtn').classList.toggle('on', this.navOpen);
+    this.updateFightStat();
     if (m !== 'pet' && this.padState.clear()) this.sendPad();
+  }
+  /** v1.6：可不可以打（別人家顯示主人狀態與原因），並把「打架中」告訴閒置偵測。 */
+  blocker(): string | null {
+    const cur = this.arena?.cur, ownerId = this.home?.owner.id;
+    const ownerP = this.isOwner ? null : (this.presenceAll.find((u) => u.id === ownerId) ?? null);
+    return fightBlocker({ isOwner: this.isOwner, ownerPresent: !!ownerP, ownerAway: this.ownerAway, ownerPet: ownerP?.pet ?? this.pet,
+      myPet: this.myPresence?.pet ?? null, cooldownMs: Math.max(0, (cur?.cooldown_ms ?? 0) - (Date.now() - (this.arena?.at ?? 0))),
+      opponents: (cur?.fighters ?? []).filter((f) => f.u !== this.ctx.me.id).length, busy: !!cur?.fights.length || !!cur?.invite || !!this.invite });
+  }
+  private updateFightStat() {
+    const el = this.$('.fightstat'), btn = this.$('.fightgo') as HTMLElement;
+    const show = !this.stairs && this.home && (!this.isOwner || this.guests.length > 0);
+    const cur = this.arena?.cur, me = this.meFighter();
+    let txt = '';
+    if (show) {
+      if (this.result) txt = '結算中…';
+      else if (me?.fight) txt = '對戰中！';
+      else if (this.invite && this.invite.from === this.ctx.me.id) txt = `已發起戰鬥，等待回覆… ${inviteSecs(this.invite.until - Date.now())} 秒`;
+      else if (cur?.fights.length) txt = '觀戰中（別人在打架）';
+      else txt = this.blocker() ?? `可以發起戰鬥${matchMedia('(pointer:coarse)').matches ? '' : '（F）'}`;
+    }
+    el.hidden = !txt; if (el.textContent !== txt) el.textContent = txt;
+    btn.classList.toggle('off', !!this.blocker() || !!me?.fight);
+    this.ctx.live.inFight = !!me?.fight || !!this.invite || !!this.result;
+  }
+  /** F／「發起戰鬥」：先在前端說明不能打的原因，伺服器仍會再檢查。 */
+  startInvite() {
+    const why = this.blocker(); if (why) return this.say(why);
+    if (!this.ctx.live.send({ type: 'arena.invite' })) this.say('連線中斷，稍後再試');
+  }
+  private showInvite() {
+    const el = this.$('.invite'), v = this.invite;
+    if (!v || v.answered || !v.to.includes(this.ctx.me.id)) { el.hidden = true; clearInterval(this.inviteTimer); return; }
+    el.hidden = false;
+    el.innerHTML = `<div class="it">${esc(v.from_name)} 發起戰鬥！</div><div class="ib"><button data-acc="1">參戰</button><button data-acc="0">觀戰</button></div><div class="ic">${inviteSecs(v.until - Date.now())} 秒後自動觀戰</div>`;
+    clearInterval(this.inviteTimer);
+    this.inviteTimer = window.setInterval(() => { const c = el.querySelector('.ic'); if (!this.invite) return this.showInvite(); if (c) c.textContent = `${inviteSecs(this.invite.until - Date.now())} 秒後自動觀戰`; this.updateFightStat(); if (Date.now() > this.invite.until) this.answerInvite(false, true); }, 250);
+  }
+  answerInvite(accept: boolean, silent = false) {
+    const v = this.invite; if (!v || v.answered) return;
+    v.answered = true;
+    if (!silent) this.ctx.live.send({ type: 'arena.reply', invite: v.id, accept });
+    this.say(accept ? '參戰！等其他人回覆…' : '觀戰中');
+    this.showInvite(); this.updateFightStat();
   }
   onArena(m: any) {
     if (m.type === 'arena.state') {
@@ -88,7 +136,15 @@ export class Device {
       const nowFight = !!this.meFighter()?.fight;
       if (nowFight && !wasFight && this.isOwner) this.say('有人來挑戰！方向鍵移動、空白鍵啄');
       this.updateControls();
-    } else if (m.type === 'arena.event' && m.kind === 'start') { this.ctx.toast(`${(m.names ?? [m.a, m.b]).join(' vs ')} 混戰開打！`); }
+    } else if (m.type === 'arena.event' && m.kind === 'invite') {
+      this.invite = { id: m.invite, from: m.from, from_name: m.from_name ?? '?', to: m.to ?? [], until: Date.now() + (m.left_ms ?? 10_000), answered: false };
+      if (m.from === this.ctx.me.id) this.say('已發起戰鬥！等大家回覆（10 秒）');
+      this.showInvite(); this.updateFightStat();
+    } else if (m.type === 'arena.event' && m.kind === 'invite_cancel') {
+      if (this.invite?.id === m.invite) { this.invite = null; this.showInvite(); }
+      if (m.from === this.ctx.me.id || this.arena?.cur.fighters.some((f) => f.u === this.ctx.me.id)) this.ctx.toast(NOTICE_TEXT[m.code] ?? '戰鬥取消');
+      this.updateFightStat();
+    } else if (m.type === 'arena.event' && m.kind === 'start') { this.invite = null; this.showInvite(); this.ctx.toast(`${(m.names ?? [m.a, m.b]).join(' vs ')} 混戰開打！`); }
     else if (m.type === 'arena.event' && m.kind === 'ko') { if (m.user === this.ctx.me.id) this.say('被打倒了…觀戰中'); }
     else if (m.type === 'arena.result') {
       const nm = (id: string) => (this.arena?.cur.fighters.find((f) => f.u === id)?.name) ?? (id === this.home?.owner.id ? this.home.owner.display_name : this.guests.find((g) => g.id === id)?.display_name ?? '?');
@@ -113,7 +169,12 @@ export class Device {
       + (v.coin ? `<div class="coin">${esc(v.coin)}</div>` : '')
       + (v.lostLine ? `<div class="lost">${esc(v.lostLine)}</div>` : '')
       + (v.stats.length ? `<div class="stats">${v.stats.map(([k, x]) => `<div><b>${esc(k)}</b><span>${esc(x)}</span></div>`).join('')}</div>` : '')
-      + '<div class="tap">點一下或按任意鍵繼續</div>';
+      + (v.rows.length ? `<table class="rank"><tr><th>#</th><th>名字</th><th>分數</th><th>獎池</th><th>轉帳</th></tr>${v.rows.map((x) => `<tr class="${x.me ? 'me' : ''}"><td>${x.rank}</td><td>${esc(x.name)}</td><td>${x.score}</td><td>+${x.pool}</td><td>${x.transfer ? coinStr(x.transfer) : '—'}</td></tr>`).join('')}</table>` : '')
+      + (v.net ? `<div class="net">${esc(v.net)}</div>` : '')
+      + `<div class="tap">${lockSecs(0)} 秒後可關閉</div>`;
+    this.resultAt = Date.now();
+    clearInterval(this.lockTimer);
+    this.lockTimer = window.setInterval(() => { const t = el.querySelector('.tap'); const e = Date.now() - this.resultAt; if (t) t.textContent = resultInput(e) === 'locked' ? `${lockSecs(e)} 秒後可關閉` : '點一下或按任意鍵繼續'; if (resultInput(e) !== 'locked') clearInterval(this.lockTimer); }, 200);
     this.confettiT = 0; this.drawConfetti();
     clearTimeout(this.resultTimer); this.resultTimer = window.setTimeout(() => this.dismissResult(), RESULT_AUTO_MS);
     if (r.parts.some((p) => p.u === this.ctx.me.id)) void this.refreshItems();
@@ -126,9 +187,11 @@ export class Device {
     for (let i = 0; i < 40; i++) { const x = (i * 37 + Math.sin(i + this.confettiT / 6) * 6) % 120, y = ((i * 23) % 100 + this.confettiT * (0.6 + (i % 5) * 0.2)) % 100; g.fillStyle = cols[i % cols.length]; g.fillRect(Math.round(x), Math.round(y), i % 3 ? 2 : 1, i % 2 ? 2 : 1); }
     this.confettiT++;
   }
+  /** 使用者點／按鍵：前 3 秒忽略。 */
+  tryDismissResult() { if (this.result && resultInput(Date.now() - this.resultAt) === 'dismiss') this.dismissResult(); }
   dismissResult() {
     if (!this.result) return;
-    clearTimeout(this.resultTimer); this.result = null; this.$('.fightres').hidden = true; this.unfreeze();
+    clearTimeout(this.resultTimer); clearInterval(this.lockTimer); this.result = null; this.$('.fightres').hidden = true; this.unfreeze(); this.updateFightStat();
   }
   private unfreeze() { this.frozen = false; }
   async refreshItems() { try { const r = await api('GET', '/items'); this.myItems = r.items ?? {}; if (this.equip && !(this.myItems[this.equip] > 0)) this.equip = nextEquip(this.myItems, null); this.updateControls(); if (this.menu === 'shop') this.renderMenu(); } catch { /* 下次 */ } }
@@ -144,7 +207,9 @@ export class Device {
       if (x.inv > 0 && !flash && this.frame % 2 && !this.frozen) continue; // 無敵中閃爍
       const n = speciesSprite(x.sp, f && this.arena && !x.out ? 2 : 1), w = sw(n), h = sh(n);
       const px = x.x + (x.atk > 0 && x.sw !== 'beam' ? x.dir * 2 : 0), py = x.y + 12 - h;
-      if (x.out) g.globalAlpha = 0.35;
+      const spectator = !!this.arena?.cur.fights.length && !x.fight;
+      if (x.out) g.globalAlpha = 0.35; else if (spectator) g.globalAlpha = 0.4;
+      if (x.u === this.ctx.me.id) this.outline(n, px, py, x.dir > 0);
       if ((x.chg ?? 0) > 0) { g.fillStyle = this.frame % 2 ? '#ffffff' : '#ffd23f'; const r = 2 + Math.floor((x.chg ?? 0) / 8); g.fillRect(Math.round(px) - r, Math.round(py) - r, w + r * 2, h + r * 2); }
       spr(g, n, px, py, x.dir > 0);
       if (flash) this.whiteOut(n, px, py, x.dir > 0);
@@ -153,6 +218,11 @@ export class Device {
       if (x.fight) { g.fillStyle = PAL[3]; g.fillRect(Math.round(x.x), Math.round(py) - 4, 12, 3); g.fillStyle = PAL[1]; g.fillRect(Math.round(x.x) + 1, Math.round(py) - 3, Math.round(10 * x.hp / hpMax), 1); }
       const tagKey = x.u === this.home?.owner.id ? 'owner' : String(this.guests.findIndex((u) => u.id === x.u));
       if (tagKey !== '-1') this.tag(tagKey, px + w / 2, py - (x.fight ? 4 : 0));
+      if (x.u === this.ctx.me.id) { // 自己：上下浮動的 ▼（對比色）
+        const by = Math.round(py) - (x.fight ? 18 : 14) - (Math.floor(this.frame / 3) % 2 ? 1 : 0), cx = Math.round(px + w / 2);
+        g.fillStyle = PAL[3]; for (let i = 0; i < 5; i++) g.fillRect(cx - 4 + i, by - 1 + i, 9 - i * 2, 1); // 淺色描邊
+        g.fillStyle = MARK; for (let i = 0; i < 4; i++) g.fillRect(cx - 3 + i, by + i, 7 - i * 2, 1);
+      }
     }
     for (const p of this.arena?.cur.proj ?? []) spr(g, 'poop', Math.round(p.x) - 3, Math.round(p.y) - 2);
     for (const hh of this.fxHits) { const x = fs.find((q) => q.u === hh.u); if (!x) continue; const k = (now - hh.t) / 700; this.drawDmg(hh.dmg, x.x + 1, x.y - 16 - k * 10); }
@@ -162,6 +232,19 @@ export class Device {
       g.fillStyle = PAL[0]; g.fillRect(W / 2 - 9, HUD + 1, 18, 7);
       num(g, Math.ceil(left / 1000), W / 2 - 7, HUD + 2);
     }
+  }
+  /** 自己的寵物外框（對比色）。 */
+  private outline(n: string, x: number, y: number, flip: boolean) {
+    const t = document.createElement('canvas'); t.width = sw(n); t.height = sh(n);
+    const tg = t.getContext('2d')!; spr(tg, n, 0, 0, flip); tg.globalCompositeOperation = 'source-in'; tg.fillStyle = MARK; tg.fillRect(0, 0, t.width, t.height);
+    // 只留外框：四個方向位移的剪影，再挖掉原本的剪影
+    const o = document.createElement('canvas'); o.width = t.width + 2; o.height = t.height + 2;
+    const og = o.getContext('2d')!;
+    for (const [dx, dy] of [[0, 1], [2, 1], [1, 0], [1, 2]]) og.drawImage(t, dx, dy);
+    og.globalCompositeOperation = 'destination-out'; og.drawImage(t, 1, 1);
+    const a = this.g.globalAlpha; this.g.globalAlpha = 1;
+    this.g.drawImage(o, Math.round(x) - 1, Math.round(y) - 1);
+    this.g.globalAlpha = a;
   }
   /** 被打中：整隻變白。 */
   private whiteOut(n: string, x: number, y: number, flip: boolean) {
@@ -187,9 +270,10 @@ export class Device {
   }
 
   /** v1.3：在場者的寵物同框。 */
-  ownerAway = false;
+  ownerAway = false; presenceAll: PresenceUser[] = [];
   setPresence(users: PresenceUser[], ownerAway = false) {
     if (!this.home) return;
+    this.presenceAll = users;
     // v1.4：主人在別人家 → 寵物跟著出門；自己家只顯示「主人外出中」（自己看自己家不會發生）
     this.ownerAway = ownerAway && !this.isOwner;
     const g = guestsOf(users, this.home.owner.id);
@@ -233,9 +317,10 @@ export class Device {
     this.el.className = 'device';
     this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
       <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">◎0</span><span data-k="age">—</span></div><div class="toptip" role="tooltip" hidden></div>
-      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div></div>
+      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div></div>
+      <p class="fightstat" hidden></p>
       <div class="labels"></div>
-      <div class="fightbar" hidden><button data-pad="left" aria-label="左">◀</button><button data-pad="jump" aria-label="跳">▲</button><button data-pad="attack">啄</button><button data-pad="upAtk">上啄</button><button data-pad="item">道具</button><button data-pad="right" aria-label="右">▶</button><button class="navbtn">選單</button></div>
+      <div class="fightbar" hidden><button data-pad="left" aria-label="左">◀</button><button data-pad="jump" aria-label="跳">▲</button><button data-pad="attack">啄</button><button data-pad="upAtk">上啄</button><button data-pad="item">道具</button><button data-pad="right" aria-label="右">▶</button><button class="navbtn">選單</button><button class="fightgo">發起戰鬥</button></div>
       <p class="hint" hidden></p>
       <div class="gamebar" hidden><button data-dir="left">◀</button><button class="quit">離開</button><button data-dir="right">▶</button></div>
       <p class="msg">…</p></div></div>`;
@@ -348,7 +433,12 @@ export class Device {
     if ((e.target as HTMLElement)?.closest?.('input,select,textarea')) return;
     const k = e.key;
     if (this.stairs) { if (this.stairs.key(k, true)) e.preventDefault(); return; }
-    if (this.result) { e.preventDefault(); if (!e.repeat) this.dismissResult(); return; }
+    if (this.result) { e.preventDefault(); if (!e.repeat) this.tryDismissResult(); return; }
+    if (this.invite && !this.invite.answered && this.invite.to.includes(this.ctx.me.id) && !this.$('.invite').hidden) {
+      if (k === 'Enter' || k === 'y' || k === 'Y' || k === '1') { e.preventDefault(); this.answerInvite(true); return; }
+      if (k === 'Escape' || k === 'n' || k === 'N' || k === '2') { e.preventDefault(); this.answerInvite(false); return; }
+    }
+    if ((k === 'f' || k === 'F') && !e.repeat && !this.menu && (!this.isOwner || this.guests.length > 0)) { e.preventDefault(); this.startInvite(); return; }
     const mode = this.mode();
     if (mode === 'pet') {
       const b = petKey(k); if (!b) return;
@@ -361,6 +451,7 @@ export class Device {
     if (this.menu) {
       if (k === 'Escape' || k === 'Backspace') this.closeMenu();
       else if ((this.menu === 'feed' || this.menu === 'shop') && (k === 'ArrowUp' || k === 'ArrowDown')) { const n = this.menu === 'feed' ? this.ctx.cfg.foods.length : ITEM_ORDER.length; this.menuSel = (this.menuSel + (k === 'ArrowUp' ? n - 1 : 1)) % n; this.renderMenu(); }
+      else if (this.menu === 'board' && (k === 'Enter' || k === ' ')) { this.closeMenu(); this.startStairs(); }
       else if (k === 'Enter' || k === ' ') { if (this.menu === 'feed') this.chooseFood(this.ctx.cfg.foods[this.menuSel]); else if (this.menu === 'shop') void this.buyItem(ITEM_ORDER[this.menuSel]); else this.closeMenu(); }
       else return;
     } else if (k === 'ArrowLeft') { this.sel = (this.sel + this.cells.length - 1) % this.cells.length; this.drawCells(); }
@@ -392,11 +483,15 @@ export class Device {
         return;
       }
       if (this.menu === 'result') { this.endStairsView(); return; }
+      if (this.menu === 'board') { if (t.closest('[data-go]')) { this.closeMenu(); this.startStairs(); } else if (t.closest('.back')) this.closeMenu(); return; }
       if (this.menu === 'shop') { const it = t.closest('.mi') as HTMLElement | null; if (!it) return; const i = +it.dataset.i!; if (i < 0) return this.closeMenu(); this.menuSel = i; return void this.buyItem(ITEM_ORDER[i]); }
       this.closeMenu();
     });
     this.cv.addEventListener('click', () => { if (!this.stairs && this.menu) this.closeMenu(); });
-    this.$('.fightres').addEventListener('click', () => this.dismissResult());
+    this.$('.fightres').addEventListener('click', () => this.tryDismissResult());
+    this.$('.invite').addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('[data-acc]') as HTMLElement | null; if (b) this.answerInvite(b.dataset.acc === '1'); });
+    // fightbar 的 touchstart 有 preventDefault（擋長按選字），手機不會產生 click → 用 pointerup
+    this.$('.fightgo').addEventListener('pointerup', (e) => { if (e.button > 0) return; this.startInvite(); });
     this.el.querySelectorAll<HTMLElement>('.gamebar [data-dir]').forEach((b) => {
       const d = b.dataset.dir as 'left' | 'right';
       const set = (v: boolean) => (e: Event) => { e.preventDefault(); this.stairs?.setDir(d, v); };
@@ -408,7 +503,7 @@ export class Device {
       // 手機：按住移動要靠 pointer capture（手指稍微滑出按鈕也不會放開）；touchstart preventDefault（非 passive）
       // 擋掉 iOS 長按選字／放大鏡／callout（那會觸發 pointercancel，寵物就停住）與雙擊縮放
       const down = (e: PointerEvent) => {
-        e.preventDefault(); e.stopPropagation();
+        e.preventDefault(); // 不要 stopPropagation：閒置偵測要看到這一下
         try { b.setPointerCapture(e.pointerId); } catch { /* 舊瀏覽器 */ }
         const r = padPress(this.mode(), true);
         if (r.exitNav) { this.navOpen = false; this.updateControls(); }
@@ -449,7 +544,7 @@ export class Device {
     if (this.anim) return this.say(this.anim.type === 'clean' ? '正在洗澎澎，等一下～' : '正在吃東西，等一下～');
     if (a === 'feed' && this.ownerAway) return this.say('主人帶寵物出門了，等牠回來再餵吧');
     if (a === 'feed') { if (p.sleeping) return this.say('噓…牠在睡覺，先叫醒牠吧。'); return this.openMenu('feed'); }
-    if (a === 'play') return this.startStairs();
+    if (a === 'play') return this.openBoard();
     void this.ownerAction(a);
   }
   async ownerAction(a: string) {
@@ -477,6 +572,7 @@ export class Device {
     if (!this.menu) { el.hidden = true; return; }
     el.hidden = false;
     const p = this.pet, coins = this.ctx.wallet(), cfg = this.ctx.cfg;
+    if (this.menu === 'board') { el.innerHTML = boardHtml(this.board, this.boardErr); return; }
     if (this.menu === 'feed') {
       const v = this.visitor, f = cfg.game.feed;
       el.innerHTML = `<div class="mt">— 餵食 —  ◎${coins}</div>` + cfg.foods.map((fd: any, i: number) => {
@@ -557,6 +653,12 @@ export class Device {
   }
 
   // ---------- 下樓梯 ----------
+  board: Board | null = null; boardErr = false;
+  /** v1.6：進下樓梯先看排行榜，按「開始」才開局。 */
+  openBoard() {
+    this.board = null; this.boardErr = false; this.menu = 'board'; this.renderMenu();
+    api('GET', '/leaderboard/stairs').then((b) => { this.board = b; }).catch(() => { this.boardErr = true; }).finally(() => { if (this.menu === 'board') this.renderMenu(); });
+  }
   startStairs() {
     if (!this.ctx.live.send({ type: 'match.create', request_id: crypto.randomUUID() })) return this.say('連線中斷，稍後再試');
     this.say('準備下樓梯…');

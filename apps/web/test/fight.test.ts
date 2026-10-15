@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hintFor, padPress, TOUCH_HINT, controlMode, petKey, PadState, lerpFighters, resultText, HINT, showFightbar, resultView, nextEquip, itemHud, diffFx, RESULT_AUTO_MS, type ResultMsg } from '../src/fight';
+import { hintFor, padPress, TOUCH_HINT, controlMode, petKey, PadState, lerpFighters, resultText, HINT, showFightbar, resultView, nextEquip, itemHud, diffFx, RESULT_AUTO_MS, type ResultMsg, fightBlocker, petBlock, ranking, resultInput, lockSecs, RESULT_LOCK_MS, inviteSecs, NOTICE_TEXT } from '../src/fight';
 
 const base = { isOwner: false, submenuOpen: false, navOpen: false, inArena: true, inFight: false };
 describe('fight input mode (v1.4)', () => {
@@ -74,17 +74,17 @@ describe('fight v2 (v1.5): result screen', () => {
   it('loser: banner, -coins, 「你輸了」 and stats (damage, hits, taken, HP left, coins lost)', () => {
     const v = resultView(r, 'b')!;
     expect(v.banner).toContain('小黃（Benson）'); expect(v.role).toBe('loser'); expect(v.coin).toBe('◎-7'); expect(v.lostLine).toBe('你輸了');
-    expect(v.stats).toEqual([['造成傷害', '40'], ['命中次數', '4'], ['被打次數', '10'], ['剩餘 HP', '0'], ['損失金幣', '◎7']]);
+    expect(v.stats).toEqual([['造成傷害', '40'], ['命中次數', '4'], ['被打次數', '10'], ['剩餘 HP', '0']]);
   });
   it('spectator: banner only', () => {
     const v = resultView(r, 'zz')!;
     expect(v).toMatchObject({ role: 'spectator', coin: null, lostLine: null, stats: [] }); expect(v.banner).toContain('贏了');
   });
-  it('draw shows 平手 and ±0; cancel shows no screen; auto-dismiss ~6s', () => {
+  it('draw shows 平手 and ±0; cancel shows no screen; auto-dismiss ~8s', () => {
     const d = resultView({ ...r, winner: null, winner_name: null, losers: [], draw: true, amount: 0, reason: 'timeout', parts: r.parts.map((p) => ({ ...p, delta: 0 })) }, 'b')!;
     expect(d).toMatchObject({ banner: '平手！', role: 'draw', coin: '◎±0', lostLine: null });
     expect(resultView({ ...r, reason: 'cancel' }, 'a')).toBeNull();
-    expect(RESULT_AUTO_MS).toBe(6000);
+    expect(RESULT_AUTO_MS).toBe(8000);
   });
 });
 
@@ -101,5 +101,44 @@ describe('mobile fight controls', () => {
     // 手機沒有 Enter：訪客與有訪客時的主人預設就是寵物控制
     expect(controlMode({ ...base })).toBe('pet');
     expect(controlMode({ ...base, isOwner: true, visitors: true })).toBe('pet');
+  });
+});
+
+describe('v1.6: result lock, ranking, ineligibility, invite countdown', () => {
+  it('result screen ignores input for 3s, shows the countdown, then dismisses', () => {
+    expect(RESULT_LOCK_MS).toBe(3000);
+    expect(resultInput(0)).toBe('locked'); expect(resultInput(2999)).toBe('locked'); expect(resultInput(3000)).toBe('dismiss');
+    expect([lockSecs(0), lockSecs(1200), lockSecs(2500), lockSecs(3100)]).toEqual([3, 2, 1, 0]);
+  });
+  it('ranking by score with pool share and transfer; viewer net change', () => {
+    const r: ResultMsg = { fight: 'f', winner: 'a', winner_name: 'A', losers: ['b', 'c'], draw: false, amount: 27, reason: 'ko', pool: 50, parts: [
+      { u: 'b', name: 'B', dmg: 10, hits: 1, taken: 3, hp: 0, out: true, forfeit: false, transfer: -7, pool: 17, delta: 10 },
+      { u: 'a', name: 'A', dmg: 30, hits: 3, taken: 0, hp: 90, out: false, forfeit: false, transfer: 27, pool: 33, delta: 60 },
+      { u: 'c', name: 'C', dmg: 0, hits: 0, taken: 1, hp: 0, out: true, forfeit: false, transfer: -20, pool: 0, delta: -20 },
+    ] };
+    expect(ranking(r, 'b').map((x) => [x.rank, x.u, x.score, x.pool, x.transfer, x.me])).toEqual([[1, 'a', 30, 33, 27, false], [2, 'b', 10, 17, -7, true], [3, 'c', 0, 0, -20, false]]);
+    expect(resultView(r, 'b')!.net).toBe('你的變化 ◎+10');
+    expect(resultView(r, 'zz')!.net).toBeNull();
+  });
+  const ok = { status: 'alive', sleeping: false, sick: false };
+  const base = { isOwner: false, ownerPresent: true, ownerAway: false, ownerPet: ok, myPet: ok, cooldownMs: 0, opponents: 1 };
+  it('ineligibility reasons in someone else\'s home', () => {
+    expect(fightBlocker(base)).toBeNull();
+    expect(fightBlocker({ ...base, ownerPresent: false })).toBe('主人離線，不能打架');
+    expect(fightBlocker({ ...base, ownerAway: true, ownerPresent: false })).toBe('主人外出中，不能打架');
+    expect(fightBlocker({ ...base, ownerPet: { ...ok, sleeping: true } })).toBe('主人的寵物在睡覺，不能打架');
+    expect(fightBlocker({ ...base, ownerPet: { ...ok, sick: true } })).toBe(NOTICE_TEXT.OWNER_SICK);
+    expect(fightBlocker({ ...base, myPet: { ...ok, sleeping: true } })).toBe('你的寵物在睡覺，不能打架');
+    expect(fightBlocker({ ...base, myPet: null })).toBe('你還沒有寵物');
+    expect(fightBlocker({ ...base, cooldownMs: 12_300 })).toBe('剛打完，還要休息 13 秒');
+    expect(fightBlocker({ ...base, opponents: 0 })).toBe(NOTICE_TEXT.NO_OPPONENT);
+    expect(fightBlocker({ ...base, busy: true })).toBe(NOTICE_TEXT.FIGHT_BUSY);
+    expect(fightBlocker({ ...base, isOwner: true, ownerPresent: false })).toBeNull(); // 自己家不看主人
+  });
+  it('per-pet eligibility and invite countdown seconds', () => {
+    expect(petBlock({ status: 'egg', sleeping: false, sick: false })).toBe('你的寵物還是蛋');
+    expect(petBlock({ status: 'dead', sleeping: false, sick: false })).toBe('你的寵物已經死了');
+    expect(petBlock({ ...ok, sick: true })).toBe('你的寵物生病了，不能打架');
+    expect([inviteSecs(10_000), inviteSecs(9_001), inviteSecs(1), inviteSecs(-5)]).toEqual([10, 10, 1, 0]);
   });
 });

@@ -32,4 +32,21 @@ describe('watchIdle', () => {
     expect(activity.map((c) => c.type).sort()).toEqual(['keydown', 'pointerdown', 'touchstart']);
     for (const c of activity) expect(c.opts).toMatchObject({ capture: true });
   });
+  it('v1.6: an active fight / invite / result screen (live.inFight) counts as active — never paused while idle', async () => {
+    let tick: () => void = () => {}; let paused = 0;
+    const g = globalThis as any; const saved = { window: g.window, document: g.document };
+    const t = { addEventListener() {}, removeEventListener() {} };
+    g.window = { ...t, setInterval: (f: () => void) => { tick = f; return 1; }, clearInterval() {} };
+    g.document = { ...t, hidden: true };
+    const realNow = Date.now;
+    try {
+      const { watchIdle } = await import('../src/idle');
+      const live = { isPaused: false, inMatch: false, inFight: true, pause() { paused++; }, resume() {} } as any;
+      const off = watchIdle(live, { hiddenMs: 0, idleMs: 0 });
+      Date.now = () => realNow() + 60 * 60_000;
+      tick(); expect(paused).toBe(0);
+      live.inFight = false; tick(); expect(paused).toBe(1);
+      off();
+    } finally { Date.now = realNow; g.window = saved.window; g.document = saved.document; }
+  });
 });
