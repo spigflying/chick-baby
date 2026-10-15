@@ -69,7 +69,7 @@ export class Device {
     const m = this.mode();
     const pet = m === 'pet' || m === 'nav';
     (this.$('.fightbar') as HTMLElement).hidden = !showFightbar(m);
-    const hud = this.$('.itemhud'); const ht = pet ? itemHud(this.equip, this.myItems, this.arena?.cur.ammo ?? 0) : '';
+    const hud = this.$('.itemhud'); const ht = pet ? itemHud(this.equip, this.myItems) : '';
     hud.hidden = !ht; if (hud.textContent !== ht) hud.textContent = ht;
     const h = this.$('.hint'); const txt = m === 'stairs' ? '' : hintFor(m as 'pet', matchMedia('(pointer:coarse)').matches) ?? '';
     h.hidden = !txt; if (h.textContent !== txt) h.textContent = txt;

@@ -50,7 +50,7 @@ describe('fight v2 (v1.5): owner controls', () => {
     expect(nextEquip({ sword: 3, poop: 1 }, 'poop')).toBe('sword');
     expect(nextEquip({ kame: 0 }, null)).toBeNull();
     expect(itemHud('sword', { sword: 9 })).toBe('長劍 剩9場');
-    expect(itemHud('poop', { poop: 4, sword: 1 }, 3)).toBe('丟大便 剩4場・便便×3・X換');
+    expect(itemHud('poop', { poop: 4, sword: 1 })).toBe('丟大便 剩4場・X換'); // v1.6.1：不顯示彈藥
     expect(itemHud(null, {})).toBe('');
   });
   it('detects new swings and hits between snapshots', () => {

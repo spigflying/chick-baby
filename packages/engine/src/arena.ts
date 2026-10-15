@@ -49,7 +49,7 @@ export interface Fighter {
 export interface Part { u: string; pet: string; name: string; dmg: number; hits: number; taken: number; hp: number; out: boolean; forfeit: boolean; used?: ItemId[] }
 export interface Fight { id: string; parts: Part[]; startTick: number; endTick: number }
 export interface Proj { id: number; from: string; fightId: string | null; x: number; y: number; vx: number; vy: number }
-export interface ArenaState { tick: number; fighters: Fighter[]; fights: Fight[]; params: ArenaParams; proj: Proj[]; projSeq: number; poopAmmo: number }
+export interface ArenaState { tick: number; fighters: Fighter[]; fights: Fight[]; params: ArenaParams; proj: Proj[]; projSeq: number }
 export type FightEnd = { type: 'end'; fight: Fight; winner: string | null; losers: string[]; draw: boolean; reason: 'ko' | 'timeout' | 'forfeit' | 'cancel'; used: Record<string, ItemId[]> };
 export type HitKind = 'peck' | 'up' | 'stomp' | 'sword' | 'beam' | 'poop';
 export type ArenaEvent =
@@ -57,11 +57,10 @@ export type ArenaEvent =
   | { type: 'hit'; fightId: string | null; from: string; to: string; kind: HitKind; damage: number; hp: number }
   | { type: 'ko'; fightId: string; user: string }
   | { type: 'refused'; from: string; to: string; reason: string }
-  | { type: 'poop'; from: string }
   | FightEnd;
 export interface ArenaHooks { canStart(users: string[]): string | null; newId(): string }
 
-export function createArena(params: ArenaParams = ARENA_PARAMS): ArenaState { return { tick: 0, fighters: [], fights: [], params, proj: [], projSeq: 0, poopAmmo: 0 }; }
+export function createArena(params: ArenaParams = ARENA_PARAMS): ArenaState { return { tick: 0, fighters: [], fights: [], params, proj: [], projSeq: 0 }; }
 
 /** 加入（已存在則忽略）。x 由呼叫端決定（例如原本的跑道位置）。 */
 export function addFighter(s: ArenaState, f: { userId: string; petId: string; species: string; name: string; x?: number; items?: Partial<Record<ItemId, number>> }) {
@@ -264,9 +263,8 @@ export function stepArena(s: ArenaState, hooks: ArenaHooks): ArenaEvent[] {
         f.itemCd = P.swordCooldownTicks; f.atk = P.swordAnimTicks; f.swing = 'sword'; f.swingN++;
         const g = nearestInFront(s, f, P.swordRange - P.petW); if (g) hit(s, f, g, 'sword', hooks, ev);
         if (f.fightId) useItem(f, 'sword');
-      } else if (eq === 'poop' && s.poopAmmo > 0) {
+      } else if (eq === 'poop') { // 擁有就能無限丟（只受 0.5 秒冷卻限制），和地上的便便無關
         f.itemCd = P.poopCooldownTicks; f.atk = P.attackAnimTicks; f.swing = 'throw'; f.swingN++;
-        s.poopAmmo--; ev.push({ type: 'poop', from: f.userId });
         s.proj.push({ id: ++s.projSeq, from: f.userId, fightId: f.fightId, x: f.x + P.petW / 2 + f.dir * 6, y: f.y + 2, vx: f.dir * P.poopVx, vy: P.poopVy });
         if (f.fightId) useItem(f, 'poop');
       }

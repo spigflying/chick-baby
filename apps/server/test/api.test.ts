@@ -632,21 +632,24 @@ describe('fight mode v2 (v1.5)', () => {
     expect(JSON.stringify(r.json)).not.toContain('@');
     expect((await c.call('GET', '/api/leaderboard/stairs')).json.me).toBeNull(); // 沒寵物
   });
-  it('poop ammo comes from the floor of the home where the fight happens; each throw removes one', async () => {
-    const { a, wa, arena, home, close } = await setup({}, false);
-    const petId = (await a.call('GET', '/api/me')).json.pet.id;
-    await db.updateTable('pets').set({ poop: 2 }).where('id', '=', petId).execute();
+  it('poop: unlimited throws in a fight, never touches any pet\'s poop count or broadcasts pet updates; fights_left -1 once', async () => {
+    const { a, b, wa, wb, wc, arena, fa, close } = await setup({}, false);
+    const pets = (await db.selectFrom('pets').select(['id', 'poop']).execute()).map((p) => p.id);
+    await db.updateTable('pets').set({ poop: 0 }).execute(); // 地上沒有便便也能丟
     await db.updateTable('wallets').set({ balance: 100 }).where('user_id', '=', a.id).execute();
     expect((await a.call('POST', '/api/items/buy', { item_id: 'poop', request_id: rid() })).status).toBe(200);
-    // 觸發彈藥重新載入（任何寵物更新都會）
-    await db.selectFrom('pets').select('id').execute();
-    const { notify } = await import('../src/core'); await notify(db, { t: 'pet', home, pet: petId });
-    for (let i = 0; i < 50 && arena.state.poopAmmo !== 2; i++) await new Promise((r) => setTimeout(r, 20));
-    expect(arena.state.poopAmmo).toBe(2);
-    wa.send({ type: 'arena.input', item: true, equip: 'poop' }); await new Promise((r) => setTimeout(r, 100)); wa.send({ type: 'arena.input', item: false });
-    for (let i = 0; i < 50; i++) { const p = await db.selectFrom('pets').select('poop').where('id', '=', petId).executeTakeFirstOrThrow(); if (p.poop === 1) break; await new Promise((r) => setTimeout(r, 20)); }
-    expect((await db.selectFrom('pets').select('poop').where('id', '=', petId).executeTakeFirstOrThrow()).poop).toBe(1);
-    await close();
+    for (let i = 0; i < 50 && !(fa.items.poop! > 0); i++) await new Promise((r) => setTimeout(r, 20));
+    await startFight(wa, [[wb, true]], wc); await wc.wait((m) => m.type === 'arena.event' && m.kind === 'start', 'start');
+    for (const w of [wa, wb, wc]) w.msgs.length = 0;
+    const sn0 = fa.swingN;
+    for (let i = 0; i < 5; i++) { wa.send({ type: 'arena.input', item: true, equip: 'poop' }); await new Promise((r) => setTimeout(r, 80)); wa.send({ type: 'arena.input', item: false }); await new Promise((r) => setTimeout(r, 520)); }
+    expect(fa.swingN - sn0).toBe(5);
+    for (const w of [wa, wb, wc]) expect(w.msgs.some((m: any) => m.type === 'pet.updated')).toBe(false);
+    expect((await db.selectFrom('pets').select('poop').where('id', 'in', pets).execute()).map((p) => p.poop)).toEqual(pets.map(() => 0));
+    arena.state.fights[0].endTick = arena.state.tick; // 時間到
+    await wc.wait((m) => m.type === 'arena.result', 'result'); await new Promise((r) => setTimeout(r, 200));
+    expect((await db.selectFrom('user_items').select('fights_left').where('user_id', '=', a.id).where('item_id', '=', 'poop').executeTakeFirstOrThrow()).fights_left).toBe(9);
+    void b; await close();
   });
 });
 

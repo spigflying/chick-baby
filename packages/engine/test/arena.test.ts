@@ -109,17 +109,29 @@ describe('arena v2: items', () => {
     // 放開就取消蓄力
     const t = arena([10, 30], { a: { kame: 1 } }); setArenaInput(t, 'a', { item: true }); run(t, 10); setArenaInput(t, 'a', {}); run(t, 1); expect(F(t, 'a').charge).toBe(0);
   });
-  it('poop: arc projectile, 8 dmg, slip, ammo from the home floor', () => {
-    const s = arena([10, 40], { a: { poop: 2 } }); s.poopAmmo = 1; F(s, 'a').dir = 1;
-    const e1 = tap(s, 'a', { item: true });
-    expect(e1.some((x) => x.type === 'poop')).toBe(true); expect(s.poopAmmo).toBe(0); expect(s.proj).toHaveLength(1);
+  it('poop: arc projectile, 8 dmg, slip; unlimited throws in a fight, limited only by the 0.5s cooldown', () => {
+    const s = arena([10, 40], { a: { poop: 2 } }); F(s, 'a').dir = 1;
+    tap(s, 'a', { item: true });
+    expect(s.proj).toHaveLength(1);
     const ys: number[] = []; let hit: any;
     for (let i = 0; i < 40 && !hit; i++) { hit = stepArena(s, hooks()).find((x) => x.type === 'hit'); if (s.proj[0]) ys.push(s.proj[0].y); }
     expect(Math.min(...ys)).toBeLessThan(ys[0]); // 先往上再落下（拋物線）
     expect(hit).toMatchObject({ kind: 'poop', damage: 8, to: 'b' });
     expect(F(s, 'b').slip).toBeGreaterThan(0);
-    run(s, 20); F(s, 'a').itemCd = 0;
-    expect(tap(s, 'a', { item: true }).some((x) => x.type === 'poop')).toBe(false); // 沒有便便了
+    // 不需要彈藥：連丟很多次；冷卻 15 tick（0.5 秒）內按不出來
+    const t = arena([10, 100], { a: { poop: 1 } }); F(t, 'a').dir = -1; let n = 0;
+    for (let k = 0; k < 12; k++) {
+      const sn = F(t, 'a').swingN;
+      tap(t, 'a', { item: true }); expect(F(t, 'a').swingN).toBe(sn + 1); n++; // 丟出去了
+      tap(t, 'a', { item: true }); expect(F(t, 'a').swingN).toBe(sn + 1); // 冷卻中
+      run(t, P.poopCooldownTicks);
+    }
+    expect(n).toBe(12);
+    expect(F(t, 'a').used.filter((x) => x === 'poop')).toEqual(['poop']); // 每場只扣一次
+    expect(P.poopCooldownTicks).toBe(15);
+  });
+  it('poop needs the item: no throw without owning it', () => {
+    const s = arena([10, 40]); F(s, 'a').equip = 'poop' as any; tap(s, 'a', { item: true }); expect(s.proj).toHaveLength(0);
   });
   it('X cycles only to owned items', () => {
     const s = arena([10, 40], { a: { sword: 1, poop: 1 } });

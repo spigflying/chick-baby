@@ -31,7 +31,7 @@ export class PadState {
 export const ITEM_INFO: Record<string, { name: string; price: number; fights: number; desc: string }> = {
   sword: { name: '長劍', price: 150, fights: 10, desc: '揮砍 42px・12 傷害' },
   kame: { name: '龜派氣功', price: 300, fights: 5, desc: '按住 1 秒・光束 30 傷害・每場 1 次' },
-  poop: { name: '丟大便', price: 50, fights: 10, desc: '拋物線・8 傷害＋滑倒・彈藥=地上的便便' },
+  poop: { name: '丟大便', price: 50, fights: 10, desc: '拋物線・8 傷害＋滑倒・對戰中無限丟（0.5 秒冷卻）' },
 };
 export const ITEM_ORDER = ['sword', 'kame', 'poop'];
 /** X：在擁有（剩餘場數 > 0）的道具間循環。 */
@@ -42,15 +42,15 @@ export function nextEquip(items: Record<string, number> | undefined, cur: string
   return owned[(k + 1) % owned.length];
 }
 /** HUD：裝備中的道具與剩餘場數（丟大便另外顯示彈藥）。 */
-export function itemHud(eq: string | null, items: Record<string, number> | undefined, ammo = 0): string {
+export function itemHud(eq: string | null, items: Record<string, number> | undefined): string {
   if (!eq || !(items?.[eq]! > 0)) return '';
   const n = Object.keys(items ?? {}).filter((k) => items![k] > 0).length;
-  return `${ITEM_INFO[eq].name} 剩${items![eq]}場${eq === 'poop' ? `・便便×${ammo}` : ''}${n > 1 ? '・X換' : ''}`;
+  return `${ITEM_INFO[eq].name} 剩${items![eq]}場${n > 1 ? '・X換' : ''}`;
 }
 
 export interface FSnap { u: string; pet: string; sp: string; name: string; x: number; y: number; dir: 1 | -1; atk: number; inv: number; hp: number; fight: string | null;
   out?: boolean; sw?: string | null; sn?: number; hn?: number; hd?: number; chg?: number; eq?: string | null; items?: Record<string, number>; slip?: boolean }
-export interface ArenaMsg { tick: number; server_time: number; fighters: FSnap[]; fights: { id: string; parts: string[]; left_ms: number }[]; hp_max: number; frozen?: boolean; cooldown_ms?: number; invite?: { id: string; from: string; to: string[]; left_ms: number } | null; proj?: { x: number; y: number }[]; ammo?: number }
+export interface ArenaMsg { tick: number; server_time: number; fighters: FSnap[]; fights: { id: string; parts: string[]; left_ms: number }[]; hp_max: number; frozen?: boolean; cooldown_ms?: number; invite?: { id: string; from: string; to: string[]; left_ms: number } | null; proj?: { x: number; y: number }[] }
 /** 兩個快照之間線性插值（新加入的直接用最新位置）。 */
 export function lerpFighters(prev: ArenaMsg | null, cur: ArenaMsg, t: number): FSnap[] {
   const k = Math.max(0, Math.min(1, t));
