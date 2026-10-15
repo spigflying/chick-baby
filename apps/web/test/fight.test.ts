@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { controlMode, petKey, PadState, lerpFighters, resultText, HINT, showFightbar, resultView, nextEquip, itemHud, diffFx, RESULT_AUTO_MS, type ResultMsg } from '../src/fight';
+import { hintFor, padPress, TOUCH_HINT, controlMode, petKey, PadState, lerpFighters, resultText, HINT, showFightbar, resultView, nextEquip, itemHud, diffFx, RESULT_AUTO_MS, type ResultMsg } from '../src/fight';
 
 const base = { isOwner: false, submenuOpen: false, navOpen: false, inArena: true, inFight: false };
 describe('fight input mode (v1.4)', () => {
@@ -85,5 +85,21 @@ describe('fight v2 (v1.5): result screen', () => {
     expect(d).toMatchObject({ banner: '平手！', role: 'draw', coin: '◎±0', lostLine: null });
     expect(resultView({ ...r, reason: 'cancel' }, 'a')).toBeNull();
     expect(RESULT_AUTO_MS).toBe(6000);
+  });
+});
+
+describe('mobile fight controls', () => {
+  it('pad buttons work in pet mode, and pull you out of the action menu instead of being swallowed', () => {
+    expect(padPress('pet', true)).toEqual({ exitNav: false, apply: true });
+    expect(padPress('nav', true)).toEqual({ exitNav: true, apply: true });
+    expect(padPress('menu', true)).toEqual({ exitNav: false, apply: false });
+    expect(padPress('menu', false).apply).toBe(true); // 放開一律送出
+  });
+  it('touch devices get an on-screen hint instead of keyboard keys', () => {
+    expect(hintFor('pet', true)).toBe(TOUCH_HINT); expect(TOUCH_HINT).not.toContain('Enter');
+    expect(hintFor('pet', false)).toContain('Enter');
+    // 手機沒有 Enter：訪客與有訪客時的主人預設就是寵物控制
+    expect(controlMode({ ...base })).toBe('pet');
+    expect(controlMode({ ...base, isOwner: true, visitors: true })).toBe('pet');
   });
 });

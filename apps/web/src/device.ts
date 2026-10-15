@@ -6,7 +6,7 @@ import { act, api, errText } from './api';
 import { savePetCache } from './sleep';
 import type { Live } from './ws';
 import { StairsClient } from './stairs';
-import { controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
+import { hintFor, padPress, controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
 
 const W = 120, H = 100, GROUND = 86, HUD = 14;
 const esc = (s: string) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -68,7 +68,7 @@ export class Device {
     (this.$('.fightbar') as HTMLElement).hidden = !showFightbar(m);
     const hud = this.$('.itemhud'); const ht = pet ? itemHud(this.equip, this.myItems, this.arena?.cur.ammo ?? 0) : '';
     hud.hidden = !ht; if (hud.textContent !== ht) hud.textContent = ht;
-    const h = this.$('.hint'); const txt = m === 'stairs' ? '' : HINT[m as 'pet'] ?? '';
+    const h = this.$('.hint'); const txt = m === 'stairs' ? '' : hintFor(m as 'pet', matchMedia('(pointer:coarse)').matches) ?? '';
     h.hidden = !txt; if (h.textContent !== txt) h.textContent = txt;
     this.$('.navbtn').classList.toggle('on', this.navOpen);
     if (m !== 'pet' && this.padState.clear()) this.sendPad();
@@ -235,7 +235,7 @@ export class Device {
       <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">◎0</span><span data-k="age">—</span></div><div class="toptip" role="tooltip" hidden></div>
       <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div></div>
       <div class="labels"></div>
-      <div class="fightbar" hidden><button data-pad="left">◀</button><button data-pad="jump">▲</button><button data-pad="attack">啄</button><button data-pad="upAtk">上啄</button><button data-pad="item">道具</button><button data-pad="right">▶</button><button class="navbtn">選單</button></div>
+      <div class="fightbar" hidden><button data-pad="left" aria-label="左">◀</button><button data-pad="jump" aria-label="跳">▲</button><button data-pad="attack">啄</button><button data-pad="upAtk">上啄</button><button data-pad="item">道具</button><button data-pad="right" aria-label="右">▶</button><button class="navbtn">選單</button></div>
       <p class="hint" hidden></p>
       <div class="gamebar" hidden><button data-dir="left">◀</button><button class="quit">離開</button><button data-dir="right">▶</button></div>
       <p class="msg">…</p></div></div>`;
@@ -405,10 +405,25 @@ export class Device {
     this.$('.gamebar .quit').addEventListener('click', () => this.stairs?.quit());
     this.el.querySelectorAll<HTMLElement>('.fightbar [data-pad]').forEach((b) => {
       const d = b.dataset.pad as keyof Pad;
-      const set = (v: boolean) => (e: Event) => { e.preventDefault(); if (this.mode() === 'pet' || !v) this.setPad(d, v); };
-      b.addEventListener('pointerdown', set(true)); ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => b.addEventListener(ev, set(false)));
+      // 手機：按住移動要靠 pointer capture（手指稍微滑出按鈕也不會放開）；touchstart preventDefault（非 passive）
+      // 擋掉 iOS 長按選字／放大鏡／callout（那會觸發 pointercancel，寵物就停住）與雙擊縮放
+      const down = (e: PointerEvent) => {
+        e.preventDefault(); e.stopPropagation();
+        try { b.setPointerCapture(e.pointerId); } catch { /* 舊瀏覽器 */ }
+        const r = padPress(this.mode(), true);
+        if (r.exitNav) { this.navOpen = false; this.updateControls(); }
+        if (r.apply) this.setPad(d, true);
+        b.classList.add('down');
+      };
+      const up = (e: Event) => { e.preventDefault(); this.setPad(d, false); b.classList.remove('down'); };
+      b.addEventListener('pointerdown', down);
+      ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((ev) => b.addEventListener(ev, up));
+      b.addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
+      b.addEventListener('contextmenu', (e) => e.preventDefault());
     });
+    this.$('.fightbar').addEventListener('touchstart', (e) => e.preventDefault(), { passive: false });
     this.$('.navbtn').addEventListener('click', () => { this.navOpen = !this.navOpen; this.updateControls(); });
+    this.$('.navbtn').addEventListener('touchend', (e) => { e.preventDefault(); this.navOpen = !this.navOpen; this.updateControls(); }, { passive: false });
     // 滑鼠：和下樓梯一樣，左鍵按住往左、右鍵按住往右
     this.cv.addEventListener('pointerdown', (e) => { if (this.mode() !== 'pet' || e.pointerType !== 'mouse') return; if (e.button === 0) this.setPad('left', true); else if (e.button === 2) this.setPad('right', true); });
     window.addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') return; this.setPad('left', false); this.setPad('right', false); });

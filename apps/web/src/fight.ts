@@ -70,6 +70,15 @@ export function resultText(r: { winner: string | null; amount: number; reason: s
   if (!r.winner) return '平手！不轉帳';
   return `${name(r.winner)} 贏了！拿走 ◎${r.amount}${r.reason === 'forfeit' ? '（對手離開）' : ''}`;
 }
+/** 手機（觸控）的提示：沒有鍵盤，用螢幕按鈕。 */
+export const TOUCH_HINT = '按住 ◀ ▶ 移動・▲ 跳・啄／上啄／道具（龜派氣功按住 1 秒）・選單 開動作列';
+export const hintFor = (m: ControlMode, touch: boolean) => (m === 'pet' && touch ? TOUCH_HINT : m === 'nav' && touch ? '點下方圖示選動作・再按「選單」或任一控制鈕返回' : HINT[m]);
+/** 控制鈕按下：動作列（nav）開著時直接回到寵物控制，不要吞掉這一下（手機沒有 Esc）。 */
+export function padPress(mode: string, down: boolean): { exitNav: boolean; apply: boolean } {
+  if (!down) return { exitNav: false, apply: true };
+  if (mode === 'nav') return { exitNav: true, apply: true };
+  return { exitNav: false, apply: mode === 'pet' };
+}
 export const HINT: Record<ControlMode, string> = {
   pet: '←→ 移動　↑ 跳　空白 啄　↑+空白 上啄　Z 道具　X 換　Enter 選單',
   nav: '←→ 選擇　Enter 確定　Esc 返回',
