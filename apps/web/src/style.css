@@ -24,6 +24,10 @@ main.page{max-width:980px;margin:0 auto;padding:10px;display:flex;flex-wrap:wrap
 .lcd{position:relative}
 .lcd-top [data-k]{cursor:help;user-select:none;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .toptip{position:absolute;z-index:20;pointer-events:none;font-family:var(--ui);font-size:13px;line-height:1.2;white-space:nowrap;background:var(--g0);color:var(--g3);padding:3px 6px;border:2px solid var(--g3);box-shadow:0 0 0 2px var(--g0),3px 3px 0 2px #000}
+.evobar{height:3px;margin:0 0 2px;background:color-mix(in srgb,var(--g2) 55%,var(--g3));cursor:help;touch-action:manipulation;-webkit-tap-highlight-color:transparent;position:relative}
+.evobar::before{content:'';position:absolute;inset:-5px 0}
+.evobar i{display:block;height:100%;width:0;background:color-mix(in srgb,var(--g1) 60%,var(--g2))}
+.evobar.off{visibility:hidden}
 .scr{position:relative}
 .scr canvas.screen{display:block;width:100%;margin:0 auto;background:var(--g3);cursor:pointer}
 .msg{margin:0;min-height:2.6em;font-size:clamp(8px,2.4vw,14px);line-height:1.3;background:var(--g2);padding:2px 3px}

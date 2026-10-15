@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACCESSORIES, BAO_POOLS, CARE_POOL, GAME, OUTFITS, careScore, evolveAt, growthBy, lookKey, makeClock, newPet, parseOpenHours, resolveLook, rollBao, simulate, createRng, ALWAYS_OPEN, type PetState } from '../src';
+import { stagesDue, stageAt, evolveProgress, ACCESSORIES, BAO_POOLS, CARE_POOL, GAME, OUTFITS, careScore, evolveAt, growthBy, lookKey, makeClock, newPet, parseOpenHours, resolveLook, rollBao, simulate, createRng, ALWAYS_OPEN, type PetState } from '../src';
 
 function pet(stats: Partial<PetState>, counters: Record<string, number> = {}): PetState {
   const p = newPet('chicken', 0); p.status = 'alive'; p.hatchedAt = 0; Object.assign(p, stats); Object.assign(p.counters, counters); return p;
@@ -64,4 +64,26 @@ describe('寶 evolution (v1.7)', () => {
     simulate(p, 10 * 60_000, createRng(1), { ...GAME, timeScale: 0 }, ALWAYS_OPEN);
     expect(p.counters.hungryMin).toBeCloseTo(10); expect(p.counters.dirtyMin).toBeCloseTo(10);
   });
+  it('re-evolves every 77 open hours after the first 33; catch-up counts stages', () => {
+    const p = newPet('chicken', 0); p.status = 'alive'; p.hatchedAt = 0; const H = 3_600_000;
+    expect(stagesDue(p, ALWAYS_OPEN, 32 * H, GAME.bao)).toBe(0);
+    expect(stagesDue(p, ALWAYS_OPEN, 33 * H, GAME.bao)).toBe(1);
+    expect(stagesDue(p, ALWAYS_OPEN, 109 * H, GAME.bao)).toBe(1);
+    expect(stagesDue(p, ALWAYS_OPEN, 110 * H, GAME.bao)).toBe(2);
+    expect(stagesDue(p, ALWAYS_OPEN, (33 + 77 * 3) * H, GAME.bao)).toBe(4);
+    expect(stageAt(p, ALWAYS_OPEN, 2, GAME.bao)).toBe(110 * H);
+    const pr = evolveProgress(p, ALWAYS_OPEN, 120 * H, 2, GAME.bao)!;
+    expect(pr.need_ms).toBe(77 * H); expect(pr.done_ms).toBe(10 * H); expect(pr.next_at).toBe(187 * H);
+  });
+  it('later evolutions avoid the previous main/secondary items', () => {
+    for (let i = 0; i < 40; i++) {
+      const p = newPet('chicken', 0); p.strength = 40; p.speed = 38;
+      const a = rollBao('r' + i, p, 0, 1);
+      const prev = a.items.filter((x) => !(CARE_POOL as string[]).includes(x));
+      const b = rollBao('r' + i, p, 0, 2, prev);
+      for (const x of prev) expect(b.items).not.toContain(x);
+      expect(b.stage).toBe(2);
+    }
+  });
 });
+

@@ -715,6 +715,21 @@ describe('寶 evolution & outfits (v1.7)', () => {
     const ev = await db.selectFrom('pet_events').select('type').where('pet_id', '=', id).where('type', '=', 'evolve').execute();
     expect(ev).toHaveLength(1);
   });
+  it('evolves again every 77 open hours; offline catch-up applies only the latest roll but counts stages', async () => {
+    const a = await login('evore'); const id = await hatchAlive(a, 'chicken', { strength: 60 });
+    await evolveDue(id);
+    let me = await a.call('GET', '/api/me');
+    const first = me.json.pet.bao; expect(me.json.pet.bao_stage).toBe(1);
+    expect(me.json.pet.evolve_need_ms).toBe(77 * 3_600_000);
+    await db.updateTable('pets').set({ hatched_at: sql`now() - interval '${sql.raw(String(33 + 77 * 2 + 1))} hours'` } as any).where('id', '=', id).execute();
+    me = await a.call('GET', '/api/me');
+    expect(me.json.pet.bao_stage).toBe(3);
+    const mains = first.items.filter((x: string) => !['bow', 'flower', 'leaf', 'double'].includes(x));
+    expect(me.json.pet.bao.items.slice().sort().join(',')).not.toBe(first.items.slice().sort().join(','));
+    expect(me.json.pet.evolve_done_ms).toBeGreaterThan(0);
+    const ev = await db.selectFrom('pet_events').select('type').where('pet_id', '=', id).where('type', '=', 'evolve').execute();
+    expect(ev).toHaveLength(2); expect(mains.length).toBeGreaterThan(0);
+  });
   it('rerolls deterministically (seed+n) when another living pet already has the exact same set', async () => {
     const a = await login('dupa'); const b = await login('dupb');
     const ida = await hatchAlive(a, 'chicken', { strength: 60 }); const idb = await hatchAlive(b, 'chicken', { strength: 60 });

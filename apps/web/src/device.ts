@@ -1,4 +1,4 @@
-import { TopTip, tipText, type TopKey } from './topTip';
+import { TopTip, tipText, evoProgress, type TopKey } from './topTip';
 import { ANCHOR, PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID, petSpriteKey, frontSprite, coinHtml } from './sprites';
 import { ACCESSORIES, OUTFITS, OUTFIT_IDS, isAccId } from '@chick/engine';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
@@ -317,7 +317,7 @@ export class Device {
     this.el = document.createElement('div');
     this.el.className = 'device';
     this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
-      <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">${coinHtml(0)}</span><span data-k="age">—</span></div><div class="toptip" role="tooltip" hidden></div>
+      <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">${coinHtml(0)}</span><span data-k="age">—</span></div><div class="evobar" data-k="evo" aria-label="下次進化進度"><i></i></div><div class="toptip" role="tooltip" hidden></div>
       <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div></div>
       <p class="fightstat" hidden></p>
       <div class="labels"></div>
@@ -394,9 +394,9 @@ export class Device {
     });
   }
   private topTip = new TopTip(() => this.showTopTip());
-  private onDocDown = (e: PointerEvent) => { if (!(e.target as HTMLElement)?.closest?.('.lcd-top [data-k]')) this.topTip.outside(); };
+  private onDocDown = (e: PointerEvent) => { if (!(e.target as HTMLElement)?.closest?.('.lcd [data-k]')) this.topTip.outside(); };
   private bindTopTip() {
-    this.el.querySelectorAll<HTMLElement>('.lcd-top [data-k]').forEach((s) => {
+    this.el.querySelectorAll<HTMLElement>('.lcd-top [data-k], .evobar').forEach((s) => {
       const k = s.dataset.k as TopKey;
       s.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') this.topTip.hover(k); });
       s.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') this.topTip.leave(k); });
@@ -409,8 +409,8 @@ export class Device {
   private showTopTip() {
     const tip = this.$('.toptip'), k = this.topTip.shown;
     if (!k) { tip.hidden = true; return; }
-    const s = this.$(`.lcd-top [data-k="${k}"]`);
-    tip.textContent = tipText(k, s.textContent ?? '', this.pet?.status === 'egg');
+    const s = this.$(`.lcd [data-k="${k}"]`);
+    tip.textContent = tipText(k, k === 'evo' ? evoProgress(this.pet)?.text ?? '' : s.textContent ?? '', this.pet?.status === 'egg');
     tip.hidden = false;
     const lcd = this.$('.lcd').getBoundingClientRect(), r = s.getBoundingClientRect();
     tip.style.top = `${r.bottom - lcd.top + 4}px`;
@@ -426,6 +426,12 @@ export class Device {
       const a = Math.max(0, Math.floor((Date.now() - (p.hatched_at ?? p.born_at)) / 60000));
       t('age', p.status === 'egg' ? `${Math.max(0, Math.ceil((p.hatch_at - this.ctx.live.serverNow()) / 1000))}秒` : a < 60 ? a + '分' : a < 1440 ? Math.floor(a / 60) + '時' : Math.floor(a / 1440) + '天');
     } else t('age', '—');
+    // v1.7 寶：低調的進化進度條（蛋／死亡不顯示；下樓梯、戰鬥中隱藏）
+    const ev = evoProgress(p), bar = this.$('.evobar');
+    const hide = !ev || !!this.stairs || !!this.meFighter()?.fight;
+    bar.classList.toggle('off', hide);
+    if (ev) (bar.firstElementChild as HTMLElement).style.width = `${(ev.frac * 100).toFixed(1)}%`;
+    if (hide && this.topTip.shown === 'evo') this.topTip.outside();
     if (this.topTip.shown) this.showTopTip();
   }
 
@@ -568,8 +574,9 @@ export class Device {
   /** v1.7 寶：進化瞬間的閃光（約 3 秒）＋訊息；每隻寵物只演一次（localStorage）。 */
   evoT = 0;
   celebrateEvolve(p: any) {
-    try { if (localStorage.getItem(`bao-seen:${p.id}`)) return; localStorage.setItem(`bao-seen:${p.id}`, '1'); } catch { /* 無痕模式 */ }
-    this.evoT = 36; setTimeout(() => this.say(`${p.name}進化成寶了！`), 0); // 晚一點說，避免被「歡迎回家」蓋掉
+    const st = p.bao_stage ?? 1, key = st > 1 ? `bao-seen:${p.id}:${st}` : `bao-seen:${p.id}`;
+    try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch { /* 無痕模式 */ }
+    this.evoT = 36; setTimeout(() => this.say(st > 1 ? `${p.name}又進化了！（第 ${st} 次）` : `${p.name}進化成寶了！`), 0); // 晚一點說，避免被「歡迎回家」蓋掉
   }
   private drawEvolve(pw: number, ph: number, baseY: number) {
     const g = this.g, t = 36 - this.evoT;
