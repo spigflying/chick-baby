@@ -6,6 +6,8 @@ import { Device } from './device';
 import { drawShell } from './shell';
 import { spriteCanvas, speciesSprite, SPECIES_LABEL, PAL, spr, sw, sh } from './sprites';
 import { watchIdle } from './idle';
+import { createUpdater, SEEN_KEY } from './update';
+import { PET_CACHE_KEY } from './sleep';
 import { formatCountdown, formatOpensAt, closedLine, loadPetCache, savePetCache, sleepSprite } from './sleep';
 
 const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -248,12 +250,24 @@ async function route() {
   if (p === '/admin') return adminPage();
   nav('/', true);
 }
+// v1.6.2 新版本提示：WS 連上、狀態輪詢（3 分鐘）、分頁回到前景時比對 build id
+const updater = createUpdater({
+  mine: __BUILD_ID__,
+  busy: () => !!device?.stairs || !!live?.inFight || !!live?.inMatch,
+  existingUser: () => { try { return !!localStorage.getItem(PET_CACHE_KEY) || !!localStorage.getItem(SEEN_KEY); } catch { return false; } },
+  fetchStatus: () => api('GET', '/status'),
+});
+(window as any).__updater = updater;
+document.addEventListener('visibilitychange', () => { if (!document.hidden) void updater.check(); });
+window.addEventListener('focus', () => void updater.check());
+setInterval(() => { if (!document.hidden) void updater.check(); }, 3 * 60_000);
 function startLive() {
   live?.stop();
   live = new Live();
   live.onStatus = (s) => {
     if (s === 'unauthorized') { me = null; void route(); }
     else if (s === 'closed') void goSleep();
+    else if (s === 'online') void updater.check();
     else if (s === 'paused') toast('閒置中，已暫停連線；回來點一下畫面就會繼續');
   };
   live.on((m) => {
@@ -274,6 +288,7 @@ function startLive() {
 }
 async function boot() {
   const st = await api('GET', '/status').catch(() => null);
+  updater.boot(st);
   if (st && !st.open) return sleepPage(st); // 休息時段：不連資料庫、不開 WebSocket
   cfg = cfg ?? await api('GET', '/config');
   try { me = await api('GET', '/me'); setWallet(me.wallet.balance); savePetCache(localStorage, me.pet); startLive(); }

@@ -3,7 +3,7 @@ import cookie from '@fastify/cookie';
 import rateLimitPlugin from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
 import fastifyStatic from '@fastify/static';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Db } from './db';
 import { env } from './env';
@@ -20,7 +20,13 @@ import { clock } from './hours';
 import { createDbGate, type DbGate } from './gate';
 import { requireCronOidc, type IdTokenVerifier } from './cron-auth';
 
-export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?: DbGate; cronVerifier?: IdTokenVerifier } = {}) {
+/** 前端建置時寫的 dist/build.json（build id＋更新說明）；本機開發沒有就是 null。 */
+export function readRelease(dir: string): { build: string | null; notes: string[] } {
+  try { const j = JSON.parse(readFileSync(path.join(dir, 'build.json'), 'utf8')); return { build: typeof j.build === 'string' ? j.build : null, notes: Array.isArray(j.notes) ? j.notes.map(String) : [] }; }
+  catch { return { build: null, notes: [] }; }
+}
+export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?: DbGate; cronVerifier?: IdTokenVerifier; release?: { build: string | null; notes: string[] } } = {}) {
+  const release = opts.release ?? readRelease(env.webDist || path.resolve(process.cwd(), '../web/dist'));
   const gate = opts.gate ?? createDbGate(db, bus);
   // Cloud Run（網域對應、沒有負載平衡器）：只信任緊鄰的那一層，req.ip = Google 附加在 X-Forwarded-For 最右邊的真實來源。
   // trustProxy: true 會取最左邊（客戶端自己填的）→ 可偽造 IP 繞過限流、汙染稽核紀錄。
@@ -52,7 +58,8 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
 
   await app.register(async (api) => {
     // ---- 開放時間與資料庫閘門（requirements §4.7）----
-    api.get('/status', async () => { const now = Date.now(); return { ...clock().status(now), server_time: now }; });
+    // v1.6.2：目前部署的前端 build id（內部比對用）＋更新說明；前端發現不一致就提示「有新版本，請更新」
+    api.get('/status', async () => { const now = Date.now(); return { ...clock().status(now), server_time: now, build: release.build, notes: release.notes }; });
     const NO_DB = new Set(['/api/status', '/api/config']);
     // 路徑上的 :id 都是 uuid 欄位：格式不對直接 400，不要丟給 Postgres 變成 500（還會寫 error log）
     api.addHook('onRequest', async (req, reply) => {

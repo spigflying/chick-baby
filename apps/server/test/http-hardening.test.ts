@@ -23,6 +23,7 @@ const put = (rel: string, body: string) => {
 
 beforeAll(async () => {
   put('index.html', '<!doctype html><title>chick</title>' + 'x'.repeat(2000));
+  writeFileSync(path.join(dist, 'build.json'), JSON.stringify({ build: 'abc1234-deadbeef', notes: ['丟大便可以無限丟了', '下樓梯排行榜'] }));
   put('assets/index-abc123.js', 'console.log(1);'.repeat(200));
   env.webDist = dist; env.secureCookies = true;
   ({ app } = await buildApp(db, bus, { logger: false }));
@@ -85,5 +86,27 @@ describe('path id validation', () => {
   it('lets a valid UUID through to the normal checks', async () => {
     const r = await app.inject({ url: '/api/pets/2b9f2a1e-6f1a-4a43-9a3e-0b6f1c2d3e4f/events', remoteAddress: '192.0.2.2' });
     expect(r.statusCode).not.toBe(400);
+  });
+});
+
+describe('new-version notice (build id + release notes)', () => {
+  it('/api/status returns the deployed build id and release notes from dist/build.json (no DB needed)', async () => {
+    const r = await app.inject({ url: '/api/status' });
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toMatchObject({ build: 'abc1234-deadbeef', notes: ['丟大便可以無限丟了', '下樓梯排行榜'] });
+  });
+  it('index.html (and the SPA fallback) is no-cache; hashed assets stay immutable', async () => {
+    for (const url of ['/', '/index.html', '/home/abc']) expect((await app.inject({ url })).headers['cache-control'], url).toBe('no-cache');
+    expect((await app.inject({ url: '/assets/index-abc123.js' })).headers['cache-control']).toContain('immutable');
+  });
+  it('readRelease: missing file → null build, no notes', async () => {
+    const { readRelease } = await import('../src/app');
+    expect(readRelease('/nonexistent')).toEqual({ build: null, notes: [] });
+  });
+  it('the repo release-notes.json is valid: 1–8 short Chinese lines, no version numbers', async () => {
+    const { readFileSync } = await import('node:fs');
+    const j = JSON.parse(readFileSync(path.resolve(__dirname, '../release-notes.json'), 'utf8'));
+    expect(j.notes.length).toBeGreaterThan(0); expect(j.notes.length).toBeLessThanOrEqual(8);
+    for (const n of j.notes) { expect(typeof n).toBe('string'); expect(n.length).toBeLessThan(60); expect(n).not.toMatch(/v\d+\.\d+/i); }
   });
 });

@@ -12,6 +12,24 @@
 2. 連線池 `max: 10` → `8`（`apps/server/src/db.ts`）。f1-micro 只有 25 條連線：2 個執行個體 × 8 + 2 條 LISTEN = 18。
 3. 開放時間（requirements §4.7）：時間凍結的模擬、早安、關門流程（19:55 / 20:00）、`GET /api/status`、讀取 `OPEN_HOURS` 環境變數。**資料庫停機時伺服器也要能啟動**：目前啟動時會先跑 migration（`apps/server/src/index.ts:9`），要改成第一次連上資料庫時才執行，否則休息時段有人打開網頁，容器會起不來。
 
+## 每次部署前：編輯更新說明（新版本提示）
+
+開著頁面的玩家在新版本部署後會看到「有新版本，請更新」與更新說明，按「立即更新」重新載入；重新載入後會再顯示一次「更新完成！新功能」。對戰或下樓梯中不會打擾，結束後才顯示。**畫面不顯示版本號。**
+
+1. 編輯 `apps/server/release-notes.json` 的 `notes`：3～5 行、每行一句中文（< 60 字），寫這次玩家看得到的改變；**不要寫版本號**（測試會檢查）。
+   ```json
+   { "notes": ["丟大便可以無限丟了：對戰中只受 0.5 秒冷卻限制", "下樓梯排行榜：開始前先看全部寵物的最佳樓層"] }
+   ```
+2. 跟程式一起 commit、push，照平常部署（`gcloud builds submit --tag …` → `gcloud run deploy chick-baby --image …`）。
+3. 驗證：`curl -s https://chick.thesilvertrees.com/api/status` 裡的 `build` 變成新的值、`notes` 是剛寫的內容。
+
+運作方式（給開發者）：
+- 前端建置（`apps/web/build-id.mjs`）算出 build id（`BUILD_ID` 環境變數 → git commit → 前端／引擎原始碼＋`release-notes.json` 的內容雜湊；Docker 裡沒有 `.git`，所以是內容雜湊），內嵌到 JS（`__BUILD_ID__`），並寫 `dist/build.json`（id＋notes）。
+- 伺服器啟動時讀 `WEB_DIST/build.json`，`GET /api/status` 回傳 `build`、`notes`（不碰資料庫）。
+- 前端在 WebSocket（重新）連上、每 3 分鐘輪詢、分頁回到前景時比對；`localStorage['chick.seenBuild']` 記住看過的 id。
+- 只改伺服器、沒改前端也沒改 notes → id 不變 → 不提示（不需要重新載入）。想強制提示就改 notes。
+- `index.html`（含 SPA 路由）是 `Cache-Control: no-cache`；`/assets/*` 檔名帶 hash，`immutable`。
+
 ## 0. 帳號與變數
 
 ```bash
