@@ -131,6 +131,16 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
           }
           case 'home.leave': leaveHome(c); break;
           // v1.4 打架模式：意圖一律經過 NOTIFY 交給負責這個家的執行個體
+          case 'arena.invite': {
+            if (!c.homeId) throw new AppError('NOT_IN_HOME');
+            await bus.publish({ t: 'arena.invite', home: c.homeId, user: c.user.id });
+            break;
+          }
+          case 'arena.reply': {
+            if (!c.homeId || typeof msg.invite !== 'string' || msg.invite.length > 40) return;
+            await bus.publish({ t: 'arena.reply', home: c.homeId, user: c.user.id, invite: msg.invite, accept: !!msg.accept });
+            break;
+          }
           case 'arena.join': case 'arena.leave': {
             if (!c.homeId) throw new AppError('NOT_IN_HOME');
             await bus.publish({ t: msg.type, home: c.homeId, user: c.user.id });

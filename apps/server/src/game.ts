@@ -299,3 +299,17 @@ export async function dailyMaintenance(db: Db) {
   await sql`DELETE FROM sessions WHERE expires_at < now()`.execute(db);
   return { ip_cleared: Number(ip.numAffectedRows), idempotency_deleted: Number(idem.numAffectedRows) };
 }
+
+// ---------- v1.6 下樓梯排行榜 ----------
+/** 前 10 名（所有寵物的最深樓層），以及自己（最好的那隻寵物）的名次。同樓層同名次。 */
+export async function stairsLeaderboard(db: Db, userId: string, limit = 10) {
+  const top = await db.selectFrom('pets').innerJoin('users', 'users.id', 'pets.owner_id')
+    .select(['pets.id', 'pets.name', 'pets.species_id as species', 'pets.best_floor', 'pets.status', 'users.display_name', 'pets.owner_id'])
+    .where('pets.best_floor', '>', 0).orderBy('pets.best_floor', 'desc').orderBy('pets.born_at', 'asc').limit(limit).execute();
+  const rankOf = async (floor: number) => 1 + Number((await db.selectFrom('pets').select((eb: any) => eb.fn.countAll().as('n')).where('best_floor', '>', floor).executeTakeFirst() as any)?.n ?? 0);
+  const out = [] as { rank: number; pet_name: string; owner_name: string; species: string; best_floor: number; mine: boolean }[];
+  for (const r of top) out.push({ rank: await rankOf(r.best_floor), pet_name: r.name, owner_name: r.display_name, species: r.species, best_floor: r.best_floor, mine: r.owner_id === userId });
+  const mineRow = await db.selectFrom('pets').select(['name', 'best_floor']).where('owner_id', '=', userId).orderBy('best_floor', 'desc').limit(1).executeTakeFirst();
+  const me = mineRow ? { pet_name: mineRow.name, best_floor: mineRow.best_floor, rank: mineRow.best_floor > 0 ? await rankOf(mineRow.best_floor) : null } : null;
+  return { top: out, me };
+}

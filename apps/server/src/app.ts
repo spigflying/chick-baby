@@ -116,6 +116,7 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
       }
       a.get('/homes/:id/visitors', async (req) => g.homeVisitors(db, (req.params as any).id, req.user!.id));
       // ---- v1.5 道具 ----
+      a.get('/leaderboard/stairs', async (req) => g.stairsLeaderboard(db, req.user!.id));
       a.get('/items', async (req) => ({ catalog: itemCatalog(), items: await listItems(db, req.user!.id) }));
       a.post('/items/buy', async (req) => { const b = (req.body ?? {}) as any; return buyItem(db, ctx(req), b.item_id, b.request_id, inFight); });
       a.post('/pets', async (req) => g.hatch(db, ctx(req), req.body));

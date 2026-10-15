@@ -470,16 +470,26 @@ describe('fight mode v2 (v1.5)', () => {
     return { A, a, b, c, d, home, wa, wb, wc, wd, arena, F, fa, fb, close };
   }
   const peck = async (w: any) => { w.send({ type: 'arena.input', attack: true }); await new Promise((r) => setTimeout(r, 120)); w.send({ type: 'arena.input', attack: false }); await new Promise((r) => setTimeout(r, 120)); };
+  /** v1.6：發起戰鬥 → 其他人回覆（true 參戰／false 觀戰／null 不回）→ 等開打 */
+  async function startFight(from: any, replies: [any, boolean | null][], watcher: any) {
+    watcher.msgs.length = 0;
+    from.send({ type: 'arena.invite' });
+    const inv = await watcher.wait((m: any) => m.type === 'arena.event' && m.kind === 'invite', 'invite');
+    for (const [w, acc] of replies) if (acc !== null) w.send({ type: 'arena.reply', invite: inv.invite, accept: acc });
+    return inv;
+  }
   const ready = (f: any, x: number) => Object.assign(f, { inv: 0, x, kx: 0, vy: 0, y: 74, onGround: true, cd: 0 });
 
   it('the owner can start a melee: all eligible pets join; each loser pays min(20, own balance) once, ledger + audit, idempotent', async () => {
-    const { A, a, b, d, home, wa, wc, F, fa, fb, close } = await setup({ b: 7, d: 50 });
-    await peck(wa); // 主人先動手
+    const { A, a, b, d, home, wa, wb, wc, wd, F, fa, fb, close } = await setup({ b: 7, d: 50 });
+    const inv = await startFight(wa, [[wb, true], [wd, true]], wc); // 主人發起
+    expect(inv.to.sort()).toEqual([b.id, d!.id].sort());
     const start = await wc.wait((m) => m.type === 'arena.event' && m.kind === 'start', 'start');
     expect(start.names).toHaveLength(3);
     const st = await wc.wait((m) => m.type === 'arena.state' && m.fights.length === 1, 'fight state');
     expect(st.fights[0].parts.sort()).toEqual([a.id, b.id, d!.id].sort());
     expect(st.fights[0].left_ms).toBeGreaterThan(55_000);
+    ready(fb, 52); ready(fa, 40); fa.dir = 1; await peck(wa); // 第一下
     // KO b，然後 KO d
     Object.assign(fb, { hp: 5 }); ready(fb, 52); ready(fa, 40); fa.dir = 1;
     await peck(wa);
@@ -490,12 +500,14 @@ describe('fight mode v2 (v1.5)', () => {
     expect(fz.fighters.find((x: any) => x.u === d!.id).hp).toBe(0); // 決勝瞬間凍結
     const res = await wc.wait((m) => m.type === 'arena.result', 'result');
     expect(res).toMatchObject({ winner: a.id, amount: 27, reason: 'ko', draw: false });
+    expect(res.parts.find((p: any) => p.u === a.id)).toMatchObject({ dmg: 30, pool: 50, transfer: 27, delta: 77 }); // 只有 a 有攻擊分數 → 獎金池全拿
     expect(res.losers.sort()).toEqual([b.id, d!.id].sort());
     const pa = res.parts.find((p: any) => p.u === a.id), pb = res.parts.find((p: any) => p.u === b.id);
-    expect(pa).toMatchObject({ delta: 27, hits: 3 }); expect(pb).toMatchObject({ delta: -7, taken: 2, hp: 0 });
+    expect(pa).toMatchObject({ delta: 77, hits: 3 }); expect(pb).toMatchObject({ delta: -7, taken: 2, hp: 0 });
     expect((await b.call('GET', '/api/me')).json.wallet.balance).toBe(0);
     expect((await d!.call('GET', '/api/me')).json.wallet.balance).toBe(30);
-    expect((await a.call('GET', '/api/me')).json.wallet.balance).toBe(47);
+    expect((await a.call('GET', '/api/me')).json.wallet.balance).toBe(97);
+    expect(await db.selectFrom('coin_ledger').select(['delta']).where('reason', '=', 'fight_bonus').execute()).toEqual([{ delta: 50 }]);
     const led = await db.selectFrom('coin_ledger').select(['delta', 'ref_id']).where('reason', '=', 'fight').execute();
     expect(led.map((l: any) => l.delta).sort((x: number, y: number) => x - y)).toEqual([-20, -7, 27]);
     expect(new Set(led.map((l: any) => l.ref_id))).toEqual(new Set([res.fight]));
@@ -511,19 +523,22 @@ describe('fight mode v2 (v1.5)', () => {
     // 家的冷卻 30 秒
     await new Promise((r) => setTimeout(r, 1700)); // 等凍結結束
     ready(fb, 52); ready(fa, 40); fa.dir = 1;
-    await peck(wa);
+    wa.send({ type: 'arena.invite' });
     await wa.wait((m) => m.type === 'arena.notice' && m.code === 'HOME_COOLDOWN', 'cooldown');
     await close();
   });
-  it('a draw at timeout transfers nothing', async () => {
-    const { A, a, b, home, wa, arena, fa, fb, close } = await setup({ b: 40 }, false);
-    await peck(wa); await new Promise((r) => setTimeout(r, 100));
+  it('a draw at timeout skips loser transfers but still pays the 50 pool by damage', async () => {
+    const { A, a, b, home, wa, wb, arena, fa, fb, close } = await setup({ b: 40 }, false);
+    await startFight(wa, [[wb, true]], wa); await wa.wait((m) => m.type === 'arena.event' && m.kind === 'start', 'start');
+    ready(fb, 52); ready(fa, 40); fa.dir = 1; await peck(wa); await new Promise((r) => setTimeout(r, 100));
     const fight = arena.state.fights[0]; expect(fight).toBeTruthy();
     fa.hp = fb.hp = 70; fight.endTick = arena.state.tick + 2;
     const res = await wa.wait((m) => m.type === 'arena.result', 'draw');
     expect(res).toMatchObject({ winner: null, draw: true, amount: 0, reason: 'timeout' });
     expect((await b.call('GET', '/api/me')).json.wallet.balance).toBe(40);
-    void A; void a; void home;
+    expect((await a.call('GET', '/api/me')).json.wallet.balance).toBe(70); // 20 + 獎金池 50
+    expect(res.parts.find((p: any) => p.u === a.id)).toMatchObject({ pool: 50, transfer: 0 });
+    void A; void home;
     await close();
   });
   it('refuses to start near closing; 20:00 abort cancels with no transfer', async () => {
@@ -533,7 +548,7 @@ describe('fight mode v2 (v1.5)', () => {
     setClock(makeClock({ days: [0, 1, 2, 3, 4, 5, 6], openMin: 0, closeMin: 12 * 60 + 3, offsetMin: 12 * 60 - utcMin }));
     expect(A.canStart(home, [a.id, b.id])).toBe('GAME_CLOSING');
     setClock(ALWAYS_OPEN);
-    await peck(wa);
+    await startFight(wa, [[wb, true]], wb);
     await wb.wait((m) => m.type === 'arena.event' && m.kind === 'start', 'start');
     await A.abortArenas();
     const r = await wb.wait((m) => m.type === 'arena.result', 'abort');
@@ -559,15 +574,16 @@ describe('fight mode v2 (v1.5)', () => {
     expect((await a.call('GET', '/api/items')).json.catalog.map((c: any) => [c.id, c.price, c.fights])).toEqual([['sword', 150, 10], ['kame', 300, 5], ['poop', 50, 10]]);
   });
   it('fights_left decrements once for a fight where the sword was swung many times', async () => {
-    const { a, b, wa, wc, arena, fa, fb, close } = await setup({ b: 5 }, false);
+    const { a, b, wa, wb, wc, arena, fa, fb, close } = await setup({ b: 5 }, false);
     await db.updateTable('wallets').set({ balance: 200 }).where('user_id', '=', a.id).execute();
     expect((await a.call('POST', '/api/items/buy', { item_id: 'sword', request_id: rid() })).status).toBe(200);
     for (let i = 0; i < 50 && !(fa.items.sword! > 0); i++) await new Promise((r) => setTimeout(r, 20)); // 道具同步到場上
     expect(fa.items).toEqual({ sword: 10 }); expect(fa.equip).toBe('sword');
     const swing = async () => { wa.send({ type: 'arena.input', item: true, equip: 'sword' }); await new Promise((r) => setTimeout(r, 100)); wa.send({ type: 'arena.input', item: false }); await new Promise((r) => setTimeout(r, 700)); };
-    ready(fb, 70); await swing(); // 42px 內 → 命中並開打
-    await wc.wait((m) => m.type === 'arena.event' && m.kind === 'start', 'start');
-    ready(fb, 70); await swing(); ready(fb, 70); await swing();
+    ready(fb, 70); await swing(); // 對戰外揮劍無效
+    expect(fb.hp).toBe(100); expect(arena.state.fights).toHaveLength(0);
+    await startFight(wa, [[wb, true]], wc); await wc.wait((m) => m.type === 'arena.event' && m.kind === 'start', 'start');
+    ready(fb, 70); await swing(); ready(fb, 70); await swing(); ready(fb, 70); await swing();
     Object.assign(fb, { hp: 1 }); ready(fb, 70); await swing();
     await wc.wait((m) => m.type === 'arena.result', 'result');
     await new Promise((r) => setTimeout(r, 200));
@@ -575,6 +591,37 @@ describe('fight mode v2 (v1.5)', () => {
     expect(row.fights_left).toBe(9);
     void b; void arena;
     await close();
+  });
+  it('invites: no answer within 10s = spectator → cancel when <2; decline; early start when all answered', async () => {
+    const { A, a, b, d, wa, wb, wc, wd, arena, close } = await setup({}, true);
+    const inv = await startFight(wa, [[wb, false]], wc); // b 觀戰、d 不回
+    expect(arena.state.fights).toHaveLength(0);
+    A._arenas.get(arena.home)!.invite!.deadline = Date.now(); // 時間到
+    const cancel = await wc.wait((m) => m.type === 'arena.event' && m.kind === 'invite_cancel', 'cancel');
+    expect(cancel).toMatchObject({ invite: inv.invite, code: 'NOT_ENOUGH' });
+    expect(arena.state.fights).toHaveLength(0);
+    // 再發起：b 參戰、d 觀戰 → 全部回覆就立刻開打（不用等 10 秒）
+    const t0 = Date.now();
+    await startFight(wa, [[wb, true], [wd, false]], wc);
+    await wc.wait((m) => m.type === 'arena.event' && m.kind === 'start', 'start');
+    expect(Date.now() - t0).toBeLessThan(3000);
+    expect(arena.state.fights[0].parts.map((p) => p.u).sort()).toEqual([a.id, b.id].sort());
+    expect(arena.state.fighters.find((f) => f.userId === d!.id)!.fightId).toBeNull(); // 觀戰
+    // 對戰中不能再發起
+    wb.send({ type: 'arena.invite' }); await wb.wait((m) => m.type === 'arena.notice' && m.code === 'FIGHT_BUSY', 'busy');
+    await close();
+  });
+  it('stairs leaderboard: top floors across all pets plus the viewer\'s own rank', async () => {
+    const a = await login('Benson'), b = await login('仲軍'), c = await login('Newbie');
+    const pa = await hatchAlive(a, 'chicken'), pb = await hatchAlive(b, 'duck');
+    await db.updateTable('pets').set({ best_floor: 12 }).where('id', '=', pa).execute();
+    await db.updateTable('pets').set({ best_floor: 30 }).where('id', '=', pb).execute();
+    const r = await a.call('GET', '/api/leaderboard/stairs');
+    expect(r.status).toBe(200);
+    expect(r.json.top.map((x: any) => [x.rank, x.pet_name, x.owner_name, x.best_floor, x.mine])).toEqual([[1, 'Pduck', '仲軍', 30, false], [2, 'Pchicken', 'Benson', 12, true]]);
+    expect(r.json.me).toMatchObject({ rank: 2, best_floor: 12 });
+    expect(JSON.stringify(r.json)).not.toContain('@');
+    expect((await c.call('GET', '/api/leaderboard/stairs')).json.me).toBeNull(); // 沒寵物
   });
   it('poop ammo comes from the floor of the home where the fight happens; each throw removes one', async () => {
     const { a, wa, arena, home, close } = await setup({}, false);
