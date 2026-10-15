@@ -1,5 +1,6 @@
 // v1.5 打架模式 v2（混戰）。每個家由「目前有連線的最小 instance id」負責模擬；
 // 輸入與狀態都經過 LISTEN/NOTIFY，所以不論玩家連到哪個執行個體都看到同一場。
+import { spriteKey } from './pets';
 import { randomUUID } from 'node:crypto';
 import { addFighter, ARENA_PARAMS, cancelFights, canFightPet, createArena, createInvite, inviteOutcome, meleeTransfers, poolShares, replyInvite, startFightWith, type Invite, phaseAt, removeFighter, setArenaInput, setFighterItems, stepArena, type ArenaEvent, type ArenaState, type FightEnd, type ItemId } from '@chick/engine';
 import type { Db } from './db';
@@ -73,7 +74,7 @@ async function join(home: string, user: string) {
   const nick = deps!.presence.users(home).find((u) => u.id === user)?.display_name ?? '?';
   const name = `${pet!.name}（${nick}）`;
   const x = 8 + ((a.state.fighters.length * 29) % (P.width - P.petW - 16));
-  if (!addFighter(a.state, { userId: user, petId: pet!.id, species: pet!.species, name, x, items })) {
+  if (!addFighter(a.state, { userId: user, petId: pet!.id, species: spriteKey(pet!), name, x, items })) {
     if (!a.state.fighters.some((f) => f.userId === user)) pub({ t: 'arena.notice', home, user, code: 'ARENA_FULL' });
     else setFighterItems(a.state, user, items);
   }

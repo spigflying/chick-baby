@@ -172,6 +172,26 @@ const migrations: Record<string, Migration> = {
         ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item'));`.execute(db);
     },
   },
+  '0005_bao': {
+    async up(db: Kysely<unknown>) {
+      await sql`
+      -- v1.7 寶：進化外觀（掉落配件）、目前穿著的服飾；服飾為每位使用者擁有
+      ALTER TABLE pets ADD COLUMN bao jsonb, ADD COLUMN bao_at timestamptz, ADD COLUMN outfits jsonb NOT NULL DEFAULT '[]';
+      CREATE INDEX pets_bao_key ON pets ((bao->>'key')) WHERE status = 'alive' AND bao IS NOT NULL;
+      CREATE TABLE user_outfits (
+        user_id uuid NOT NULL REFERENCES users(id), outfit_id text NOT NULL CHECK (outfit_id IN ('shades','crown')),
+        bought_at timestamptz NOT NULL DEFAULT now(), PRIMARY KEY (user_id, outfit_id)
+      );
+      ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+      ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus','outfit'));
+      `.execute(db);
+    },
+    async down(db: Kysely<unknown>) {
+      await sql`DROP TABLE user_outfits; DROP INDEX pets_bao_key; ALTER TABLE pets DROP COLUMN bao, DROP COLUMN bao_at, DROP COLUMN outfits;
+        ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+        ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus'));`.execute(db);
+    },
+  },
 };
 
 const provider: MigrationProvider = { getMigrations: async () => migrations };

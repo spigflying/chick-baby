@@ -1,11 +1,12 @@
 import { listItems } from './items';
+import { ownedOutfits } from './outfits';
 import * as engine from '@chick/engine';
 import { clock } from './hours';
 import { applyFood, applyOwnerAction, checkFeed, foodById, createRng, GAME, isSpecies, newPet, revive as reviveState, SPECIES, type OwnerAction } from '@chick/engine';
 import { sql, type Db, type Tx } from './db';
 import { changeBalance, lockWallets, notify, rateLimit, runAction, type ReqCtx } from './core';
 import { fail } from './errors';
-import { insertEvents, loadSettledPet, lockPet, publicPet, rowToState, savePet, settle, stateToRow } from './pets';
+import { maybeEvolve, insertEvents, loadSettledPet, lockPet, publicPet, rowToState, savePet, settle, stateToRow } from './pets';
 import { newShareCode, normalizeShareCode, publicUser, randomSeed } from './util';
 import { env } from './env';
 
@@ -39,7 +40,8 @@ export async function getMe(db: Db, userId: string) {
   const home = await db.selectFrom('homes').select(['id', 'name', 'access_mode']).where('owner_id', '=', userId).executeTakeFirstOrThrow();
   const pet = await currentPet(db, userId);
   const items = await listItems(db, userId);
-  return { user: { ...publicUser(u), share_code: u.share_code, role: u.role }, wallet: { balance: w.balance }, home, pet, items };
+  const outfits = await ownedOutfits(db, userId);
+  return { user: { ...publicUser(u), share_code: u.share_code, role: u.role }, wallet: { balance: w.balance }, home, pet, items, outfits };
 }
 
 async function currentPetRow(db: Db | Tx, ownerId: string) {
@@ -257,6 +259,20 @@ export async function myPets(db: Db, userId: string) {
     for (const r of rows) { const x = await loadSettledPet(tx, r.id); if (x) out.push(publicPet(x.row, x.state)); }
     return out;
   });
+}
+
+// ---------- 寶（進化）強制觸發：管理員任何寵物；開發模式只能自己的 ----------
+export async function forceEvolve(db: Db, ctx: ReqCtx, petId: string, requestId: unknown, admin: boolean) {
+  return runAction(db, ctx, admin ? 'admin.evolve' : 'dev.evolve', requestId, { petId }, async (tx) => {
+    const row = await lockPet(tx, petId);
+    if (!row) fail('NOT_FOUND');
+    if (!admin && row.owner_id !== ctx.userId) fail('FORBIDDEN');
+    const { state } = await settle(tx, row);
+    if (state.status !== 'alive') fail(state.status === 'egg' ? 'PET_EGG' : 'PET_DEAD');
+    await savePet(tx, petId, state);
+    const bao = row.bao ?? (await maybeEvolve(tx, row, state, Date.now(), true));
+    return { ok: true, bao, pet: publicPet(row, state) };
+  }, { type: 'pet', id: petId });
 }
 
 // ---------- 管理員 ----------
