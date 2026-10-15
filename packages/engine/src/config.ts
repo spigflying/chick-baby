@@ -17,5 +17,7 @@ export const GAME = {
   revive: { stat: 50, health: 50 },
   rateLimit: { feedPerMinute: 10, wsMsgsPerSecond: 35 },
   dailyEarnCap: null as number | null,
+  /** v1.7 寶：孵化後累計多少「開放時間」進化（3 個開放日 × 09:00–20:00 = 33 小時；與蛋的計時一樣只算開放時間）；重複外觀最多重抽幾次 */
+  bao: { evolveOpenMs: 3 * 11 * 3_600_000, maxRerolls: 8 },
 };
 export type GameConfig = typeof GAME;

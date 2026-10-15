@@ -6,3 +6,4 @@ export * from './pet';
 export * from './stairs';
 export * from './hours';
 export * from './arena';
+export * from './bao';
