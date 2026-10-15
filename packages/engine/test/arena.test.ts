@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { ARENA_PARAMS as P, addFighter, cancelFights, canFightPet, createArena, fightTransfer, meleeTransfers, removeFighter, setArenaInput, stepArena, type ArenaEvent, type ArenaState } from '../src';
+import { ARENA_PARAMS as P, startFightWith, poolShares, createInvite, replyInvite, inviteOutcome, addFighter, cancelFights, canFightPet, createArena, fightTransfer, meleeTransfers, removeFighter, setArenaInput, stepArena, type ArenaEvent, type ArenaState } from '../src';
 
 let n = 0;
 const hooks = (why: string | null = null) => ({ canStart: () => why, newId: () => `f${++n}` });
 const FLOOR = P.ground - P.petH;
-function arena(xs: number[] = [40, 54], items: any = {}) {
+/** v1.6：預設所有人已經接受邀請、對戰進行中（noFight = 對戰外）。 */
+function arena(xs: number[] = [40, 54], items: any = {}, noFight = false) {
   const s = createArena();
   xs.forEach((x, i) => addFighter(s, { userId: 'abcdefgh'[i], petId: 'p' + i, species: 'chicken', name: 'N' + i, x, items: items['abcdefgh'[i]] }));
+  if (!noFight) startFightWith(s, s.fighters.map((f) => f.userId), `f${++n}`);
   return s;
 }
 const F = (s: ArenaState, u: string) => s.fighters.find((f) => f.userId === u)!;
@@ -19,7 +21,7 @@ describe('arena v2: attacks', () => {
   it('peck reaches ~14px in front (was 6), 10 dmg, more knockback', () => {
     const s = arena([40, 40 + P.petW + 13]); F(s, 'a').dir = 1;
     const e = peck(s, 'a');
-    expect(e.map((x) => x.type)).toEqual(['start', 'hit']);
+    expect(e.map((x) => x.type)).toEqual(['hit']);
     expect(F(s, 'b').hp).toBe(100 - P.peckDamage);
     expect(F(s, 'b').kx).toBeGreaterThan(3);
     expect(P.peckRange).toBe(14); expect(P.hitInvulnTicks).toBe(15); expect(P.attackCooldownTicks).toBe(15);
@@ -127,9 +129,9 @@ describe('arena v2: items', () => {
 });
 
 describe('arena v2: melee', () => {
-  it('first hit pulls ALL present pets into one fight; KO\'d pets spectate; last standing wins', () => {
+  it('accepted pets fight together; KO\'d pets spectate; last standing wins', () => {
     const s = arena([40, 54, 90]); F(s, 'a').dir = 1;
-    const e = peck(s, 'a'); const st = e.find((x) => x.type === 'start') as any;
+    peck(s, 'a'); const st = { fight: s.fights[0] };
     expect(st.fight.parts.map((p: any) => p.u)).toEqual(['a', 'b', 'c']);
     expect(s.fighters.every((f) => f.fightId === st.fight.id)).toBe(true);
     // c 被 KO
@@ -163,12 +165,40 @@ describe('arena v2: melee', () => {
     const t = arena(); F(t, 'a').dir = 1; peck(t, 'a');
     expect(cancelFights(t)[0]).toMatchObject({ winner: null, draw: true, reason: 'cancel', losers: [] });
   });
-  it('refused start does nothing; late joiners are not in the running fight', () => {
-    const s = arena(); F(s, 'a').dir = 1;
-    expect(peck(s, 'a', hooks('HOME_COOLDOWN'))).toEqual([{ type: 'refused', from: 'a', to: 'b', reason: 'HOME_COOLDOWN' }]);
-    F(s, 'a').cd = 0; peck(s, 'a');
-    addFighter(s, { userId: 'z', petId: 'pz', species: 'duck', name: 'Z', x: 60 });
-    expect(F(s, 'z').fightId).toBeNull();
+  it('v1.6: hits outside a fight do nothing; only invited participants fight; spectators are untouchable', () => {
+    const s = arena([40, 54, 66], {}, true); F(s, 'a').dir = 1;
+    expect(peck(s, 'a')).toEqual([]); expect(F(s, 'b').hp).toBe(100); expect(s.fights).toHaveLength(0);
+    const fight = startFightWith(s, ['a', 'c'], 'fx')!; // b 選觀戰
+    expect(fight.parts.map((p) => p.u)).toEqual(['a', 'c']);
+    expect(F(s, 'b').fightId).toBeNull();
+    reset(s, 'a'); expect((peck(s, 'a').filter((x) => x.type === 'hit') as any[]).map((h) => h.to)).toEqual(['c']); expect(F(s, 'b').hp).toBe(100); // 較近的 b 是觀眾 → 穿過去打到 c
+    expect(startFightWith(s, ['b', 'a'], 'fy')).toBeNull(); // 已有對戰
+    const t = arena([10, 50], {}, true); expect(startFightWith(t, ['a'], 'z')).toBeNull(); expect(startFightWith(t, ['a', 'zz'], 'z')).toBeNull();
+    addFighter(s, { userId: 'z', petId: 'pz', species: 'duck', name: 'Z', x: 60 }); expect(F(s, 'z').fightId).toBeNull();
+  });
+  it('v1.6 invites: accept/decline, early finish when all answered, 10s timeout = spectator, <2 = cancel', () => {
+    const inv = createInvite('i', 'a', ['b', 'c', 'a'], 1000);
+    expect(inv.to).toEqual(['b', 'c']); expect(inv.deadline).toBe(1000 + P.inviteMs);
+    expect(inviteOutcome(inv, 2000)).toEqual({ done: false });
+    expect(replyInvite(inv, 'b', true)).toBe(true); expect(replyInvite(inv, 'b', false)).toBe(false); expect(replyInvite(inv, 'x', true)).toBe(false);
+    expect(inviteOutcome(inv, 2000)).toEqual({ done: false });
+    replyInvite(inv, 'c', false);
+    expect(inviteOutcome(inv, 2000)).toEqual({ done: true, participants: ['a', 'b'] }); // 全部回覆 → 立刻開始
+    const t = createInvite('j', 'a', ['b', 'c'], 0); replyInvite(t, 'c', true);
+    expect(inviteOutcome(t, P.inviteMs - 1)).toEqual({ done: false });
+    expect(inviteOutcome(t, P.inviteMs)).toEqual({ done: true, participants: ['a', 'c'] }); // b 沒回覆 → 觀戰
+    const u = createInvite('k', 'a', ['b'], 0); replyInvite(u, 'b', false);
+    expect(inviteOutcome(u, 1)).toEqual({ done: true, participants: null });
+    expect(inviteOutcome(createInvite('l', 'a', ['b'], 0), P.inviteMs)).toEqual({ done: true, participants: null });
+  });
+  it('v1.6 pool: 50 coins by damage share, largest remainder, exact total; all-zero = nobody', () => {
+    expect(poolShares({ a: 30, b: 30, c: 30 })).toEqual({ a: 17, b: 17, c: 16 });
+    expect(poolShares({ a: 100, b: 0 })).toEqual({ a: 50, b: 0 });
+    expect(poolShares({ a: 0, b: 0 })).toEqual({ a: 0, b: 0 });
+    const r = poolShares({ a: 13, b: 29, c: 41, d: 7 });
+    expect(Object.values(r).reduce((x, y) => x + y, 0)).toBe(50);
+    expect(r).toEqual({ a: 7, b: 16, c: 23, d: 4 }); // 7.22 16.11 22.78 3.89 → 餘數最大的 d、c 各 +1
+    for (let k = 0; k < 50; k++) { const sc: Record<string, number> = {}; for (let i = 0; i < 1 + (k % 6); i++) sc['u' + i] = (k * 7 + i * 13) % 37; const v = poolShares(sc); const tot = Object.values(v).reduce((x, y) => x + y, 0); expect(tot).toBe(Object.values(sc).some((x) => x > 0) ? 50 : 0); }
   });
   it('multi-loser transfers: each loser pays min(20, own balance)', () => {
     expect(meleeTransfers({ winner: 'a', losers: ['b', 'c', 'd'] }, { a: 1, b: 50, c: 7, d: 0 })).toEqual({ b: -20, c: -7, d: -0, a: 27 });

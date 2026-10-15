@@ -20,6 +20,8 @@ export const ARENA_PARAMS = {
   kameChargeTicks: 30, kameDamage: 30, kameBeamTicks: 9,
   poopVx: 2.4, poopVy: -1.8, poopDamage: 8, poopCooldownTicks: 15, slipTicks: 20, slipKx: 1.6, slipDecay: 0.95,
   fightTicks: 30 * 60, homeCooldownMs: 30_000, maxFighters: 8,
+  /** v1.6 邀請制：等回覆的時間、系統獎金池 */
+  inviteMs: 10_000, bonusPool: 50,
 };
 export type ArenaParams = typeof ARENA_PARAMS;
 export type ItemId = 'sword' | 'kame' | 'poop';
@@ -132,26 +134,25 @@ export function removeFighter(s: ArenaState, userId: string): FightEnd | null {
 /** 關門／重啟：取消所有對戰，不分勝負。 */
 export function cancelFights(s: ArenaState): FightEnd[] { return [...s.fights].map((f) => endFight(s, f, 'cancel')); }
 
-function startFight(s: ArenaState, f: Fighter, g: Fighter, hooks: ArenaHooks, ev: ArenaEvent[]): boolean {
+/** v1.6 邀請制：用指定的參賽者（發起人＋接受者）開打；回傳 null = 人數不足或有人不在場／已在對戰。 */
+export function startFightWith(s: ArenaState, users: string[], id: string): Fight | null {
   const P = s.params;
-  const all = s.fighters.filter((x) => !x.fightId);
-  const why = hooks.canStart(all.map((x) => x.userId));
-  if (why) { ev.push({ type: 'refused', from: f.userId, to: g.userId, reason: why }); return false; }
-  const fight: Fight = { id: hooks.newId(), startTick: s.tick, endTick: s.tick + P.fightTicks,
+  const all = [...new Set(users)].map((u) => byId(s, u)).filter((x): x is Fighter => !!x && !x.fightId);
+  if (all.length < 2 || s.fights.length) return null;
+  all.sort((a, b) => (a.userId < b.userId ? -1 : 1));
+  const fight: Fight = { id, startTick: s.tick, endTick: s.tick + P.fightTicks,
     parts: all.map((x) => ({ u: x.userId, pet: x.petId, name: x.name, dmg: 0, hits: 0, taken: 0, hp: P.hpMax, out: false, forfeit: false })) };
   s.fights.push(fight);
-  for (const x of all) { x.fightId = fight.id; x.hp = P.hpMax; x.inv = 0; x.out = false; x.used = []; }
-  ev.push({ type: 'start', fight });
-  return true;
+  for (const x of all) { x.fightId = fight.id; x.hp = P.hpMax; x.inv = 0; x.out = false; x.used = []; x.kameFight = null; }
+  return fight;
 }
 const DMG: Record<HitKind, keyof ArenaParams> = { peck: 'peckDamage', up: 'upPeckDamage', stomp: 'stompDamage', sword: 'swordDamage', beam: 'kameDamage', poop: 'poopDamage' };
 /** 命中：沒有對戰時開打（場上所有寵物一起），對戰中只有同一場、還沒被 KO 的才算。回傳是否真的造成傷害。 */
 function hit(s: ArenaState, f: Fighter, g: Fighter, kind: HitKind, hooks: ArenaHooks, ev: ArenaEvent[], dir?: number): boolean {
   const P = s.params;
   if (g.inv > 0 || g.out || f.out) return false;
-  if (f.fightId || g.fightId) {
-    if (f.fightId !== g.fightId) return false; // 不在同一場：完全忽略
-  } else if (!startFight(s, f, g, hooks, ev)) return false;
+  // v1.6：只有同一場對戰中的寵物互打才算；對戰外的攻擊一律無效（改成邀請制開打）
+  if (!f.fightId || f.fightId !== g.fightId) return false;
   const fight = s.fights.find((x) => x.id === g.fightId)!;
   const dmg = P[DMG[kind]] as number;
   g.hp = Math.max(0, g.hp - dmg); g.inv = P.hitInvulnTicks; g.hitN++; g.hitDmg = dmg;
@@ -165,7 +166,7 @@ function hit(s: ArenaState, f: Fighter, g: Fighter, kind: HitKind, hooks: ArenaH
   if (g.hp <= 0) { g.out = true; if (pg) pg.out = true; g.inv = 0; ev.push({ type: 'ko', fightId: fight.id, user: g.userId }); }
   return true;
 }
-const canHitTarget = (f: Fighter, g: Fighter) => g !== f && !g.out && (!f.fightId || g.fightId === f.fightId);
+const canHitTarget = (f: Fighter, g: Fighter) => g !== f && !g.out && !!f.fightId && g.fightId === f.fightId;
 /** 面向方向 range 內（貼身 + range）最近的一隻。 */
 function nearestInFront(s: ArenaState, f: Fighter, range: number): Fighter | null {
   const P = s.params; let best: Fighter | null = null, bd = Infinity;
@@ -214,7 +215,7 @@ export function stepArena(s: ArenaState, hooks: ArenaHooks): ArenaEvent[] {
     if (f.out) continue;
     if (prevBottom < f.y + P.petH && f.vy >= 0) {
       for (const g of s.fighters) {
-        if (g === f || g.out || Math.abs(f.x - g.x) >= P.petW - 2) continue;
+        if (g === f || g.out || !f.fightId || g.fightId !== f.fightId || Math.abs(f.x - g.x) >= P.petW - 2) continue;
         const top = g.y;
         if (prevBottom <= top + 1 && f.y + P.petH >= top) { f.y = top - P.petH; f.vy = P.stompBounceVy; f.onGround = false; hit(s, f, g, 'stomp', hooks, ev); break; }
       }
@@ -302,3 +303,33 @@ export function meleeTransfers(e: { winner: string | null; losers: string[] }, b
 }
 /** 對戰前提：寵物活著、醒著、沒生病。 */
 export function canFightPet(p: { status: string; sleeping: boolean; sick: boolean } | null | undefined) { return !!p && p.status === 'alive' && !p.sleeping && !p.sick; }
+
+/** v1.6 系統獎金池：依攻擊分數（造成的總傷害）比例分配，整數、最大餘數法，總和剛好 = pool；全部 0 分則沒人拿。 */
+export function poolShares(scores: Record<string, number>, pool = ARENA_PARAMS.bonusPool): Record<string, number> {
+  const ids = Object.keys(scores).sort();
+  const total = ids.reduce((t, u) => t + Math.max(0, scores[u]), 0);
+  const out: Record<string, number> = {};
+  if (total <= 0 || pool <= 0) { for (const u of ids) out[u] = 0; return out; }
+  const rem: [string, number][] = [];
+  let given = 0;
+  for (const u of ids) { const exact = (Math.max(0, scores[u]) * pool) / total; out[u] = Math.floor(exact); given += out[u]; rem.push([u, exact - out[u]]); }
+  rem.sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)); // 餘數大的先；同餘數依 id（決定性）
+  for (let i = 0; given < pool; i++, given++) out[rem[i % rem.length][0]]++;
+  return out;
+}
+/** v1.6 邀請：發起人＋被邀請者（其他合格寵物的主人），10 秒內回覆「參戰／觀戰」，沒回覆＝觀戰。 */
+export interface Invite { id: string; from: string; to: string[]; accepted: string[]; declined: string[]; deadline: number }
+export function createInvite(id: string, from: string, others: string[], now: number, ms = ARENA_PARAMS.inviteMs): Invite {
+  return { id, from, to: [...new Set(others)].filter((u) => u !== from).sort(), accepted: [], declined: [], deadline: now + ms };
+}
+export function replyInvite(inv: Invite, user: string, accept: boolean): boolean {
+  if (!inv.to.includes(user) || inv.accepted.includes(user) || inv.declined.includes(user)) return false;
+  (accept ? inv.accepted : inv.declined).push(user); return true;
+}
+/** 全部回覆或時間到 → 結束；參賽者 = 發起人＋接受者（至少 2 隻，否則取消）。 */
+export function inviteOutcome(inv: Invite, now: number): { done: false } | { done: true; participants: string[] | null } {
+  const answered = inv.accepted.length + inv.declined.length >= inv.to.length;
+  if (!answered && now < inv.deadline) return { done: false };
+  const parts = [inv.from, ...inv.accepted].sort();
+  return { done: true, participants: parts.length >= 2 ? parts : null };
+}
