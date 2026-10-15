@@ -43,6 +43,16 @@ export function canStart(home: string, users: string[], now = Date.now()): strin
   return null;
 }
 
+/** v1.6：在別人家打架需要主人在家、寵物醒著且沒生病。 */
+export function ownerBlock(home: string): string | null {
+  const owner = deps!.presence.ownerOf(home); if (!owner) return null;
+  if (deps!.presence.ownerAway(home)) return 'OWNER_AWAY';
+  const u = deps!.presence.users(home).find((x) => x.id === owner);
+  if (!u) return 'OWNER_OFFLINE';
+  if (u.pet?.sleeping) return 'OWNER_SLEEPING';
+  if (u.pet?.sick) return 'OWNER_SICK';
+  return null;
+}
 /** 每個執行個體都會收到同一則 NOTIFY；只有負責的執行個體處理輸入。 */
 export function onArenaBus(m: any) {
   if (!deps) return;
@@ -96,6 +106,7 @@ export function invite(home: string, user: string, now = Date.now()) {
   const me = a?.state.fighters.find((f) => f.userId === user);
   if (!a || !me) return pub({ t: 'arena.notice', home, user, code: 'NOT_ELIGIBLE' });
   if (a.state.fights.length || a.invite) return pub({ t: 'arena.notice', home, user, code: 'FIGHT_BUSY' });
+  const ob = ownerBlock(home); if (ob) return pub({ t: 'arena.notice', home, user, code: ob });
   const others = a.state.fighters.filter((f) => f.userId !== user && canFightPet(petOf(home, f.userId))).map((f) => f.userId);
   const why = canStart(home, [user, ...others], now);
   if (why && why !== 'NOT_ELIGIBLE') return pub({ t: 'arena.notice', home, user, code: why });

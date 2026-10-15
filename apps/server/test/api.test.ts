@@ -611,6 +611,15 @@ describe('fight mode v2 (v1.5)', () => {
     wb.send({ type: 'arena.invite' }); await wb.wait((m) => m.type === 'arena.notice' && m.code === 'FIGHT_BUSY', 'busy');
     await close();
   });
+  it('owner must be home: owner offline → OWNER_OFFLINE notice, no invite', async () => {
+    const { a, wa, wb, wc, close } = await setup({}, true);
+    wa.ws.terminate(); wc.msgs.length = 0;
+    await wc.wait((m) => m.type === 'home.presence' && !m.users.some((u: any) => u.id === a.id), 'owner gone');
+    wb.send({ type: 'arena.invite' });
+    await wb.wait((m) => m.type === 'arena.notice' && m.code === 'OWNER_OFFLINE', 'offline');
+    expect(wc.msgs.some((m: any) => m.type === 'arena.event' && m.kind === 'invite')).toBe(false);
+    await close();
+  });
   it('stairs leaderboard: top floors across all pets plus the viewer\'s own rank', async () => {
     const a = await login('Benson'), b = await login('仲軍'), c = await login('Newbie');
     const pa = await hatchAlive(a, 'chicken'), pb = await hatchAlive(b, 'duck');
