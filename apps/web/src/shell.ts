@@ -6,8 +6,9 @@ export function eggE(fx: number, fy: number): number {
 }
 /** 內容（畫面）可以佔用的範圍：留在彩色邊以內。 */
 export const EGG_SAFE_E = 0.76;
-export function drawShell(c: HTMLCanvasElement, palette = ['#ff5c8a', '#ffd23f', '#3ec6ff', '#7ee07e', '#b48cff', '#ff9f43'], rim = '#ff3d7f', H = 56) {
-  const W = 40; c.width = W; c.height = H;
+export const SHELL_W = 40, SHELL_H = 56;
+export function drawShell(c: HTMLCanvasElement, palette = ['#ff5c8a', '#ffd23f', '#3ec6ff', '#7ee07e', '#b48cff', '#ff9f43'], rim = '#ff3d7f') {
+  const W = SHELL_W, H = SHELL_H; c.width = W; c.height = H; // 比例固定 40:56，永遠不拉長
   const g = c.getContext('2d')!;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const e = eggE((x + 0.5) / W, (y + 0.5) / H);
@@ -22,7 +23,7 @@ export function drawShell(c: HTMLCanvasElement, palette = ['#ff5c8a', '#ffd23f',
     g.fillStyle = col; g.fillRect(x, y, 1, 1);
   }
   // 高光：只畫在殼的內部（舊座標 (10–12, 8–10) 落在外框／蛋外面，左上角出現白色缺角）
-  g.fillStyle = '#ffffff'; SHINE.forEach(([x, y]) => g.fillRect(x, Math.round((y + 0.5) * H / 56 - 0.5), 1, 1)); // 蛋被拉高時跟著等比例往下
+  g.fillStyle = '#ffffff'; SHINE.forEach(([x, y]) => g.fillRect(x, y, 1, 1));
 }
 // 每種物種一個殼色，訪客一眼看出是誰家
 export const SHELL_COLORS: Record<string, { palette: string[]; rim: string }> = {

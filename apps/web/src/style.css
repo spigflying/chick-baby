@@ -159,3 +159,13 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .update-toast ul{margin:4px 0 1px;padding:0;list-style:none;font-size:10px;line-height:1.45}
 .update-toast li{padding-left:10px;position:relative}
 .update-toast li::before{content:"";position:absolute;left:1px;top:.5em;width:4px;height:4px;background:var(--g0)}
+/* 蛋殼放不下畫面時的精簡模式（fitEgg 加上 class；蛋比例固定 40:56） */
+.device.fit1 .fightbar{grid-template-columns:repeat(4,1fr);grid-template-areas:"l j r a" "u i n g";gap:3px;padding:3px 2px}
+.device.fit1 .fightbar button{min-height:36px;padding:0;font-size:clamp(11px,3.4vw,16px)}
+.device.fit1 .fightbar .fightgo{grid-area:g;grid-column:auto;font-size:clamp(10px,2.8vw,13px)}
+.device.fit1 .fightbar [data-pad="left"]{grid-area:l}.device.fit1 .fightbar [data-pad="jump"]{grid-area:j}.device.fit1 .fightbar [data-pad="right"]{grid-area:r}
+.device.fit1 .fightbar [data-pad="attack"]{grid-area:a}.device.fit1 .fightbar [data-pad="upAtk"]{grid-area:u}.device.fit1 .fightbar [data-pad="item"]{grid-area:i}.device.fit1 .fightbar .navbtn{grid-area:n}
+.device.fit1 .gamebar button{min-height:36px;padding:0;display:flex;align-items:center;justify-content:center}
+.device.fit2 .lcd-top,.device.fit2 .msg{font-size:clamp(7px,2vw,12px)}
+.device.fit2 .msg{min-height:1.4em}
+.device.fit2 .hint,.device.fit2 .fightstat{font-size:clamp(7px,1.9vw,10px)}

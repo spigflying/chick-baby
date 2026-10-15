@@ -331,31 +331,44 @@ export class Device {
     this.off.push(ctx.live.on((m) => this.onLive(m)));
   }
   /** 讓蛋殼永遠包住畫面：依內容實際高度，二分搜尋畫面寬度（佔蛋寬的比例），直到四個角都在彩色邊以內。 */
-  private fitRaf = 0;
+  private fitRaf = 0; private fitLcdH = -1;
   private bindFit() {
     const go = () => { cancelAnimationFrame(this.fitRaf); this.fitRaf = requestAnimationFrame(() => this.fitEgg()); };
-    let lastH = -1; // 只看 .lcd 高度變化（顯示／隱藏按鈕列）；蛋本身的大小改變不再觸發，避免來回震盪
-    const ro = new ResizeObserver(() => { const h = this.$('.lcd').offsetHeight; if (h !== lastH) { lastH = h; go(); } });
+    // 只看 .lcd 高度變化（顯示／隱藏按鈕列）；fitEgg 自己造成的變化（記在 fitLcdH）不再觸發，避免來回震盪
+    const ro = new ResizeObserver(() => { if (this.$('.lcd').offsetHeight !== this.fitLcdH) go(); });
     ro.observe(this.$('.lcd')); window.addEventListener('resize', go);
     this.off.push(() => { ro.disconnect(); window.removeEventListener('resize', go); });
   }
-  private shellSc: { palette: string[]; rim: string } | null = null; private shellK = 1;
-  paintShell(sc: { palette: string[]; rim: string }) { this.shellSc = sc; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim, Math.round(56 * this.shellK)); }
+  private shellSc: { palette: string[]; rim: string } | null = null;
+  paintShell(sc: { palette: string[]; rim: string }) { this.shellSc = sc; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim); }
+  /**
+   * 讓蛋殼永遠包住畫面，蛋的比例固定 40:56（不拉長）。依序嘗試：
+   * 畫面寬度在蛋寬 55–56% 之間微調 → 整顆蛋等比例放大（最多到視窗寬 96%，頁面可捲動）
+   * → 精簡模式 1（戰鬥按鈕 2 列、按鈕高 36px）→ 精簡模式 2（字再小一點）。
+   */
   fitEgg() {
-    // 先縮畫面（不小於蛋寬 55%，再窄按鈕文字會折行）；還放不下（例如手機的戰鬥按鈕）就把蛋拉高，最多 1.8 倍
-    for (let k = 1; k <= 1.8001; k += 0.1) {
-      if (Math.abs(k - this.shellK) > 1e-6) { this.shellK = k; this.el.style.aspectRatio = `40/${(56 * k).toFixed(1)}`; if (this.shellSc) this.paintShell(this.shellSc); }
-      if (this.fitInner(k >= 1.79 ? 0.3 : 0.55)) return;
+    const dev = this.el;
+    dev.style.width = ''; dev.classList.remove('fit1', 'fit2');
+    const base = dev.getBoundingClientRect().width; if (!base) return;
+    const maxW = Math.max(base, Math.min(document.documentElement.clientWidth * 0.96, 900));
+    const done = () => { this.fitLcdH = this.$('.lcd').offsetHeight; };
+    for (const level of [0, 1, 2]) {
+      dev.classList.toggle('fit1', level >= 1); dev.classList.toggle('fit2', level >= 2);
+      for (let w = base; ; w = Math.min(maxW, w * 1.08)) {
+        dev.style.width = w === base ? '' : `${Math.round(w)}px`;
+        if (this.fitInner(0.55)) return done();
+        if (w >= maxW) break;
+      }
     }
+    dev.style.width = `${Math.round(maxW)}px`; this.fitInner(0.3); done(); // 最後手段：畫面再窄一點
   }
   private fitInner(min: number): boolean {
     const inner = this.$('.inner'), dev = this.el;
     const D = dev.getBoundingClientRect(); if (!D.width) return true;
-
     const fits = (w: number) => {
       inner.style.left = inner.style.right = `${((1 - w) / 2) * 100}%`;
       // 垂直置中在蛋最寬的地方（0.54），但不高過原本的 26.5%
-      inner.style.top = `${Math.max(26.5 / this.shellK, 54 - (inner.offsetHeight / D.height) * 50)}%`;
+      inner.style.top = `${Math.max(26.5, 54 - (inner.offsetHeight / D.height) * 50)}%`;
       for (const el of [this.$('.brand'), this.$('.lcd')]) {
         const r = el.getBoundingClientRect(), pad = el.classList.contains('lcd') ? 8 : 0; // .lcd 的外框陰影 4+4px
         for (const [x, y] of [[r.left - pad, r.top - pad], [r.right + pad, r.top - pad], [r.left - pad, r.bottom + pad], [r.right + pad, r.bottom + pad]])
@@ -363,8 +376,7 @@ export class Device {
       }
       return true;
     };
-    const w = fitWidth(fits, undefined, min);
-    return fits(w);
+    return fits(fitWidth(fits, undefined, min));
   }
   destroy() { this.leaveArena(); clearInterval(this.timer); this.off.forEach((f) => f()); this.stairs?.leave(); document.removeEventListener('keydown', this.onKey); document.removeEventListener('keyup', this.onKeyUp); }
   $(s: string) { return this.el.querySelector(s) as HTMLElement; }
