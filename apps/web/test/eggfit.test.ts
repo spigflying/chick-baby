@@ -1,28 +1,28 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync, statSync } from 'node:fs';
 import { fitWidth, FIT_MAX, FIT_MIN } from '../src/eggfit';
-import { eggE, SHINE, drawShell, SHELL_W, SHELL_H } from '../src/shell';
-import { readFileSync } from 'node:fs';
+import { SHELL } from '../src/shell';
 
-describe('egg frame fit', () => {
-  it('keeps the full width when it fits, else the widest width that fits', () => {
+const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
+describe('photo shell frame', () => {
+  it('fitWidth keeps the full width when it fits, else the widest width that fits', () => {
     expect(fitWidth(() => true)).toBe(FIT_MAX);
     expect(fitWidth(() => false)).toBe(FIT_MIN);
-    const w = fitWidth((x) => x <= 0.47);
-    expect(w).toBeLessThanOrEqual(0.47); expect(w).toBeGreaterThan(0.465);
+    const w = fitWidth((x) => x <= 0.8);
+    expect(w).toBeLessThanOrEqual(0.8); expect(w).toBeGreaterThan(0.79);
   });
-  it('the shine pixels sit inside the shell fill (no white corner on the outline), ', () => {
-    for (const [x, y] of SHINE) expect(eggE((x + 0.5) / SHELL_W, (y + 0.5) / SHELL_H)).toBeLessThan(0.78);
+  it('shell ratio is fixed to the photo (635:733) in CSS and never changed by code', () => {
+    expect(css).toMatch(/\.egg\{[^}]*aspect-ratio:635\/733/);
+    expect(css).toMatch(/background:url\(\/shell-white\.webp\) center\/100% 100%/);
+    for (const f of ['device.ts', 'main.ts', 'eggfit.ts']) expect(readFileSync(new URL(`../src/${f}`, import.meta.url), 'utf8')).not.toMatch(/aspectRatio/);
+    expect(SHELL.w / SHELL.h).toBeCloseTo(635 / 733, 6);
   });
-  it('egg shape: centre inside, corners outside', () => {
-    expect(eggE(0.5, 0.54)).toBe(0);
-    expect(eggE(0, 0)).toBeGreaterThan(1); expect(eggE(1, 1)).toBeGreaterThan(1);
+  it('the CSS LCD box matches SHELL.lcd and sits inside the shell', () => {
+    const m = css.match(/\.inner\{position:absolute;left:([\d.]+)%;top:([\d.]+)%;width:([\d.]+)%;height:([\d.]+)%/)!;
+    expect(m.slice(1).map(Number)).toEqual([SHELL.lcd.left, SHELL.lcd.top, SHELL.lcd.width, SHELL.lcd.height].map((v) => +(v * 100).toFixed(2)));
+    expect(SHELL.lcd.left + SHELL.lcd.width).toBeLessThan(1); expect(SHELL.lcd.top + SHELL.lcd.height).toBeLessThan(1);
   });
-  it('egg ratio is always exactly 40:56 (canvas, CSS, and the fit code never changes it)', () => {
-    const c: any = { width: 0, height: 0, getContext: () => ({ fillRect() {}, set fillStyle(_v: string) {} }) };
-    drawShell(c); expect([c.width, c.height]).toEqual([40, 56]); expect(SHELL_W / SHELL_H).toBe(40 / 56);
-    const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
-    expect(css).toMatch(/\.device\{[^}]*aspect-ratio:40\/56/);
-    const dev = readFileSync(new URL('../src/device.ts', import.meta.url), 'utf8');
-    expect(dev).not.toMatch(/aspectRatio|drawShell\([^)]*,[^)]*,[^)]*,/);
+  it('the shell image is small', () => {
+    expect(statSync(new URL('../public/shell-white.webp', import.meta.url)).size).toBeLessThan(300_000);
   });
 });

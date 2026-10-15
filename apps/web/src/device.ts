@@ -1,8 +1,7 @@
 import { TopTip, tipText, type TopKey } from './topTip';
 import { PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID } from './sprites';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
-import { drawShell, SHELL_COLORS, eggE, EGG_SAFE_E } from './shell';
-import { fitWidth } from './eggfit';
+import { fitIntoLcd } from './eggfit';
 import { act, api, errText } from './api';
 import { savePetCache } from './sleep';
 import type { Live } from './ws';
@@ -316,15 +315,15 @@ export class Device {
   constructor(private ctx: Ctx) {
     this.el = document.createElement('div');
     this.el.className = 'device';
-    this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
+    this.el.innerHTML = `<div class="brand">CHICK♥BABY</div><div class="egg"><div class="inner"><div class="lcd">
       <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">◎0</span><span data-k="age">—</span></div><div class="toptip" role="tooltip" hidden></div>
-      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div></div>
-      <p class="fightstat" hidden></p>
+      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div></div></div></div></div>
+      <div class="ctrl"><p class="fightstat" hidden></p>
       <div class="labels"></div>
       <div class="fightbar" hidden><button data-pad="left" aria-label="左">◀</button><button data-pad="jump" aria-label="跳">▲</button><button data-pad="attack">啄</button><button data-pad="upAtk">上啄</button><button data-pad="item">道具</button><button data-pad="right" aria-label="右">▶</button><button class="navbtn">選單</button><button class="fightgo">發起戰鬥</button></div>
       <p class="hint" hidden></p>
       <div class="gamebar" hidden><button data-dir="left">◀</button><button class="quit">離開</button><button data-dir="right">▶</button></div>
-      <p class="msg">…</p></div></div>`;
+      <p class="msg">…</p></div>`;
     this.cv = this.el.querySelector('canvas.screen')!; this.g = this.cv.getContext('2d')!;
     this.bind(); this.bindTopTip(); this.bindFit();
     this.timer = window.setInterval(() => this.loop(), 33);
@@ -333,51 +332,14 @@ export class Device {
   /** 讓蛋殼永遠包住畫面：依內容實際高度，二分搜尋畫面寬度（佔蛋寬的比例），直到四個角都在彩色邊以內。 */
   private fitRaf = 0; private fitLcdH = -1;
   private bindFit() {
-    const go = () => { cancelAnimationFrame(this.fitRaf); this.fitRaf = requestAnimationFrame(() => this.fitEgg()); };
-    // 只看 .lcd 高度變化（顯示／隱藏按鈕列）；fitEgg 自己造成的變化（記在 fitLcdH）不再觸發，避免來回震盪
+    const go = () => { cancelAnimationFrame(this.fitRaf); this.fitRaf = requestAnimationFrame(() => this.fitLcd()); };
+    // 只看 .lcd 高度變化；fitLcd 自己造成的變化（記在 fitLcdH）不再觸發，避免來回震盪
     const ro = new ResizeObserver(() => { if (this.$('.lcd').offsetHeight !== this.fitLcdH) go(); });
     ro.observe(this.$('.lcd')); window.addEventListener('resize', go);
     this.off.push(() => { ro.disconnect(); window.removeEventListener('resize', go); });
   }
-  private shellSc: { palette: string[]; rim: string } | null = null;
-  paintShell(sc: { palette: string[]; rim: string }) { this.shellSc = sc; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim); }
-  /**
-   * 讓蛋殼永遠包住畫面，蛋的比例固定 40:56（不拉長）。依序嘗試：
-   * 畫面寬度在蛋寬 55–56% 之間微調 → 整顆蛋等比例放大（最多到視窗寬 96%，頁面可捲動）
-   * → 精簡模式 1（戰鬥按鈕 2 列、按鈕高 36px）→ 精簡模式 2（字再小一點）。
-   */
-  fitEgg() {
-    const dev = this.el;
-    dev.style.width = ''; dev.classList.remove('fit1', 'fit2');
-    const base = dev.getBoundingClientRect().width; if (!base) return;
-    const maxW = Math.max(base, Math.min(document.documentElement.clientWidth * 0.96, 900));
-    const done = () => { this.fitLcdH = this.$('.lcd').offsetHeight; };
-    for (const level of [0, 1, 2]) {
-      dev.classList.toggle('fit1', level >= 1); dev.classList.toggle('fit2', level >= 2);
-      for (let w = base; ; w = Math.min(maxW, w * 1.08)) {
-        dev.style.width = w === base ? '' : `${Math.round(w)}px`;
-        if (this.fitInner(0.55)) return done();
-        if (w >= maxW) break;
-      }
-    }
-    dev.style.width = `${Math.round(maxW)}px`; this.fitInner(0.3); done(); // 最後手段：畫面再窄一點
-  }
-  private fitInner(min: number): boolean {
-    const inner = this.$('.inner'), dev = this.el;
-    const D = dev.getBoundingClientRect(); if (!D.width) return true;
-    const fits = (w: number) => {
-      inner.style.left = inner.style.right = `${((1 - w) / 2) * 100}%`;
-      // 垂直置中在蛋最寬的地方（0.54），但不高過原本的 26.5%
-      inner.style.top = `${Math.max(26.5, 54 - (inner.offsetHeight / D.height) * 50)}%`;
-      for (const el of [this.$('.brand'), this.$('.lcd')]) {
-        const r = el.getBoundingClientRect(), pad = el.classList.contains('lcd') ? 8 : 0; // .lcd 的外框陰影 4+4px
-        for (const [x, y] of [[r.left - pad, r.top - pad], [r.right + pad, r.top - pad], [r.left - pad, r.bottom + pad], [r.right + pad, r.bottom + pad]])
-          if (eggE((x - D.left) / D.width, (y - D.top) / D.height) > EGG_SAFE_E) return false;
-      }
-      return true;
-    };
-    return fits(fitWidth(fits, undefined, min));
-  }
+  /** 頂部列＋遊戲畫面一定要放在照片的 LCD 裡：太高就等比例縮窄（置中）；再不行就把頂部列的字縮小。外殼比例固定。 */
+  fitLcd() { fitIntoLcd(this.el); this.fitLcdH = this.$('.lcd').offsetHeight; }
   destroy() { this.leaveArena(); clearInterval(this.timer); this.off.forEach((f) => f()); this.stairs?.leave(); document.removeEventListener('keydown', this.onKey); document.removeEventListener('keyup', this.onKeyUp); }
   $(s: string) { return this.el.querySelector(s) as HTMLElement; }
   say(t: string) { this.$('.msg').textContent = t; }
@@ -386,16 +348,12 @@ export class Device {
     const first = !this.home || this.home.id !== view.home.id;
     this.home = view.home; this.isOwner = !!view.home.is_owner; this.visitor = view.visitor;
     this.setPet(view.pet);
-    const sc = SHELL_COLORS[this.pet?.species ?? 'chicken'];
-    this.paintShell(sc);
     this.$('.brand').textContent = this.isOwner ? 'CHICK♥BABY' : `${view.home.owner.display_name} 的家`;
     if (first) this.say(this.isOwner ? (this.pet ? `歡迎回家！` : '還沒有寵物，點「孵蛋」選一隻吧！') : `來 ${view.home.owner.display_name} 家玩～`);
   }
   setPet(p: any) {
-    const prevSpecies = this.pet?.species;
     this.pet = p;
     if (this.isOwner) savePetCache(localStorage, p); // 休息時段的畫面用
-    if (p && prevSpecies && prevSpecies !== p.species) { const sc = SHELL_COLORS[p.species]; this.paintShell(sc); }
     this.buildCells(); this.renderTop(); if (this.menu === 'status') this.renderMenu();
     const ot = this.el.querySelector('.tags [data-g="owner"]'); if (ot && this.home) ot.textContent = this.ownerAway ? '主人外出中' : this.pet?.name ?? this.home.owner.display_name;
   }
@@ -661,7 +619,6 @@ export class Device {
     try {
       const r = await act('POST', '/pets', { species: this.hatchPick, name });
       this.closeMenu(); this.setPet(r.pet); this.petX = 42;
-      const sc = SHELL_COLORS[r.pet.species]; this.paintShell(sc);
       this.say(`${r.pet.name} 的蛋來了！一分鐘內就會孵化～`);
     } catch (e) { this.say(errText(e)); }
   }

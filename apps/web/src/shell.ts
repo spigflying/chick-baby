@@ -1,36 +1,8 @@
-// 彩色像素蛋殼（移植自原型）
-/** 蛋形：e ≤ 1 在蛋裡；> 0.88 是外框，0.78–0.88 是彩色邊（與 drawShell 同一個公式）。nx, ny 是 0–1 的相對座標。 */
-export function eggE(fx: number, fy: number): number {
-  const nx = (fx - 0.5) / 0.5, ny = (fy - 0.54) / 0.46;
-  return ny < 0 ? nx * nx / (1 + ny * 0.08) ** 2 + ny * ny : nx * nx + ny * ny;
-}
-/** 內容（畫面）可以佔用的範圍：留在彩色邊以內。 */
-export const EGG_SAFE_E = 0.76;
-export const SHELL_W = 40, SHELL_H = 56;
-export function drawShell(c: HTMLCanvasElement, palette = ['#ff5c8a', '#ffd23f', '#3ec6ff', '#7ee07e', '#b48cff', '#ff9f43'], rim = '#ff3d7f') {
-  const W = SHELL_W, H = SHELL_H; c.width = W; c.height = H; // 比例固定 40:56，永遠不拉長
-  const g = c.getContext('2d')!;
-  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-    const e = eggE((x + 0.5) / W, (y + 0.5) / H);
-    if (e > 1) continue;
-    let col;
-    if (e > 0.88) col = '#1a1030';
-    else if (e > 0.78) col = rim;
-    else {
-      const d = ((x >> 2) + (y >> 2)) % 2 === 0 && x % 4 < 3 && y % 4 < 3;
-      col = d ? palette[((x >> 2) * 3 + (y >> 2)) % palette.length] : '#fff4d6';
-    }
-    g.fillStyle = col; g.fillRect(x, y, 1, 1);
-  }
-  // 高光：只畫在殼的內部（舊座標 (10–12, 8–10) 落在外框／蛋外面，左上角出現白色缺角）
-  g.fillStyle = '#ffffff'; SHINE.forEach(([x, y]) => g.fillRect(x, y, 1, 1));
-}
-// 每種物種一個殼色，訪客一眼看出是誰家
-export const SHELL_COLORS: Record<string, { palette: string[]; rim: string }> = {
-  chicken: { palette: ['#ff5c8a', '#ffd23f', '#3ec6ff', '#7ee07e', '#b48cff', '#ff9f43'], rim: '#ff3d7f' },
-  duck: { palette: ['#3ec6ff', '#ffd23f', '#7ee07e', '#ffffff', '#5b8cff', '#ff9f43'], rim: '#1e90ff' },
-  penguin: { palette: ['#b48cff', '#3ec6ff', '#ffffff', '#5b8cff', '#ff5c8a', '#7ee07e'], rim: '#6a4cff' },
-  dino: { palette: ['#7ee07e', '#ffd23f', '#ff9f43', '#3ec6ff', '#ff5c8a', '#b48cff'], rim: '#2fb34a' },
-};
-/** 左上角高光的像素（已確認都落在殼的內部填色區）。 */
-export const SHINE: [number, number][] = [[12, 10], [13, 10], [11, 11], [11, 12]];
+// 外殼：白色貼紙蛋＋粉紅星框的照片（去背；apps/web/public/shell-white.webp）。比例固定，永遠不拉長。
+export const SHELL = {
+  src: '/shell-white.webp', w: 635, h: 733,
+  /** 照片裡 LCD 的位置（佔外殼寬／高的比例）；畫面（頂部列＋遊戲畫面）一定要放在這裡面。 */
+  lcd: { left: 0.2142, top: 0.2838, width: 0.5638, height: 0.4652 },
+} as const;
+/** 頂部列＋畫面要放進 LCD 時的寬度比例（佔 LCD 寬）上下限。 */
+export const LCD_FIT_MAX = 1, LCD_FIT_MIN = 0.4;
