@@ -3,7 +3,7 @@ import './style.css';
 import { api, act, errText, ApiError } from './api';
 import { Live } from './ws';
 import { Device } from './device';
-import { fitIntoLcd } from './eggfit';
+import { drawShell } from './shell';
 import { spriteCanvas, speciesSprite, SPECIES_LABEL, PAL, spr, sw, sh } from './sprites';
 import { watchIdle } from './idle';
 import { createUpdater, SEEN_KEY } from './update';
@@ -43,13 +43,13 @@ function setWallet(n: number) { wallet = n; const c = document.getElementById('b
 // ---------- 登入 ----------
 async function loginPage() {
   $('#bar').hidden = true;
-  app.innerHTML = `<main class="page"><div class="device" id="lobbyDev"><div class="brand">CHICK♥BABY</div><div class="egg"><div class="inner">
-    <div class="lcd"><div class="lcd-top"><span>多人版</span><span>M1</span></div><div class="scr" style="display:flex;justify-content:center;align-items:center;gap:8%;aspect-ratio:6/5;background:var(--g3)" id="lobbyPets"></div></div></div></div><div class="ctrl"><p class="msg">登入後就能孵蛋、拜訪朋友的家！</p></div></div>
+  app.innerHTML = `<main class="page"><div class="device" id="lobbyDev"><canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div>
+    <div class="lcd"><div class="lcd-top"><span>多人版</span><span>M1</span></div><div class="scr" style="display:flex;justify-content:center;gap:8%;padding:12% 0;background:var(--g3)" id="lobbyPets"></div><p class="msg">登入後就能孵蛋、拜訪朋友的家！</p></div></div></div>
     <div class="panel login"><h2>登入</h2><div class="gsi" id="gsi"></div><div id="gsiNote" class="muted"></div>
     <div id="devBox" hidden><h3>開發用登入（DEV_LOGIN=1）</h3><form id="devForm" class="row"><input name="name" placeholder="名字，例如 alice" pattern="[\\w\\-\\u4e00-\\u9fff]{1,20}" required><button>登入</button></form>
     <p class="muted">名字 <code>dev-admin</code> 會是管理員（ADMIN_EMAILS）。</p></div>
     <p class="muted">我們不會公開你的 Email，其他玩家只看得到暱稱與分享碼。</p></div></main>`;
-  fitIntoLcd($('#lobbyDev'));
+  drawShell(document.querySelector('#lobbyDev canvas.shell') as HTMLCanvasElement);
   for (const s of ['chicken', 'duck', 'penguin', 'dino']) { const c = spriteCanvas(speciesSprite(s, 1), 1); c.style.height = '34%'; c.style.minHeight = '28px'; c.title = SPECIES_LABEL[s]; $('#lobbyPets').append(c); }
   if (cfg.dev_login) {
     $('#devBox').hidden = false;
@@ -204,12 +204,12 @@ function sleepPage(st: { opens_at: number | null; server_time?: number }) {
   const skew = st.server_time ? st.server_time - Date.now() : 0; // 伺服器時間 − 本地時間
   // v1.5：蛋殼畫面＋自己的寵物在睡覺（從 localStorage 快取畫；不打 API、不開 WebSocket）
   const sp = sleepSprite(loadPetCache(localStorage));
-  app.innerHTML = `<main class="page"><div class="device" id="sleepDev"><div class="brand">CHICK♥BABY</div><div class="egg"><div class="inner">
-    <div class="lcd"><div class="lcd-top"><span>${esc(sp.name || '小雞')}</span><span>💤</span></div><div class="scr"><canvas class="screen" id="sleepScr" width="120" height="100"></canvas></div></div></div></div>
-    <div class="ctrl"><p class="msg" id="closedLine">${esc(closedLine(st.opens_at))}</p></div></div>
+  app.innerHTML = `<main class="page"><div class="device" id="sleepDev"><canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div>
+    <div class="lcd"><div class="lcd-top"><span>${esc(sp.name || '小雞')}</span><span>💤</span></div><div class="scr"><canvas class="screen" id="sleepScr" width="120" height="100"></canvas></div>
+    <p class="msg" id="closedLine">${esc(closedLine(st.opens_at))}</p></div></div></div>
     <div class="panel"><h2>小雞睡覺中</h2><p>${st.opens_at ? `下次開放：<b>${esc(formatOpensAt(st.opens_at))}</b>` : '目前沒有排定的開放時間'}</p>
     <p id="countdown" style="font-size:1.6em"></p><p class="muted">平日 09:00–20:00 開放。休息時段時間是暫停的：寵物不會餓、不會生病。</p></div></main>`;
-  fitIntoLcd($('#sleepDev')); window.addEventListener('resize', () => { const d = document.getElementById('sleepDev'); if (d) fitIntoLcd(d); });
+  drawShell(document.querySelector('#sleepDev canvas.shell') as HTMLCanvasElement);
   const cv = document.getElementById('sleepScr') as HTMLCanvasElement, g = cv.getContext('2d')!;
   let fr = 0;
   const draw = () => {
