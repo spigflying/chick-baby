@@ -1,5 +1,6 @@
 // 雞（chicken = adult 精靈）圓頂頭（3 列收窄的弧形）＋正中央一根 1px 呆毛（尖端微捲），取代原本的雞冠（v1.5）
 import { ACC_SPRITES, CHICKEN_FRONT } from './bao-sprites';
+import { isOutfitId } from '@chick/engine';
 // 由根目錄原型 script.js 移植的像素精靈（Game Boy 四階綠）
 export const PAL = ['#9bbc0f', '#8bac0f', '#306230', '#0f380f'];
 export const S: Record<string, string[]> = {
@@ -101,9 +102,14 @@ export function num(ctx: CanvasRenderingContext2D, n: number, x: number, y: numb
 export function speciesSprite(species: string, kind: 1 | 2 | 's') {
   const [sp0, look] = species.split('|');
   const sp = S[`${sp0}_1`] ? sp0 : 'chicken';
-  if (!look || sp !== 'chicken') return `${sp}_${kind}`;
-  const name = `${sp}_${kind}|${look}`; ensureComposite(name); return name;
+  if (!look) return `${sp}_${kind}`;
+  // 雞以外：配件圖是對齊雞畫的，只先畫服飾（墨鏡、皇冠），依眼睛位置平移；進化配件仍只畫在雞身上
+  const lk = sp === 'chicken' ? look : look.split(',').filter((id) => isOutfitId(id)).join(',');
+  if (!lk) return `${sp}_${kind}`;
+  const name = `${sp}_${kind}|${lk}`; ensureComposite(name); return name;
 }
+/** 各物種眼睛相對於雞眼睛 (5,6) 的位移（側面、未翻轉的座標）。 */
+export const SPECIES_ACC_OFFSET: Record<string, [number, number]> = { chicken: [0, 0], duck: [1, -4], penguin: [0, -3], dino: [-3, -3] };
 /** 正面（狀態面板）：只有雞有正面精靈；其他物種回傳側面。 */
 export function frontSprite(species: string) {
   const [sp0, look] = species.split('|');
@@ -118,12 +124,15 @@ export function ensureComposite(name: string) {
   const rows = front ? CHICKEN_FRONT : S[base];
   if (!rows) return;
   const ids = look.split(',').filter((id) => ACC_SPRITES[id]);
-  const accs = ids.map((id) => ({ id, a: ACC_SPRITES[id], v: front ? ACC_SPRITES[id].front : ACC_SPRITES[id].side }));
+  const sp0 = base.split('_')[0], [ox, oy] = front ? [0, 0] : SPECIES_ACC_OFFSET[sp0] ?? [0, 0];
+  const shift = (l: [number, number, number | string][]) => l.map(([x, y, c]) => [x + ox, y + oy, c] as [number, number, number | string]);
+  const accs = ids.map((id) => { const v = front ? ACC_SPRITES[id].front : ACC_SPRITES[id].side; return { id, a: ACC_SPRITES[id], v: { back: shift(v.back as any), front: shift(v.front as any), fx: shift(v.fx as any) } }; });
   const dyOf = (id: string) => (kind === 2 && !GROUNDED.has(id) ? 1 : 0); // 走路第 2 格：身體往下 1px，配件跟著動（地上的球、鞋子不動）
   const g = new Map<string, [number, number, string]>();
   const put = (x: number, y: number, c: string) => g.set(`${x},${y}`, [x, y, c]);
   for (const { id, v } of accs) for (const [x, y, c] of v.back) put(x, y + dyOf(id), String(c));
-  const nohair = accs.some((a) => a.a.nohair), nofeet = accs.some((a) => a.a.nofeet);
+  const isChicken = front || sp0 === 'chicken'; // 拿掉頭毛／腳只對雞的像素有意義
+  const nohair = isChicken && accs.some((a) => a.a.nohair), nofeet = isChicken && accs.some((a) => a.a.nofeet);
   const hairTo = 1 + (kind === 2 ? 1 : 0);
   rows.forEach((r, y) => [...r].forEach((c, x) => {
     if (c === '.' || c === ' ') return;
@@ -131,7 +140,9 @@ export function ensureComposite(name: string) {
     if (nofeet && y >= 16) return;
     put(x, y, c);
   }));
-  for (const { id, v } of accs) for (const [x, y, c] of v.front) put(x, y + dyOf(id), String(c));
+  // 雞以外：墨鏡的鏡腳是照雞的頭寬畫的，超出頭的部分（底圖是空白）拿掉，免得浮在半空中
+  const arm = (id: string, x: number, y: number) => !isChicken && id === 'shades' && x > 5 + ox + 3 && (rows[y]?.[x] ?? '.') === '.';
+  for (const { id, v } of accs) for (const [x, y, c] of v.front) if (!arm(id, x, y)) put(x, y + dyOf(id), String(c));
   for (const { id, v } of accs) for (const [x, y, c] of v.fx) put(x, y + dyOf(id), String(c));
   const bw = rows[0].length, bh = rows.length;
   let x0 = 0, y0 = 0, x1 = bw - 1, y1 = bh - 1;
