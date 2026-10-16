@@ -1,11 +1,25 @@
-// v1.6 下樓梯排行榜（開始前顯示）：全部寵物最佳樓層前 10 名＋自己的名次。
+// v1.6 下樓梯排行榜（開始前顯示）：前 5 名＋自己（不在前 5 名時加「…」）。
 export interface BoardRow { rank: number; pet_name: string; owner_name: string; species: string; best_floor: number; mine: boolean }
 export interface Board { top: BoardRow[]; me: { pet_name: string; best_floor: number; rank: number } | null }
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+/** 開始前只列前 BOARD_TOP 名；自己不在裡面就加「…」再列自己那一行。 */
+export const BOARD_TOP = 5;
+export function boardRows(b: Board): { rows: BoardRow[]; gap: boolean; me: BoardRow | null } {
+  const rows = b.top.slice(0, BOARD_TOP);
+  if (!b.me || rows.some((r) => r.mine)) return { rows, gap: false, me: null };
+  const mine = b.top.find((r) => r.mine);
+  const me: BoardRow = mine ?? { rank: b.me.rank, pet_name: b.me.pet_name, owner_name: '你', species: '', best_floor: b.me.best_floor, mine: true };
+  return { rows, gap: me.rank > rows.length + 1, me };
+}
+const row = (r: BoardRow) => `<div class="wide brow${r.mine ? ' mine' : ''}"><span>${r.rank}. ${esc(r.pet_name)}<small>（${r.mine ? '你' : esc(r.owner_name)}）</small></span><em>${r.best_floor} 樓</em></div>`;
+/** 排行榜在中間可捲動；「開始」「返回」固定在畫面底部，永遠看得到。 */
 export function boardHtml(b: Board | null, err = false): string {
-  const rows = !b ? `<div class="note">${err ? '排行榜載入失敗' : '載入中…'}</div>`
-    : b.top.length ? b.top.map((r) => `<div class="wide brow${r.mine ? ' mine' : ''}"><span>${r.rank}. ${esc(r.pet_name)}<small>（${esc(r.owner_name)}）</small></span><em>${r.best_floor} 樓</em></div>`).join('')
-      : '<div class="note">還沒有人下過樓梯</div>';
-  const me = b?.me ? `<div class="wide brow me"><span>你：${esc(b.me.pet_name)} 第 ${b.me.rank} 名</span><em>${b.me.best_floor} 樓</em></div>` : '';
-  return `<div class="mt">— 下樓梯排行榜 —</div>${rows}${me}<div class="mi on go" data-go="1">▶ 開始</div><div class="mi back">✕ 返回</div>`;
+  let list: string;
+  if (!b) list = `<div class="note">${err ? '排行榜載入失敗' : '載入中…'}</div>`;
+  else if (!b.top.length && !b.me) list = '<div class="note">還沒有人下過樓梯</div>';
+  else {
+    const v = boardRows(b);
+    list = v.rows.map(row).join('') + (v.me ? (v.gap ? '<div class="bgap">…</div>' : '') + row(v.me) : '');
+  }
+  return `<div class="board"><div class="mt">— 下樓梯排行榜 —</div><div class="blist">${list}</div><div class="bfoot"><div class="mi on go" data-go="1">▶ 開始</div><div class="mi back">✕ 返回</div></div></div>`;
 }
