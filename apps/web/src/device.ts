@@ -607,7 +607,11 @@ export class Device {
         if (a === 'doctor') { this.fx('syringe'); this.say('打針好痛…但病好了！'); }
         else this.say(a === 'sleep' ? '晚安～' : '早安！');
       }
-    } catch (e) { this.say(errText(e)); }
+    } catch (e) {
+      this.say(errText(e));
+      // 畫面上的狀態可能過期（例如睡飽自動起床）：重新抓一次寵物
+      try { const me = await api('GET', '/me'); if (me?.pet && me.pet.id === this.pet?.id) this.setPet(me.pet); } catch { /* 忽略 */ }
+    }
     finally { this.busy = false; }
   }
   pendingPet: any = null;

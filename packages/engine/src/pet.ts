@@ -164,7 +164,7 @@ export type OwnerAction = 'sleep' | 'wake' | 'clean' | 'doctor';
 export function applyOwnerAction(p: PetState, action: OwnerAction, cfg: GameConfig = GAME): GameErrorCode | null {
   if (p.status === 'dead') return 'PET_DEAD';
   if (p.status === 'egg') return 'PET_EGG';
-  if (action === 'wake') { if (!p.sleeping) return 'NOT_SLEEPING'; p.sleeping = false; }
+  if (action === 'wake') { p.sleeping = false; } // 已經自己醒了（睡飽自動起床）也算成功：前端可能還顯示在睡
   else if (action === 'sleep' && p.sleeping) return 'ALREADY_SLEEPING';
   else if (p.sleeping) return 'PET_SLEEPING';
   else if (action === 'sleep') { p.sleeping = true; p.counters.sleeps++; grow(p, 'stamina', 0.5); }

@@ -66,6 +66,8 @@ describe('feeding rules', () => {
     const p = alive(); p.hunger = 10; const c0 = p.cleanliness; applyFood(p, foodById('rice')!, 70_000, createRng(1)); expect(p.cleanliness).toBe(c0);
     applyOwnerAction(p, 'sleep'); expect(checkFeed(p, foodById('rice'), owner)).toBe('PET_SLEEPING');
     expect(applyOwnerAction(p, 'clean')).toBe('PET_SLEEPING'); expect(applyOwnerAction(p, 'wake')).toBeNull();
+    // 已經自己醒了（睡飽自動起床）再按起床：成功、不報錯
+    expect(applyOwnerAction(p, 'wake')).toBeNull(); expect(p.sleeping).toBe(false);
   });
   it('species growth multiplier', () => {
     const d = newPet('dino', 0); simulate(d, 61_000, createRng(1)); d.hunger = 0;

@@ -161,7 +161,7 @@ describe('pets & feeding', () => {
     const pet = await hatchAlive(a, 'chicken', { poop: 2, cleanliness: 30, health: 50 });
     const act = (c: Client, action: string) => c.call('POST', `/api/pets/${pet}/actions`, { action, request_id: rid() });
     expect((await act(b, 'clean')).status).toBe(403);
-    expect((await act(a, 'wake')).json.error).toBe('NOT_SLEEPING');
+    { const w = await act(a, 'wake'); expect(w.status).toBe(200); expect(w.json.pet.sleeping).toBe(false); } // 醒著按起床：冪等成功（睡飽自動起床後畫面可能還在睡）
     expect((await act(a, 'sleep')).json.pet.sleeping).toBe(true);
     expect((await act(a, 'sleep')).json.error).toBe('ALREADY_SLEEPING');
     expect((await feed(a, pet, 'rice')).json.error).toBe('PET_SLEEPING');
@@ -697,3 +697,16 @@ describe('pet follows its owner (v1.4)', () => {
     await new Promise((r) => setTimeout(r, 300));
   });
 });
+
+describe('wake after auto-wake (bug: 睡覺後起不來)', () => {
+  it('pressing 起床 after the pet already woke up by itself (energy full) succeeds and returns an awake pet', async () => {
+    const a = await login('wakeup'); const id = await hatchAlive(a, 'chicken', { energy: 60 });
+    const s = await a.call('POST', `/api/pets/${id}/actions`, { action: 'sleep', request_id: rid() });
+    expect(s.status).toBe(200); expect(s.json.pet.sleeping).toBe(true);
+    // 兩分鐘前就睡了 → 結算時睡飽自動起床，但畫面還以為在睡
+    await db.updateTable('pets').set({ last_simulated_at: sql`now() - interval '2 minutes'` } as any).where('id', '=', id).execute();
+    const w = await a.call('POST', `/api/pets/${id}/actions`, { action: 'wake', request_id: rid() });
+    expect(w.status).toBe(200); expect(w.json.pet.sleeping).toBe(false);
+  });
+});
+
