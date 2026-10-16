@@ -1,6 +1,6 @@
 // 雞（chicken = adult 精靈）圓頂頭（3 列收窄的弧形）＋正中央一根 1px 呆毛（尖端微捲），取代原本的雞冠（v1.5）
 import { ACC_SPRITES, CHICKEN_FRONT } from './bao-sprites';
-import { isOutfitId } from '@chick/engine';
+import { ACCESSORIES } from '@chick/engine';
 // 由根目錄原型 script.js 移植的像素精靈（Game Boy 四階綠）
 export const PAL = ['#9bbc0f', '#8bac0f', '#306230', '#0f380f'];
 export const S: Record<string, string[]> = {
@@ -103,13 +103,26 @@ export function speciesSprite(species: string, kind: 1 | 2 | 's') {
   const [sp0, look] = species.split('|');
   const sp = S[`${sp0}_1`] ? sp0 : 'chicken';
   if (!look) return `${sp}_${kind}`;
-  // 雞以外：配件圖是對齊雞畫的，只先畫服飾（墨鏡、皇冠），依眼睛位置平移；進化配件仍只畫在雞身上
-  const lk = sp === 'chicken' ? look : look.split(',').filter((id) => isOutfitId(id)).join(',');
-  if (!lk) return `${sp}_${kind}`;
+  const lk = look;
   const name = `${sp}_${kind}|${lk}`; ensureComposite(name); return name;
 }
-/** 各物種眼睛相對於雞眼睛 (5,6) 的位移（側面、未翻轉的座標）。 */
-export const SPECIES_ACC_OFFSET: Record<string, [number, number]> = { chicken: [0, 0], duck: [1, -4], penguin: [0, -3], dino: [-3, -3] };
+/**
+ * 配件圖是對齊雞畫的；其他物種依部位（anchor）平移到該物種的頭頂／眼睛／脖子／背／手／腳／身體。
+ * 值是相對於雞的位移（側面、未翻轉的座標）。
+ */
+type Anchor = 'head' | 'eye' | 'neck' | 'back' | 'hand' | 'feet' | 'body';
+export const SPECIES_ANCHORS: Record<string, Record<Anchor, [number, number]>> = {
+  chicken: { head: [0, 0], eye: [0, 0], neck: [0, 0], back: [0, 0], hand: [0, 0], feet: [0, 0], body: [0, 0] },
+  duck: { head: [1, -2], eye: [1, -4], neck: [1, -4], back: [1, -1], hand: [0, -1], feet: [-1, -2], body: [0, -1] },
+  penguin: { head: [-1, -2], eye: [0, -3], neck: [0, -4], back: [0, -2], hand: [0, -2], feet: [-2, -2], body: [0, -2] },
+  dino: { head: [-3, -2], eye: [-3, -3], neck: [-2, -4], back: [0, -3], hand: [1, -1], feet: [0, -2], body: [2, -2] },
+};
+const SLOT_ANCHOR: Record<string, Anchor> = { head: 'head', deco: 'head', face: 'eye', back: 'back', hand: 'hand', feet: 'feet', body: 'body' };
+/** 例外：圍巾跟著脖子。 */
+const ITEM_ANCHOR: Record<string, Anchor> = { scarf: 'neck' };
+export function accAnchor(id: string): Anchor { return ITEM_ANCHOR[id] ?? SLOT_ANCHOR[(ACCESSORIES as any)[id]?.slot] ?? 'body'; }
+/** 貼身的衣服（外套）在其他物種上只畫在身體輪廓內，跟著身形走。 */
+const CLIP_TO_BODY = new Set(['jacket']);
 /** 正面（狀態面板）：只有雞有正面精靈；其他物種回傳側面。 */
 export function frontSprite(species: string) {
   const [sp0, look] = species.split('|');
@@ -124,9 +137,9 @@ export function ensureComposite(name: string) {
   const rows = front ? CHICKEN_FRONT : S[base];
   if (!rows) return;
   const ids = look.split(',').filter((id) => ACC_SPRITES[id]);
-  const sp0 = base.split('_')[0], [ox, oy] = front ? [0, 0] : SPECIES_ACC_OFFSET[sp0] ?? [0, 0];
-  const shift = (l: [number, number, number | string][]) => l.map(([x, y, c]) => [x + ox, y + oy, c] as [number, number, number | string]);
-  const accs = ids.map((id) => { const v = front ? ACC_SPRITES[id].front : ACC_SPRITES[id].side; return { id, a: ACC_SPRITES[id], v: { back: shift(v.back as any), front: shift(v.front as any), fx: shift(v.fx as any) } }; });
+  const sp0 = base.split('_')[0], anchors = front ? SPECIES_ANCHORS.chicken : SPECIES_ANCHORS[sp0] ?? SPECIES_ANCHORS.chicken;
+  const shift = (l: any[], [ox, oy]: [number, number]) => l.map(([x, y, c]) => [x + ox, y + oy, c] as [number, number, number | string]);
+  const accs = ids.map((id) => { const v = front ? ACC_SPRITES[id].front : ACC_SPRITES[id].side, o = anchors[accAnchor(id)]; return { id, o, a: ACC_SPRITES[id], v: { back: shift(v.back, o), front: shift(v.front, o), fx: shift(v.fx, o) } }; });
   const dyOf = (id: string) => (kind === 2 && !GROUNDED.has(id) ? 1 : 0); // 走路第 2 格：身體往下 1px，配件跟著動（地上的球、鞋子不動）
   const g = new Map<string, [number, number, string]>();
   const put = (x: number, y: number, c: string) => g.set(`${x},${y}`, [x, y, c]);
@@ -140,9 +153,10 @@ export function ensureComposite(name: string) {
     if (nofeet && y >= 16) return;
     put(x, y, c);
   }));
-  // 雞以外：墨鏡的鏡腳是照雞的頭寬畫的，超出頭的部分（底圖是空白）拿掉，免得浮在半空中
-  const arm = (id: string, x: number, y: number) => !isChicken && id === 'shades' && x > 5 + ox + 3 && (rows[y]?.[x] ?? '.') === '.';
-  for (const { id, v } of accs) for (const [x, y, c] of v.front) if (!arm(id, x, y)) put(x, y + dyOf(id), String(c));
+  // 雞以外：墨鏡的鏡腳超出頭的部分、外套超出身體的部分（底圖是空白）拿掉，免得浮在半空中
+  const empty = (x: number, y: number) => (rows[y]?.[x] ?? '.') === '.';
+  const clip = (id: string, o: [number, number], x: number, y: number) => !isChicken && ((id === 'shades' && x > 5 + o[0] + 3 && empty(x, y)) || (CLIP_TO_BODY.has(id) && empty(x, y)));
+  for (const { id, o, v } of accs) for (const [x, y, c] of v.front) if (!clip(id, o, x, y)) put(x, y + dyOf(id), String(c));
   for (const { id, v } of accs) for (const [x, y, c] of v.fx) put(x, y + dyOf(id), String(c));
   const bw = rows[0].length, bh = rows.length;
   let x0 = 0, y0 = 0, x1 = bw - 1, y1 = bh - 1;

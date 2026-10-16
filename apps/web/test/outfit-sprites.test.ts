@@ -1,3 +1,4 @@
+import { ACCESSORIES } from '@chick/engine';
 import { describe, expect, it } from 'vitest';
 import { ANCHOR, S, speciesSprite, frontSprite, petSpriteKey } from '../src/sprites';
 const diff = (a: string, b: string) => S[a].join('\n') !== S[b].join('\n');
@@ -19,8 +20,11 @@ describe('purchased outfits are drawn on every species and view', () => {
       expect(changed).toBeGreaterThanOrEqual(2); // 眼睛周圍 3×3 有被墨鏡蓋到
     });
   }
-  it('non-chicken species keep evolution items off but show outfits', () => {
-    expect(speciesSprite('duck|sword,bow', 1)).toBe('duck_1');
-    expect(speciesSprite('duck|shades,sword', 1)).toBe('duck_1|shades');
+  it('every species × every accessory (evolution + outfits) differs from the plain sprite in walk, sleep and front views', () => {
+    for (const sp of ['chicken', 'duck', 'penguin', 'dino']) for (const id of Object.keys(ACCESSORIES)) {
+      const key = `${sp}|${id}`;
+      for (const k of [1, 2, 's'] as const) { const n = speciesSprite(key, k); expect(n, `${key} ${k}`).toContain('|'); expect(diff(n, `${sp}_${k}`), `${key} ${k}`).toBe(true); }
+      expect(frontSprite(key), key).not.toBe(frontSprite(sp));
+    }
   });
 });

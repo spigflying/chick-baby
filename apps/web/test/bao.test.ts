@@ -18,8 +18,8 @@ describe('寶 sprites (v1.7)', () => {
     const n1 = speciesSprite('chicken|crown', 1), n2 = speciesSprite('chicken|crown', 2);
     expect(ANCHOR[n2].oy).toBe(ANCHOR[n1].oy - 1);
   });
-  it('other species keep their own sprite (accessories are drawn for the chicken only)', () => {
-    expect(speciesSprite('duck|sword', 1)).toBe('duck_1'); expect(speciesSprite('chicken', 's')).toBe('chicken_s');
+  it('other species get accessories composited on their own sprite', () => {
+    expect(speciesSprite('duck|sword', 1)).toBe('duck_1|sword'); expect(speciesSprite('chicken', 's')).toBe('chicken_s');
   });
   it('front view for the status panel', () => {
     const n = frontSprite('chicken|shades'); expect(S[n]).toBeDefined(); expect(ANCHOR[n].bw).toBe(16);
