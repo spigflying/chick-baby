@@ -731,7 +731,7 @@ export class Device {
         this.menu = 'result';
         const el = this.$('.menu'); el.hidden = false;
         el.innerHTML = stairsResultHtml(r, this.ctx.wallet());
-        this.say(r.aborted ? '遊戲中止' : `${r.time_up ? '時間到！' : ''}下了 ${r.floors} 樓，賺到 ◎${r.coins}！`);
+        this.say(r.aborted ? '遊戲中止' : `${r.time_up ? (r.closing ? '快關門了，時間到！' : '時間到！') : ''}下了 ${r.floors} 樓，賺到 ◎${r.coins}！`);
       },
     });
     this.say('←→ 移動，往下跳！小心尖刺～');
