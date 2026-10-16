@@ -1,4 +1,5 @@
 // 雞（chicken = adult 精靈）圓頂頭（3 列收窄的弧形）＋正中央一根 1px 呆毛（尖端微捲），取代原本的雞冠（v1.5）
+import { ACC_SPRITES, CHICKEN_FRONT } from './bao-sprites';
 // 由根目錄原型 script.js 移植的像素精靈（Game Boy 四階綠）
 export const PAL = ['#9bbc0f', '#8bac0f', '#306230', '#0f380f'];
 export const S: Record<string, string[]> = {
@@ -74,10 +75,15 @@ S.i_home = ['....3....', '...323...', '..32223..', '.3222223.', '333333333', '.3
 S.i_wake = ['...3...', '3..3..3', '.3...3.', '..333..', '33313 33'.replace(' ', ''), '..333..', '.3...3.', '3..3..3'];
 S.tomb = ['..3333..', '.322223.', '32233223', '32222223', '32333323', '32222223', '32222223', '33333333'];
 
-export const sw = (n: string) => S[n][0].length;
-export const sh = (n: string) => S[n].length;
+/** 合成精靈（寶的配件）的錨點：本體在合成圖中的位移與本體大小；sw/sh 回傳本體大小，畫的時候自動位移，所以版面與碰撞都不變。 */
+export const ANCHOR: Record<string, { ox: number; oy: number; bw: number; bh: number }> = {};
+export const sw = (n: string) => ANCHOR[n]?.bw ?? S[n][0].length;
+export const sh = (n: string) => ANCHOR[n]?.bh ?? S[n].length;
 export function spr(ctx: CanvasRenderingContext2D, name: string, x: number, y: number, flip = false, cut = 0) {
+  if (!S[name] && name.includes('|')) ensureComposite(name);
   const rows = S[name]; if (!rows) return;
+  const an = ANCHOR[name];
+  if (an) { x -= flip ? rows[0].length - an.bw - an.ox : an.ox; y -= an.oy; }
   rows.forEach((r, j) => [...r].forEach((c, i) => {
     if (c === '.' || c === ' ') return;
     if (cut && i >= r.length - cut) return;
@@ -89,11 +95,69 @@ const DIG = ['333','3.3','3.3','3.3','333','.3.','33.','.3.','.3.','333','333','
 export function num(ctx: CanvasRenderingContext2D, n: number, x: number, y: number, c = 3) {
   String(n).split('').forEach((d, i) => { for (let j = 0; j < 5; j++) [...DIG[+d * 5 + j]].forEach((ch, k) => { if (ch === '3') { ctx.fillStyle = PAL[c]; ctx.fillRect(x + i * 4 + k, y + j, 1, 1); } }); });
 }
-export function speciesSprite(species: string, kind: 1 | 2 | 's') { return `${S[`${species}_1`] ? species : 'chicken'}_${kind}`; }
+/**
+ * species 可以帶配件：`chicken|sword,bow`（伺服器的 spriteKey）。目前配件只對齊雞的精靈；其他物種先畫原本的樣子。
+ */
+export function speciesSprite(species: string, kind: 1 | 2 | 's') {
+  const [sp0, look] = species.split('|');
+  const sp = S[`${sp0}_1`] ? sp0 : 'chicken';
+  if (!look || sp !== 'chicken') return `${sp}_${kind}`;
+  const name = `${sp}_${kind}|${look}`; ensureComposite(name); return name;
+}
+/** 正面（狀態面板）：只有雞有正面精靈；其他物種回傳側面。 */
+export function frontSprite(species: string) {
+  const [sp0, look] = species.split('|');
+  if (sp0 !== 'chicken') return speciesSprite(species, 1);
+  const name = `chicken_front|${look ?? ''}`; ensureComposite(name); return name;
+}
+/** 依 `base|a,b,c` 合成並登錄到 S／ANCHOR（快取）。 */
+export function ensureComposite(name: string) {
+  if (S[name]) return;
+  const [base, look = ''] = name.split('|');
+  const front = base === 'chicken_front', kind = base.endsWith('_2') || base.endsWith('_s') ? 2 : 1;
+  const rows = front ? CHICKEN_FRONT : S[base];
+  if (!rows) return;
+  const ids = look.split(',').filter((id) => ACC_SPRITES[id]);
+  const accs = ids.map((id) => ({ id, a: ACC_SPRITES[id], v: front ? ACC_SPRITES[id].front : ACC_SPRITES[id].side }));
+  const dyOf = (id: string) => (kind === 2 && !GROUNDED.has(id) ? 1 : 0); // 走路第 2 格：身體往下 1px，配件跟著動（地上的球、鞋子不動）
+  const g = new Map<string, [number, number, string]>();
+  const put = (x: number, y: number, c: string) => g.set(`${x},${y}`, [x, y, c]);
+  for (const { id, v } of accs) for (const [x, y, c] of v.back) put(x, y + dyOf(id), String(c));
+  const nohair = accs.some((a) => a.a.nohair), nofeet = accs.some((a) => a.a.nofeet);
+  const hairTo = 1 + (kind === 2 ? 1 : 0);
+  rows.forEach((r, y) => [...r].forEach((c, x) => {
+    if (c === '.' || c === ' ') return;
+    if (nohair && y <= hairTo) return;
+    if (nofeet && y >= 16) return;
+    put(x, y, c);
+  }));
+  for (const { id, v } of accs) for (const [x, y, c] of v.front) put(x, y + dyOf(id), String(c));
+  for (const { id, v } of accs) for (const [x, y, c] of v.fx) put(x, y + dyOf(id), String(c));
+  const bw = rows[0].length, bh = rows.length;
+  let x0 = 0, y0 = 0, x1 = bw - 1, y1 = bh - 1;
+  for (const [x, y] of g.values()) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  const out = Array.from({ length: y1 - y0 + 1 }, () => Array(x1 - x0 + 1).fill('.'));
+  for (const [x, y, c] of g.values()) out[y - y0][x - x0] = c;
+  S[name] = out.map((r) => r.join('')); ANCHOR[name] = { ox: -x0, oy: -y0, bw, bh };
+}
+const GROUNDED = new Set(['shoes', 'soccer']);
+/** v1.7 頂部列金幣圖示（9×9，四階綠）。 */
+export const COIN9 = ['..33333..', '.3222223.', '321011123', '320111123', '321111123', '321111123', '321111223', '.3222223.', '..33333..'];
+let coinUrl = '';
+export function coinIconUrl() {
+  if (coinUrl || typeof document === 'undefined') return coinUrl;
+  const c = document.createElement('canvas'); c.width = 9; c.height = 9; const g = c.getContext('2d'); if (!g) return '';
+  spr(g, '__coin', 0, 0); coinUrl = c.toDataURL(); return coinUrl;
+}
+S.__coin = COIN9;
+export const coinHtml = (n: number | string) => `<img class="coin-ic" src="${coinIconUrl()}" alt="◎" width="9" height="9">${n}`;
 /** 把精靈畫到一個小 canvas（圖示 / 物種選擇用）。 */
 export function spriteCanvas(name: string, scale = 1, inverse = false) {
-  const c = document.createElement('canvas'); c.width = sw(name) * scale; c.height = sh(name) * scale;
+  if (!S[name] && name.includes('|')) ensureComposite(name);
+  const an = ANCHOR[name];
+  const c = document.createElement('canvas'); c.width = S[name][0].length * scale; c.height = S[name].length * scale;
   const g = c.getContext('2d')!; g.scale(scale, scale);
+  if (an) { g.translate(an.ox, an.oy); }
   if (inverse) S[name].forEach((r, j) => [...r].forEach((ch, i) => { if (ch === '.') return; g.fillStyle = ch === '3' ? PAL[0] : PAL[1]; g.fillRect(i, j, 1, 1); }));
   else spr(g, name, 0, 0);
   return c;
@@ -101,3 +165,6 @@ export function spriteCanvas(name: string, scale = 1, inverse = false) {
 export const FOOD_SPRITE: Record<string, string> = { rice: 'rice', candy: 'candy', worm: 'worm', corn: 'corn', cake: 'cake', rosetea: 'rosetea' };
 /** 玫瑰茶杯子的茶水列（由上到下）與杯內 x 範圍，用來畫「慢慢喝光」。 */
 export const CUP_LIQUID = { rows: [3, 4, 5, 6], x0: 1, x1: 4 };
+
+/** 伺服器 publicPet／PetSummary → 精靈鍵（帶配件）。 */
+export function petSpriteKey(p: { species: string; look?: string } | null | undefined) { return !p ? 'chicken' : p.look ? `${p.species}|${p.look}` : p.species; }

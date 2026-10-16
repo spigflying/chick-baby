@@ -6,7 +6,8 @@ import { migrateToLatest } from '../src/migrations';
 import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
 import { createSolo, finish, handleInput, startStairsLoop, matches } from '../src/stairs';
-import { ALWAYS_OPEN, makeClock, STAIRS_PARAMS, STAIRS_CUTOFF_MS } from '@chick/engine';
+import { ALWAYS_OPEN, makeClock, STAIRS_PARAMS, STAIRS_CUTOFF_MS, rollBao, lookKey, resolveLook } from '@chick/engine';
+import { rowToState } from '../src/pets';
 import { handleClosed } from '../src/closing';
 import { setClock } from '../src/hours';
 import { feed as feedAction } from '../src/game';
@@ -727,3 +728,77 @@ describe('wake after auto-wake (bug: 睡覺後起不來)', () => {
   });
 });
 
+describe('寶 evolution & outfits (v1.7)', () => {
+  const evolveDue = (id: string) => db.updateTable('pets').set({ hatched_at: sql`now() - interval '34 hours'`, born_at: sql`now() - interval '35 hours'` } as any).where('id', '=', id).execute();
+  it('evolves once after 33 open hours, stored on the pet, event + look in public pet', async () => {
+    const a = await login('evoa'); const id = await hatchAlive(a, 'chicken', { strength: 60, hunger: 80 });
+    let me = await a.call('GET', '/api/me');
+    expect(me.json.pet.bao).toBeNull(); expect(me.json.pet.evolve_at).toBeGreaterThan(Date.now());
+    await evolveDue(id);
+    me = await a.call('GET', '/api/me');
+    const bao = me.json.pet.bao;
+    expect(bao.cat).toBe('strength'); expect(['sword', 'hammer', 'unicorn', 'horns']).toContain(bao.items[0]);
+    expect(me.json.pet.look).toBe(resolveLook(bao.items, []).join(','));
+    const again = await a.call('GET', '/api/me');
+    expect(again.json.pet.bao).toEqual(bao);
+    const ev = await db.selectFrom('pet_events').select('type').where('pet_id', '=', id).where('type', '=', 'evolve').execute();
+    expect(ev).toHaveLength(1);
+  });
+  it('evolves again every 77 open hours; offline catch-up applies only the latest roll but counts stages', async () => {
+    const a = await login('evore'); const id = await hatchAlive(a, 'chicken', { strength: 60 });
+    await evolveDue(id);
+    let me = await a.call('GET', '/api/me');
+    const first = me.json.pet.bao; expect(me.json.pet.bao_stage).toBe(1);
+    expect(me.json.pet.evolve_need_ms).toBe(77 * 3_600_000);
+    await db.updateTable('pets').set({ hatched_at: sql`now() - interval '${sql.raw(String(33 + 77 * 2 + 1))} hours'` } as any).where('id', '=', id).execute();
+    me = await a.call('GET', '/api/me');
+    expect(me.json.pet.bao_stage).toBe(3);
+    const mains = first.items.filter((x: string) => !['bow', 'flower', 'leaf', 'double'].includes(x));
+    expect(me.json.pet.bao.items.slice().sort().join(',')).not.toBe(first.items.slice().sort().join(','));
+    expect(me.json.pet.evolve_done_ms).toBeGreaterThan(0);
+    const ev = await db.selectFrom('pet_events').select('type').where('pet_id', '=', id).where('type', '=', 'evolve').execute();
+    expect(ev).toHaveLength(2); expect(mains.length).toBeGreaterThan(0);
+  });
+  it('rerolls deterministically (seed+n) when another living pet already has the exact same set', async () => {
+    const a = await login('dupa'); const b = await login('dupb');
+    const ida = await hatchAlive(a, 'chicken', { strength: 60 }); const idb = await hatchAlive(b, 'chicken', { strength: 60 });
+    const row = await db.selectFrom('pets').selectAll().where('id', '=', ida).executeTakeFirstOrThrow();
+    const first = rollBao(ida, rowToState(row), 0);
+    await db.updateTable('pets').set({ bao: JSON.stringify({ ...first, key: lookKey(first.items) }), bao_at: new Date() } as any).where('id', '=', idb).execute();
+    await evolveDue(ida);
+    const me = await a.call('GET', '/api/me');
+    expect(me.json.pet.bao.items.slice().sort().join(',')).not.toBe(lookKey(first.items));
+    const stored = await db.selectFrom('pets').select('bao').where('id', '=', ida).executeTakeFirstOrThrow();
+    expect((stored.bao as any).n).toBeGreaterThan(0);
+  });
+  it('dev/admin force evolve: dev route for own pet only, admin route needs admin', async () => {
+    const a = await login('forcea'); const id = await hatchAlive(a);
+    const o = await login('forceo');
+    expect((await o.call('POST', `/api/dev/pets/${id}/evolve`, { request_id: rid() })).status).toBe(403);
+    expect((await a.call('POST', `/api/admin/pets/${id}/evolve`, { request_id: rid() })).status).toBe(403);
+    const r = await a.call('POST', `/api/dev/pets/${id}/evolve`, { request_id: rid() });
+    expect(r.status).toBe(200); expect(r.json.bao.items.length).toBeGreaterThan(0); expect(r.json.pet.bao).toBeTruthy();
+    const boss = await login('boss'); const id2 = await hatchAlive(boss);
+    expect((await boss.call('POST', `/api/admin/pets/${id2}/evolve`, { request_id: rid() })).status).toBe(200);
+  });
+  it('outfits: buy through the ledger (once per user), auto-wear, toggle; crown replaces head items', async () => {
+    const a = await login('outa'); const id = await hatchAlive(a);
+    await db.updateTable('pets').set({ bao: JSON.stringify({ items: ['horns', 'bow'], cat: 'strength', care: 100, n: 0, key: 'bow,horns' }) } as any).where('id', '=', id).execute();
+    expect((await a.call('POST', '/api/outfits/buy', { outfit_id: 'crown', request_id: rid() })).json.error).toBe('INSUFFICIENT_COINS');
+    await db.updateTable('wallets').set({ balance: 1300 }).where('user_id', '=', a.id).execute();
+    const r = await a.call('POST', '/api/outfits/buy', { outfit_id: 'crown', request_id: rid() });
+    expect(r.status).toBe(200); expect(r.json.balance).toBe(300); expect(r.json.owned).toEqual(['crown']);
+    expect(r.json.pet.outfits).toEqual(['crown']); expect(r.json.pet.look).toBe('crown');
+    const led = await db.selectFrom('coin_ledger').select(['delta', 'reason']).where('user_id', '=', a.id).where('reason', '=', 'outfit').execute();
+    expect(led).toEqual([{ delta: -1000, reason: 'outfit' }]);
+    expect((await a.call('POST', '/api/outfits/buy', { outfit_id: 'crown', request_id: rid() })).json.error).toBe('ALREADY_OWNED');
+    const off = await a.call('POST', '/api/outfits/wear', { outfit_id: 'crown', on: false, request_id: rid() });
+    expect(off.json.pet.look).toBe('horns,bow');
+    expect((await a.call('POST', '/api/outfits/wear', { outfit_id: 'shades', on: true, request_id: rid() })).json.error).toBe('NOT_OWNED');
+    const s = await a.call('POST', '/api/outfits/buy', { outfit_id: 'shades', request_id: rid() });
+    expect(s.json.balance).toBe(100); expect(s.json.pet.look).toBe('shades,horns,bow');
+    const cat = await a.call('GET', '/api/outfits');
+    expect(cat.json.catalog.map((c: any) => [c.id, c.price])).toEqual([['shades', 200], ['crown', 1000]]);
+    expect((await a.call('GET', '/api/me')).json.outfits.sort()).toEqual(['crown', 'shades']);
+  });
+});

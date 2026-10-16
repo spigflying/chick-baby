@@ -1,5 +1,6 @@
-import { TopTip, tipText, type TopKey } from './topTip';
-import { PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID } from './sprites';
+import { TopTip, tipText, evoProgress, type TopKey } from './topTip';
+import { ANCHOR, PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID, petSpriteKey, frontSprite, coinHtml } from './sprites';
+import { ACCESSORIES, OUTFITS, OUTFIT_IDS, isAccId } from '@chick/engine';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
 import { drawShell, SHELL_COLORS, eggE, EGG_SAFE_E } from './shell';
 import { fitWidth } from './eggfit';
@@ -308,7 +309,7 @@ export class Device {
       if (n) spr(g, n, x, y, this.walkers.dir(u.id) > 0 && n !== 'ghost' && n !== 'egg' && !u.pet!.sleeping);
       if (u.pet?.sleeping) spr(g, 'z', x + w + 1, y - 5 - f * 2);
       if (u.pet?.sick && u.pet.status === 'alive') spr(g, 'skull', x - 6, y - 6 + f);
-      this.tag(String(i), x + w / 2, n ? y : GROUND - 4);
+      this.tag(String(i), x + w / 2, n ? y - (ANCHOR[n]?.oy ?? 0) : GROUND - 4);
     });
   }
   private drawOwnerTag(cx: number, top: number) { this.tag('owner', cx, top); }
@@ -317,7 +318,7 @@ export class Device {
     this.el = document.createElement('div');
     this.el.className = 'device';
     this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
-      <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">◎0</span><span data-k="age">—</span></div><div class="toptip" role="tooltip" hidden></div>
+      <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">${coinHtml(0)}</span><span data-k="age">—</span></div><div class="evobar" data-k="evo" aria-label="下次進化進度"><i></i></div><div class="toptip" role="tooltip" hidden></div>
       <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div></div>
       <p class="fightstat" hidden></p>
       <div class="labels"></div>
@@ -393,6 +394,7 @@ export class Device {
   }
   setPet(p: any) {
     const prevSpecies = this.pet?.species;
+    if (p?.bao && p.status === 'alive') this.celebrateEvolve(p);
     this.pet = p;
     if (this.isOwner) savePetCache(localStorage, p); // 休息時段的畫面用
     if (p && prevSpecies && prevSpecies !== p.species) { const sc = SHELL_COLORS[p.species]; this.paintShell(sc); }
@@ -441,9 +443,9 @@ export class Device {
     });
   }
   private topTip = new TopTip(() => this.showTopTip());
-  private onDocDown = (e: PointerEvent) => { if (!(e.target as HTMLElement)?.closest?.('.lcd-top [data-k]')) this.topTip.outside(); };
+  private onDocDown = (e: PointerEvent) => { if (!(e.target as HTMLElement)?.closest?.('.lcd [data-k]')) this.topTip.outside(); };
   private bindTopTip() {
-    this.el.querySelectorAll<HTMLElement>('.lcd-top [data-k]').forEach((s) => {
+    this.el.querySelectorAll<HTMLElement>('.lcd-top [data-k], .evobar').forEach((s) => {
       const k = s.dataset.k as TopKey;
       s.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') this.topTip.hover(k); });
       s.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') this.topTip.leave(k); });
@@ -456,8 +458,8 @@ export class Device {
   private showTopTip() {
     const tip = this.$('.toptip'), k = this.topTip.shown;
     if (!k) { tip.hidden = true; return; }
-    const s = this.$(`.lcd-top [data-k="${k}"]`);
-    tip.textContent = tipText(k, s.textContent ?? '', this.pet?.status === 'egg');
+    const s = this.$(`.lcd [data-k="${k}"]`);
+    tip.textContent = tipText(k, k === 'evo' ? evoProgress(this.pet)?.text ?? '' : s.textContent ?? '', this.pet?.status === 'egg');
     tip.hidden = false;
     const lcd = this.$('.lcd').getBoundingClientRect(), r = s.getBoundingClientRect();
     tip.style.top = `${r.bottom - lcd.top + 4}px`;
@@ -468,11 +470,17 @@ export class Device {
     const p = this.pet, t = (k: string, v: string) => { this.$(`[data-k="${k}"]`).textContent = v; };
     t('name', p ? p.name : this.isOwner ? '空巢' : '沒有寵物');
     t('stage', !p ? '—' : p.status === 'dead' ? '天堂' : p.status === 'egg' ? '蛋' : SPECIES_LABEL[p.species]);
-    t('coins', '◎' + this.ctx.wallet());
+    this.$('[data-k="coins"]').innerHTML = coinHtml(this.ctx.wallet());
     if (p) {
       const a = Math.max(0, Math.floor((Date.now() - (p.hatched_at ?? p.born_at)) / 60000));
       t('age', p.status === 'egg' ? `${Math.max(0, Math.ceil((p.hatch_at - this.ctx.live.serverNow()) / 1000))}秒` : a < 60 ? a + '分' : a < 1440 ? Math.floor(a / 60) + '時' : Math.floor(a / 1440) + '天');
     } else t('age', '—');
+    // v1.7 寶：低調的進化進度條（蛋／死亡不顯示；下樓梯、戰鬥中隱藏）
+    const ev = evoProgress(p), bar = this.$('.evobar');
+    const hide = !ev || !!this.stairs || !!this.meFighter()?.fight;
+    bar.classList.toggle('off', hide);
+    if (ev) (bar.firstElementChild as HTMLElement).style.width = `${(ev.frac * 100).toFixed(1)}%`;
+    if (hide && this.topTip.shown === 'evo') this.topTip.outside();
     if (this.topTip.shown) this.showTopTip();
   }
 
@@ -499,9 +507,9 @@ export class Device {
     if (mode === 'nav' && k === 'Escape') { this.navOpen = false; this.updateControls(); e.preventDefault(); return; }
     if (this.menu) {
       if (k === 'Escape' || k === 'Backspace') this.closeMenu();
-      else if ((this.menu === 'feed' || this.menu === 'shop') && (k === 'ArrowUp' || k === 'ArrowDown')) { const n = this.menu === 'feed' ? this.ctx.cfg.foods.length : ITEM_ORDER.length; this.menuSel = (this.menuSel + (k === 'ArrowUp' ? n - 1 : 1)) % n; this.renderMenu(); }
+      else if ((this.menu === 'feed' || this.menu === 'shop') && (k === 'ArrowUp' || k === 'ArrowDown')) { const n = this.menu === 'feed' ? this.ctx.cfg.foods.length : ITEM_ORDER.length + OUTFIT_IDS.length; this.menuSel = (this.menuSel + (k === 'ArrowUp' ? n - 1 : 1)) % n; this.renderMenu(); }
       else if (this.menu === 'board' && (k === 'Enter' || k === ' ')) { this.closeMenu(); this.startStairs(); }
-      else if (k === 'Enter' || k === ' ') { if (this.menu === 'feed') this.chooseFood(this.ctx.cfg.foods[this.menuSel]); else if (this.menu === 'shop') void this.buyItem(ITEM_ORDER[this.menuSel]); else this.closeMenu(); }
+      else if (k === 'Enter' || k === ' ') { if (this.menu === 'feed') this.chooseFood(this.ctx.cfg.foods[this.menuSel]); else if (this.menu === 'shop') void this.shopPick(this.menuSel); else this.closeMenu(); }
       else return;
     } else if (k === 'ArrowLeft') { this.sel = (this.sel + this.cells.length - 1) % this.cells.length; this.drawCells(); }
     else if (k === 'ArrowRight') { this.sel = (this.sel + 1) % this.cells.length; this.drawCells(); }
@@ -533,7 +541,7 @@ export class Device {
       }
       if (this.menu === 'result') { this.endStairsView(); return; }
       if (this.menu === 'board') { if (t.closest('[data-go]')) { this.closeMenu(); this.startStairs(); } else if (t.closest('.back')) this.closeMenu(); return; }
-      if (this.menu === 'shop') { const it = t.closest('.mi') as HTMLElement | null; if (!it) return; const i = +it.dataset.i!; if (i < 0) return this.closeMenu(); this.menuSel = i; return void this.buyItem(ITEM_ORDER[i]); }
+      if (this.menu === 'shop') { const it = t.closest('.mi') as HTMLElement | null; if (!it) return; const i = +it.dataset.i!; if (i < 0) return this.closeMenu(); this.menuSel = i; return void this.shopPick(i); }
       this.closeMenu();
     });
     this.cv.addEventListener('click', () => { if (!this.stairs && this.menu) this.closeMenu(); });
@@ -584,7 +592,7 @@ export class Device {
     this.sel = i; this.drawCells();
     const a = this.cells[i]?.act; const p = this.pet;
     if (a === 'status') return this.openMenu('status');
-    if (a === 'shop') { if (this.meFighter()?.fight) return this.say('對戰中不能買道具'); this.openMenu('shop'); void this.refreshItems(); return; }
+    if (a === 'shop') { if (this.meFighter()?.fight) return this.say('對戰中不能買道具'); this.openMenu('shop'); void this.refreshItems(); void this.refreshOutfits(); return; }
     if (a === 'home') return this.ctx.goHome();
     if (a === 'hatch') return this.openMenu('hatch');
     if (!p) return;
@@ -616,6 +624,22 @@ export class Device {
   }
   pendingPet: any = null;
   fx(k: string) { this.fxKind = k; this.fxT = 6; }
+  /** v1.7 寶：進化瞬間的閃光（約 3 秒）＋訊息；每隻寵物只演一次（localStorage）。 */
+  evoT = 0;
+  celebrateEvolve(p: any) {
+    const st = p.bao_stage ?? 1, key = st > 1 ? `bao-seen:${p.id}:${st}` : `bao-seen:${p.id}`;
+    try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1'); } catch { /* 無痕模式 */ }
+    this.evoT = 36; setTimeout(() => this.say(st > 1 ? `${p.name}又進化了！（第 ${st} 次）` : `${p.name}進化成寶了！`), 0); // 晚一點說，避免被「歡迎回家」蓋掉
+  }
+  private drawEvolve(pw: number, ph: number, baseY: number) {
+    const g = this.g, t = 36 - this.evoT;
+    if (this.evoT > 24 && t % 2 === 0) { g.fillStyle = PAL[0]; g.globalAlpha = 0.6; g.fillRect(this.petX - 3, baseY - 3, pw + 6, ph + 3); g.globalAlpha = 1; }
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2 + t * 0.25, r = 6 + (t % 12);
+      spr(g, 'sparkle', Math.round(this.petX + pw / 2 - 2 + Math.cos(a) * (pw / 2 + r)), Math.round(baseY + ph / 2 - 2 + Math.sin(a) * (ph / 2 + r / 2)));
+    }
+    if (this.frame % 2 === 0) this.evoT--;
+  }
 
   // ---------- 選單 ----------
   openMenu(m: 'feed' | 'status' | 'hatch' | 'shop') { this.menu = m; this.menuSel = m === 'feed' ? (this.isOwner ? 0 : 1) : 0; this.renderMenu(); }
@@ -628,27 +652,33 @@ export class Device {
     if (this.menu === 'board') { el.innerHTML = boardHtml(this.board, this.boardErr); return; }
     if (this.menu === 'feed') {
       const v = this.visitor, f = cfg.game.feed;
-      el.innerHTML = `<div class="mt">— 餵食 —  ◎${coins}</div>` + cfg.foods.map((fd: any, i: number) => {
+      el.innerHTML = `<div class="mt">— 餵食 —  ${coinHtml(coins)}</div>` + cfg.foods.map((fd: any, i: number) => {
         const blocked = (!this.isOwner && (!fd.visitorAllowed || fd.price === 0)) || fd.price > coins;
-        return `<div class="mi${i === this.menuSel ? ' on' : ''}${blocked ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(fd.name)}${fd.drink ? '<small>飲料</small>' : fd.snack ? '<small>點心</small>' : ''}</span><em>${fd.price ? '◎' + fd.price : '免費'}</em></div>`;
+        return `<div class="mi${i === this.menuSel ? ' on' : ''}${blocked ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(fd.name)}${fd.drink ? '<small>飲料</small>' : fd.snack ? '<small>點心</small>' : ''}</span><em>${fd.price ? coinHtml(fd.price) : '免費'}</em></div>`;
       }).join('') +
         (this.isOwner ? '' : `<div class="note">今天你餵了 ${v?.today_mine ?? 0}/${f.visitorDailyPerVisitorPerPet}・全部訪客 ${v?.today_pet_total ?? 0}/${f.visitorDailyPerPet}</div>`) +
         '<div class="mi back" data-i="-1">✕ 關閉</div>';
     } else if (this.menu === 'shop') {
-      el.innerHTML = `<div class="mt">— 道具店 —  ◎${coins}</div>` + ITEM_ORDER.map((id, i) => {
+      el.innerHTML = `<div class="mt">— 道具店 —  ${coinHtml(coins)}</div>` + ITEM_ORDER.map((id, i) => {
         const it = ITEM_INFO[id], own = this.myItems[id] ?? 0;
-        return `<div class="mi${i === this.menuSel ? ' on' : ''}${it.price > coins ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(it.name)}<small>${it.fights}場</small>${own ? `<small>有${own}場</small>` : ''}</span><em>◎${it.price}</em></div>`;
-      }).join('') + `<div class="note">${esc(ITEM_INFO[ITEM_ORDER[this.menuSel]]?.desc ?? '')}・Z 使用、X 切換</div><div class="mi back" data-i="-1">✕ 關閉</div>`;
+        return `<div class="mi${i === this.menuSel ? ' on' : ''}${it.price > coins ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(it.name)}<small>${it.fights}場</small>${own ? `<small>有${own}場</small>` : ''}</span><em>${coinHtml(it.price)}</em></div>`;
+      }).join('') + '<div class="mt">— 服飾 —</div>' + OUTFIT_IDS.map((id, j) => {
+        const i = ITEM_ORDER.length + j, o = OUTFITS[id], own = this.myOutfits.includes(id), on = (this.pet?.outfits ?? []).includes(id);
+        return `<div class="mi${i === this.menuSel ? ' on' : ''}${!own && o.price > coins ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(o.name)}${own ? `<small>${on ? '穿著' : '已擁有'}</small>` : ''}</span><em>${own ? (on ? '脫下' : '穿上') : coinHtml(o.price)}</em></div>`;
+      }).join('') + `<div class="note">${esc(this.menuSel < ITEM_ORDER.length ? (ITEM_INFO[ITEM_ORDER[this.menuSel]]?.desc ?? '') + '・Z 使用、X 切換' : '服飾買一次永久擁有，可隨時穿脫')}</div><div class="mi back" data-i="-1">✕ 關閉</div>`;
     } else if (this.menu === 'status') {
       if (!p) { el.innerHTML = '<div class="mt">— 狀態 —</div><p>還沒有寵物。</p><div class="mi back">✕ 關閉</div>'; return; }
       const row = (k: string, v: unknown) => `<div><b>${k}</b><span>${v}</span></div>`;
       const born = new Date(p.born_at);
-      el.innerHTML = '<div class="mt">— 狀態 —</div><div class="grid">' + row('名字', esc(p.name)) + row('種類', SPECIES_LABEL[p.species]) + row('性格', p.personality) +
+      const baoTxt = p.bao ? (p.bao.items as string[]).map((id) => isAccId(id) ? ACCESSORIES[id].name : id).join('・') : p.status === 'alive' && p.evolve_at ? '再過一陣子會進化' : '—';
+      el.innerHTML = '<div class="mt">— 狀態 —</div><div class="front"></div><div class="grid">' + row('名字', esc(p.name)) + row('種類', SPECIES_LABEL[p.species]) + row('性格', p.personality) +
         row('力量', p.strength) + row('速度', p.speed) + row('體力', p.stamina) + row('體重', p.weight + 'g') + row('最深', p.best_floor + '樓') +
         row('飽足', Math.round(p.hunger)) + row('心情', Math.round(p.happiness)) + row('精力', Math.round(p.energy)) + row('清潔', Math.round(p.cleanliness)) + row('健康', Math.round(p.health)) + row('便便', p.poop) + '</div>' +
+        `<div class="wide"><b>寶</b><span>${esc(baoTxt)}</span></div>` +
         `<div class="wide"><b>出生</b><span>${born.getMonth() + 1}/${born.getDate()} ${String(born.getHours()).padStart(2, '0')}:${String(born.getMinutes()).padStart(2, '0')}</span></div>` +
         (p.status === 'dead' ? `<div class="wide"><b>死因</b><span>${({ starvation: '餓壞了', illness: '生病', neglect: '沒人照顧' } as any)[p.death_cause] ?? p.death_cause}</span></div>` : '') +
-        (this.isOwner ? `<div class="wide"><b>金幣</b><span>◎${coins}</span></div>` : '') + '<div class="mi back">✕ 關閉</div>';
+        (this.isOwner ? `<div class="wide"><b>金幣</b><span>${coinHtml(coins)}</span></div>` : '') + '<div class="mi back">✕ 關閉</div>';
+      if (p.status === 'alive') { const c = spriteCanvas(frontSprite(petSpriteKey(p)), 2); c.className = 'frontpic'; el.querySelector('.front')!.append(c); }
     } else if (this.menu === 'hatch') {
       el.innerHTML = '<div class="mt">— 選一顆蛋 —</div><div class="species">' + cfg.species.map((s: any) =>
         `<div class="sp${s.id === this.hatchPick ? ' on' : ''}" data-s="${s.id}"><span class="pic"></span><span>${SPECIES_LABEL[s.id]}</span></div>`).join('') +
@@ -668,6 +698,24 @@ export class Device {
       const sc = SHELL_COLORS[r.pet.species]; this.paintShell(sc);
       this.say(`${r.pet.name} 的蛋來了！一分鐘內就會孵化～`);
     } catch (e) { this.say(errText(e)); }
+  }
+  myOutfits: string[] = [];
+  async refreshOutfits() { try { const r = await api('GET', '/outfits'); this.myOutfits = r.owned ?? []; if (this.menu === 'shop') this.renderMenu(); } catch { /* 下次 */ } }
+  shopPick(i: number) { return i < ITEM_ORDER.length ? this.buyItem(ITEM_ORDER[i]) : this.outfitPick(OUTFIT_IDS[i - ITEM_ORDER.length]); }
+  async outfitPick(id: string) {
+    if (this.busy || !id) return; this.busy = true;
+    const name = (OUTFITS as any)[id].name;
+    try {
+      if (!this.myOutfits.includes(id)) {
+        const r = await act('POST', '/outfits/buy', { outfit_id: id });
+        this.ctx.setWallet(r.balance); this.myOutfits = r.owned; if (r.pet) this.setPet(r.pet); this.say(`買了${name}！`);
+      } else {
+        const on = !(this.pet?.outfits ?? []).includes(id);
+        const r = await act('POST', '/outfits/wear', { outfit_id: id, on }); this.setPet(r.pet); this.say(on ? `穿上${name}` : `脫下${name}`);
+      }
+      this.renderMenu(); this.renderTop();
+    } catch (e) { this.say(errText(e)); }
+    finally { this.busy = false; }
   }
   async buyItem(id: string) {
     if (this.busy) return; this.busy = true;
@@ -724,7 +772,7 @@ export class Device {
     const P = m.params;
     const hh = Math.min(h0 - bar.offsetHeight + 22, Math.round(this.cv.offsetWidth * P.height / P.width));
     this.cv.width = P.width; this.cv.height = P.height; this.cv.style.height = hh + 'px'; this.cv.style.width = Math.round(hh * P.width / P.height) + 'px';
-    this.stairs = new StairsClient(this.ctx.live, m, this.pet?.species ?? 'chicken', {
+    this.stairs = new StairsClient(this.ctx.live, m, petSpriteKey(this.pet), {
       ended: (r) => {
         if (r.balance != null) this.ctx.setWallet(r.balance);
         if (r.pet) this.pendingPet = r.pet;
@@ -803,7 +851,7 @@ export class Device {
       this.drawOwnerTag(cx, GROUND - 12);
       return;
     }
-    const name1 = speciesSprite(p.species, 1), pw = sw(name1), ph = sh(name1), baseY = GROUND - ph;
+    const pk = petSpriteKey(p), name1 = speciesSprite(pk, 1), pw = sw(name1), ph = sh(name1), baseY = GROUND - ph;
     if (this.inArena.has(this.home?.owner.id)) {
       // 打架中由場地快照畫主人寵物；進行中的餵食／清潔動畫直接收尾
       if (this.anim) this.finishAnim();
@@ -853,10 +901,11 @@ export class Device {
       if (this.frame % 3 === 0) { this.petX += this.petDir; if (this.petX < rg.min || this.petX > rg.max || Math.random() < 0.02) this.petDir *= -1; }
       this.petX = Math.max(rg.min, Math.min(rg.max, this.petX));
     }
-    spr(g, p.sleeping ? speciesSprite(p.species, 's') : speciesSprite(p.species, alt ? 2 : 1), this.petX, py, flip && !p.sleeping);
+    spr(g, p.sleeping ? speciesSprite(pk, 's') : speciesSprite(pk, alt ? 2 : 1), this.petX, py, flip && !p.sleeping);
+    if (this.evoT > 0) this.drawEvolve(pw, ph, baseY);
     if (p.sleeping) { spr(g, 'z', this.petX + pw + 2, baseY - 6 - f * 3); spr(g, 'z', this.petX + pw + 8, baseY - 14 - f * 3); }
     if (p.sick) spr(g, 'skull', this.petX - 7, baseY - 6 + f);
-    this.drawOwnerTag(this.petX + pw / 2, py);
+    this.drawOwnerTag(this.petX + pw / 2, py - (ANCHOR[speciesSprite(pk, 1)]?.oy ?? 0)); // 名牌放在配件（皇冠等）上面
     if (!(this.anim && this.anim.type === 'clean')) for (let i = 0; i < p.poop; i++) { const q = poopXY(i); spr(g, 'poop', q.x, q.y); }
     if (this.anim && this.anim.type === 'clean') this.drawClean(this.anim, pw, ph, baseY);
     if (this.fxT > 0 && this.fxKind) { spr(g, this.fxKind, this.petX + pw / 2 - 3, baseY - 8 - (6 - this.fxT) * 2); if (this.frame % 3 === 0) this.fxT--; }

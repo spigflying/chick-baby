@@ -21,7 +21,7 @@ describe('tipText', () => {
     expect(tipText('age', '—')).toBe('年齡');
   });
   it('has a label for every top-row item', () => {
-    expect(Object.keys(TOP_TIP_LABEL).sort()).toEqual(['age', 'coins', 'name', 'stage']);
+    expect(Object.keys(TOP_TIP_LABEL).sort()).toEqual(['age', 'coins', 'evo', 'name', 'stage']);
   });
 });
 
@@ -47,5 +47,21 @@ describe('TopTip', () => {
   it('tapping elsewhere hides', () => {
     const tm = fakeTimers(); const t = new TopTip(() => {}, tm);
     t.tap('stage'); t.outside(); expect(t.shown).toBe(null); expect(tm.size()).toBe(0);
+  });
+});
+
+import { evoProgress } from '../src/topTip';
+describe('evoProgress (v1.7 寶 bar)', () => {
+  const H = 3_600_000;
+  it('hidden for eggs, dead or missing data', () => {
+    expect(evoProgress(null)).toBeNull();
+    expect(evoProgress({ status: 'egg', evolve_done_ms: 1, evolve_need_ms: 2 })).toBeNull();
+    expect(evoProgress({ status: 'dead', evolve_done_ms: 1, evolve_need_ms: 2 })).toBeNull();
+  });
+  it('fraction + open-hours tooltip', () => {
+    const e = evoProgress({ status: 'alive', evolve_done_ms: 10.5 * H, evolve_need_ms: 33 * H })!;
+    expect(e.frac).toBeCloseTo(10.5 / 33); expect(e.text).toBe('下次進化：還有 23 小時');
+    expect(evoProgress({ status: 'alive', evolve_done_ms: 33 * H, evolve_need_ms: 33 * H })!.text).toBe('下次進化：快了！');
+    expect(tipText('evo', '下次進化：還有 5 小時')).toBe('下次進化：還有 5 小時');
   });
 });

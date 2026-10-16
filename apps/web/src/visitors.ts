@@ -1,7 +1,7 @@
 // 拜訪同框（v1.3）：在場者的寵物畫在主人寵物旁邊；房間內每個人用同一份 home.presence 算出同一組寵物。
-import { S, speciesSprite, sw, sh } from './sprites';
+import { S, speciesSprite, sw, sh, petSpriteKey } from './sprites';
 
-export type PetSummary = { id: string; name: string; species: string; status: 'egg' | 'alive' | 'dead'; sleeping: boolean; sick: boolean; mood: 'happy' | 'ok' | 'sad' };
+export type PetSummary = { id: string; name: string; species: string; status: 'egg' | 'alive' | 'dead'; sleeping: boolean; sick: boolean; mood: 'happy' | 'ok' | 'sad'; look?: string };
 export type PresenceUser = { id: string; display_name: string; avatar_url: string | null; pet: PetSummary | null };
 export const MAX_GUESTS = 4;
 
@@ -25,7 +25,7 @@ export function guestSprite(p: PetSummary | null, alt: number): string | null {
   if (!p) return null;
   if (p.status === 'dead') return 'ghost';
   if (p.status === 'egg') return 'egg';
-  return speciesSprite(p.species, p.sleeping ? 's' : alt ? 2 : 1);
+  return speciesSprite(petSpriteKey(p), p.sleeping ? 's' : alt ? 2 : 1);
 }
 export function spriteW(name: string | null) { return name && S[name] ? sw(name) : 10; }
 export function spriteH(name: string | null) { return name && S[name] ? sh(name) : 6; }

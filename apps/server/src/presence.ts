@@ -1,13 +1,13 @@
 // 在場名單（v1.3）：每位在場者附帶自己目前的寵物摘要，讓房間內每個人看到同一組寵物。
 import type { PublicPet } from './pets';
 
-export type PetSummary = { id: string; name: string; species: string; status: 'egg' | 'alive' | 'dead'; sleeping: boolean; sick: boolean; mood: 'happy' | 'ok' | 'sad' };
+export type PetSummary = { id: string; name: string; species: string; status: 'egg' | 'alive' | 'dead'; sleeping: boolean; sick: boolean; mood: 'happy' | 'ok' | 'sad'; look?: string };
 export type PresenceUser = { id: string; display_name: string; avatar_url: string | null; pet: PetSummary | null };
 
 export function petSummary(p: PublicPet | null | undefined): PetSummary | null {
   if (!p) return null;
   const mood = p.happiness >= 60 ? 'happy' : p.happiness >= 30 ? 'ok' : 'sad';
-  return { id: p.id, name: p.name, species: p.species, status: p.status as PetSummary['status'], sleeping: !!p.sleeping, sick: !!p.sick, mood };
+  return { id: p.id, name: p.name, species: p.species, status: p.status as PetSummary['status'], sleeping: !!p.sleeping, sick: !!p.sick, mood, look: p.look ?? '' };
 }
 
 /** 依連線鍵（instance:conn）存放；同一使用者多個分頁只算一次，以最新加入的為準，並依加入順序排列。 */

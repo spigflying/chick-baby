@@ -1,3 +1,4 @@
+import { buyOutfit, outfitCatalog, ownedOutfits, wearOutfit } from './outfits';
 import Fastify, { type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimitPlugin from '@fastify/rate-limit';
@@ -126,6 +127,12 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
       a.get('/leaderboard/stairs', async (req) => g.stairsLeaderboard(db, req.user!.id));
       a.get('/items', async (req) => ({ catalog: itemCatalog(), items: await listItems(db, req.user!.id) }));
       a.post('/items/buy', async (req) => { const b = (req.body ?? {}) as any; return buyItem(db, ctx(req), b.item_id, b.request_id, inFight); });
+      // ---- v1.7 服飾（皇冠、墨鏡）----
+      a.get('/outfits', async (req) => ({ catalog: outfitCatalog(), owned: await ownedOutfits(db, req.user!.id) }));
+      a.post('/outfits/buy', async (req) => { const b = (req.body ?? {}) as any; return buyOutfit(db, ctx(req), b.outfit_id, b.request_id); });
+      a.post('/outfits/wear', async (req) => { const b = (req.body ?? {}) as any; return wearOutfit(db, ctx(req), b.outfit_id, b.on, b.request_id); });
+      // 本機開發（DEV_LOGIN=1）：讓自己的寵物馬上進化，方便測試
+      if (env.devLogin) a.post('/dev/pets/:id/evolve', async (req) => g.forceEvolve(db, ctx(req), (req.params as any).id, (req.body as any)?.request_id, false));
       a.post('/pets', async (req) => g.hatch(db, ctx(req), req.body));
       a.post('/pets/:id/actions', async (req) => {
         const b = (req.body ?? {}) as any; const id = (req.params as any).id;
@@ -138,6 +145,7 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
         ad.addHook('preHandler', requireAdmin);
         ad.get('/admin/users', async () => g.adminUsers(db));
         ad.get('/admin/users/:id/pets', async (req) => g.adminUserPets(db, (req.params as any).id));
+        ad.post('/admin/pets/:id/evolve', async (req) => g.forceEvolve(db, ctx(req), (req.params as any).id, (req.body as any)?.request_id, true));
         ad.post('/admin/pets/:id/revive', async (req) => g.adminRevive(db, ctx(req), (req.params as any).id, (req.body as any)?.request_id));
       });
     });

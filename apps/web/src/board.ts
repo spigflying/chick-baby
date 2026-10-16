@@ -1,3 +1,4 @@
+import { coinHtml } from './sprites';
 // v1.6 下樓梯排行榜（開始前顯示）：前 5 名＋自己（不在前 5 名時加「…」）。
 export interface BoardRow { rank: number; pet_name: string; owner_name: string; species: string; best_floor: number; mine: boolean }
 export interface Board { top: BoardRow[]; me: { pet_name: string; best_floor: number; rank: number } | null }
@@ -27,5 +28,5 @@ export function boardHtml(b: Board | null, err = false): string {
 export function stairsResultHtml(r: { aborted?: boolean; floors: number; coins: number; time_up?: boolean; closing?: boolean }, wallet: number): string {
   if (r.aborted) return `<div class="mt">— 遊戲中止 —</div><p>伺服器維護中，這場不計分。</p><div class="mi back on">✕ 離開</div>`;
   const head = r.time_up ? (r.closing ? `<div class="mt">— 快關門了，時間到！ —</div>` : `<div class="mt">— 時間到！ —</div>`) : `<div class="mt">— 遊戲結束 —</div>`;
-  return `${head}<div class="wide"><b>下了</b><span>${r.floors} 樓</span></div><div class="wide"><b>獲得</b><span>◎${r.coins}</span></div><div class="wide"><b>目前</b><span>◎${wallet}</span></div><div class="mi back on">✕ 離開</div>`;
+  return `${head}<div class="wide"><b>下了</b><span>${r.floors} 樓</span></div><div class="wide"><b>獲得</b><span>${coinHtml(r.coins)}</span></div><div class="wide"><b>目前</b><span>${coinHtml(wallet)}</span></div><div class="mi back on">✕ 離開</div>`;
 }

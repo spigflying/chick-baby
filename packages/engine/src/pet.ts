@@ -6,7 +6,11 @@ import { ALWAYS_OPEN, type Clock } from './hours';
 
 export type PetStatus = 'egg' | 'alive' | 'dead';
 export type Personality = '溫和' | '貪吃' | '活潑' | '懶散' | '勇敢' | '機靈';
-export interface Counters { feeds: number; snacks: number; plays: number; sleeps: number; cleans: number; doctor: number }
+export interface Counters {
+  feeds: number; snacks: number; plays: number; sleeps: number; cleans: number; doctor: number;
+  /** v1.7 照顧品質（寶的獎勵配件用）：生病次數、飢餓／骯髒的開放分鐘數 */
+  sickTimes?: number; hungryMin?: number; dirtyMin?: number;
+}
 /** 寵物模擬狀態（時間皆為 epoch ms）。 */
 export interface PetState {
   speciesId: SpeciesId; status: PetStatus; bornAt: number; hatchedAt: number | null; lastSimulatedAt: number;
@@ -84,11 +88,14 @@ function step(p: PetState, t: number, stepMs: number, rng: Rng, cfg: GameConfig,
   if (sleep && p.energy >= 100) { p.sleeping = false; events.push({ type: 'wake', at: t, payload: { auto: true } }); }
   // 骯髒持續時間（只算開放時間）
   if (p.cleanliness < cfg.sick.dirtyBelow) { if (p.dirtySince === null) p.dirtySince = t; } else p.dirtySince = null;
+  const c = p.counters;
+  if (p.cleanliness < cfg.sick.dirtyBelow) c.dirtyMin = round1((c.dirtyMin ?? 0) + m);
+  if (p.hunger < cfg.sick.hungryBelow) c.hungryMin = round1((c.hungryMin ?? 0) + m);
   if (!p.sick) {
     const dirtyLong = p.dirtySince !== null && clock.elapsed(p.dirtySince, t) >= cfg.sick.dirtyForMs;
     const hungry = p.hunger < cfg.sick.hungryBelow;
     const chance = cfg.sick.chancePerMin * m * ts;
-    if ((dirtyLong && nextFloat(rng) < chance) || (hungry && nextFloat(rng) < chance)) { p.sick = true; events.push({ type: 'sick', at: t }); }
+    if ((dirtyLong && nextFloat(rng) < chance) || (hungry && nextFloat(rng) < chance)) { p.sick = true; c.sickTimes = (c.sickTimes ?? 0) + 1; events.push({ type: 'sick', at: t }); }
   }
   const lows = [p.hunger, p.happiness, p.energy, p.cleanliness].filter((v) => v < cfg.health.lowBelow).length;
   let dh = lows * cfg.health.perLowPerMin + (p.sick ? cfg.health.sickPerMin : 0);

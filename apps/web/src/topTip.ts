@@ -1,9 +1,17 @@
 /** 頂部狀態列的中文提示（hover / 點一下才顯示，不常駐）。 */
-export type TopKey = 'name' | 'stage' | 'coins' | 'age';
-export const TOP_TIP_LABEL: Record<TopKey, string> = { name: '名字', stage: '階段', coins: '金幣', age: '年齡' };
+export type TopKey = 'name' | 'stage' | 'coins' | 'age' | 'evo';
+export const TOP_TIP_LABEL: Record<TopKey, string> = { name: '名字', stage: '階段', coins: '金幣', age: '年齡', evo: '下次進化' };
+/** v1.7 寶：下次進化的進度條（0–1）與提示文字（開放時間的小時數）；蛋／死亡／沒有資料 → null。 */
+export function evoProgress(p: { status: string; evolve_done_ms?: number | null; evolve_need_ms?: number | null } | null | undefined) {
+  if (!p || p.status !== 'alive' || !p.evolve_need_ms || p.evolve_done_ms == null) return null;
+  const frac = Math.max(0, Math.min(1, p.evolve_done_ms / p.evolve_need_ms));
+  const h = Math.ceil((p.evolve_need_ms - p.evolve_done_ms) / 3_600_000);
+  return { frac, text: h <= 0 ? '下次進化：快了！' : `下次進化：還有 ${h} 小時` };
+}
 export const TIP_HIDE_MS = 2000;
 
 export function tipText(k: TopKey, value: string, isEgg = false): string {
+  if (k === 'evo') return value || TOP_TIP_LABEL.evo;
   const label = k === 'age' && isEgg ? '孵化倒數' : TOP_TIP_LABEL[k];
   const v = (k === 'coins' ? value.replace(/^◎/, '') : value).trim();
   return v && v !== '—' ? `${label} ${v}` : label;
