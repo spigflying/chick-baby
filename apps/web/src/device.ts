@@ -4,6 +4,7 @@ import { ACCESSORIES, OUTFITS, OUTFIT_IDS, isAccId } from '@chick/engine';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
 import { drawShell, SHELL_COLORS, eggE, EGG_SAFE_E } from './shell';
 import { fitWidth } from './eggfit';
+import { accessoryLine } from './accLine';
 import { act, api, errText } from './api';
 import { savePetCache } from './sleep';
 import type { Live } from './ws';
@@ -670,11 +671,9 @@ export class Device {
       if (!p) { el.innerHTML = '<div class="mt">— 狀態 —</div><p>還沒有寵物。</p><div class="mi back">✕ 關閉</div>'; return; }
       const row = (k: string, v: unknown) => `<div><b>${k}</b><span>${v}</span></div>`;
       const born = new Date(p.born_at);
-      const baoTxt = p.bao ? (p.bao.items as string[]).map((id) => isAccId(id) ? ACCESSORIES[id].name : id).join('・') : p.status === 'alive' && p.evolve_at ? '再過一陣子會進化' : '—';
-      el.innerHTML = '<div class="mt">— 狀態 —</div><div class="front"></div><div class="grid">' + row('名字', esc(p.name)) + row('種類', SPECIES_LABEL[p.species]) + row('性格', p.personality) +
+      el.innerHTML = '<div class="mt">— 狀態 —</div><div class="front"></div><div class="wide acc"><b>配件</b><span>' + esc(accessoryLine(p)) + '</span></div><div class="grid">' + row('名字', esc(p.name)) + row('種類', SPECIES_LABEL[p.species]) + row('性格', p.personality) +
         row('力量', p.strength) + row('速度', p.speed) + row('體力', p.stamina) + row('體重', p.weight + 'g') + row('最深', p.best_floor + '樓') +
         row('飽足', Math.round(p.hunger)) + row('心情', Math.round(p.happiness)) + row('精力', Math.round(p.energy)) + row('清潔', Math.round(p.cleanliness)) + row('健康', Math.round(p.health)) + row('便便', p.poop) + '</div>' +
-        `<div class="wide"><b>寶</b><span>${esc(baoTxt)}</span></div>` +
         `<div class="wide"><b>出生</b><span>${born.getMonth() + 1}/${born.getDate()} ${String(born.getHours()).padStart(2, '0')}:${String(born.getMinutes()).padStart(2, '0')}</span></div>` +
         (p.status === 'dead' ? `<div class="wide"><b>死因</b><span>${({ starvation: '餓壞了', illness: '生病', neglect: '沒人照顧' } as any)[p.death_cause] ?? p.death_cause}</span></div>` : '') +
         (this.isOwner ? `<div class="wide"><b>金幣</b><span>${coinHtml(coins)}</span></div>` : '') + '<div class="mi back">✕ 關閉</div>';

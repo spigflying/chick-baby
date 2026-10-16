@@ -183,3 +183,5 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .menu .front{display:flex;justify-content:center;margin:2px 0}
 .menu .frontpic{image-rendering:pixelated;max-width:100%}
 .bar .coin-ic{height:14px}
+.menu .wide.acc{align-items:flex-start;gap:4px}.menu .wide.acc span{white-space:normal;text-align:right;font-size:.85em;line-height:1.3;overflow-wrap:anywhere;min-width:0}
+.menu .wide.acc b{white-space:nowrap;flex:none}
