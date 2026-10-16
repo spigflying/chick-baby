@@ -9,14 +9,19 @@ interface Input { seq: number; tick: number; left: boolean; right: boolean }
  * - 本地用共用引擎預測；收到快照 → 重設為伺服器狀態，丟掉已確認輸入，重播其餘輸入
  * - 誤差 ≤ 8px 平滑修正，否則直接瞬移；伺服器回報 late 增加 → N 加大（2–6）
  */
+/** 快關門時的剩餘秒數；離時間到超過 5 分鐘（或不是因關門而結束）就不顯示。 */
+export function stairsTimeLeft(endsAt: number | null, now: number): number | null {
+  if (endsAt === null) return null; const ms = endsAt - now;
+  return ms > 5 * 60_000 ? null : Math.max(0, Math.ceil(ms / 1000));
+}
 export class StairsClient {
   state: StairsState; P: any; matchId: string; petId: string; startAt: number; tickMs: number;
   inputs: Input[] = []; seq = 0; N = 3; left = false; right = false;
-  ended = false; lastLate = 0; corr = { x: 0, y: 0 }; frame = 0; result: any = null;
+  ended = false; lastLate = 0; corr = { x: 0, y: 0 }; frame = 0; result: any = null; endsAt: number | null = null;
   stats = { snapshots: 0, corrections: 0, snaps: 0 };
 
   constructor(private live: Live, m: any, private species: string, private cb: { ended: (r: any) => void }) {
-    this.P = m.params; this.matchId = m.match_id; this.petId = m.players[0].pet_id; this.startAt = m.server_time_at_start; this.tickMs = 1000 / this.P.tickRate;
+    this.P = m.params; this.matchId = m.match_id; this.petId = m.players[0].pet_id; this.startAt = m.server_time_at_start; this.tickMs = 1000 / this.P.tickRate; this.endsAt = m.closing_end ? m.ends_at : null;
     this.N = this.P.inputBufferTicks;
     this.state = createStairs(m.seed, m.players.map((p: any) => ({ petId: p.pet_id, speed: p.speed, stamina: p.stamina })), this.P);
     live.inMatch = true;
@@ -81,6 +86,8 @@ export class StairsClient {
     g.fillStyle = PAL[3]; g.fillRect(0, 0, W, 7);
     spr(g, 'heart', 1, 1); for (let i = 0; i < pl.maxHp; i++) { g.fillStyle = i < pl.hp ? PAL[0] : PAL[2]; g.fillRect(8 + i * 3, 2, 2, 3); }
     num(g, pl.floor, W - String(pl.floor).length * 4 - 1, 1, 0);
+    const left = stairsTimeLeft(this.endsAt, this.live.serverNow());
+    if (left !== null) { const x0 = W / 2 - 9, ss = String(left % 60).padStart(2, '0'); num(g, Math.floor(left / 60), x0, 1, 0); g.fillStyle = PAL[0]; g.fillRect(x0 + 4, 2, 1, 1); g.fillRect(x0 + 4, 4, 1, 1); num(g, +ss[0], x0 + 6, 1, 0); num(g, +ss[1], x0 + 10, 1, 0); }
     g.fillStyle = PAL[2]; for (let x = 0; x < W; x += 4) { g.fillRect(x, 7, 4, 1); g.fillRect(x + 1, 8, 2, 1); g.fillRect(x + 1, 9, 1, 1); }
     for (const p of s.plats) {
       const x = Math.round(p.x), y = Math.round(p.y);

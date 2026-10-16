@@ -160,7 +160,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
           }
           case 'match.create': {
             if (c.match && !c.match.ended) throw new AppError('ALREADY_IN_MATCH');
-            c.match = await createSolo(db, ctx, { userId: c.user.id, send: (m) => send(c, m) }, msg.request_id);
+            c.match = await createSolo(db, ctx, { userId: c.user.id, send: (m) => send(c, m) }, msg.request_id, c.connectedAt + 58 * 60_000);
             break;
           }
           case 'match.input': {

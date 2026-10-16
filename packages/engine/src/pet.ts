@@ -184,9 +184,10 @@ export function checkStairsStart(p: PetState, cfg: GameConfig = GAME): GameError
   return null;
 }
 /** 下樓梯結算（消耗乘 timeScale）。回傳獲得金幣。 */
-export function applyStairsResult(p: PetState, floors: number, cfg: GameConfig = GAME): number {
-  const ts = cfg.timeScale;
-  p.energy = clamp(p.energy - 15 * ts); p.hunger = clamp(p.hunger - 8 * ts);
+/** ticks = 這局玩了幾 tick（30 tps）。前 5 分鐘固定扣精力 15／飽食 8；之後每分鐘多扣 1／0.5，最多再多 15／10（長局不會扣到怪）。 */
+export function applyStairsResult(p: PetState, floors: number, cfg: GameConfig = GAME, ticks = 0): number {
+  const ts = cfg.timeScale, extraMin = Math.max(0, ticks / (30 * 60) - 5);
+  p.energy = clamp(p.energy - (15 + Math.min(15, extraMin)) * ts); p.hunger = clamp(p.hunger - (8 + Math.min(10, extraMin * 0.5)) * ts);
   p.happiness = clamp(p.happiness + 10 + Math.min(15, Math.floor(floors / 2)));
   grow(p, 'speed', Math.min(2, 0.5 + floors * 0.03)); grow(p, 'weight', -1);
   p.counters.plays++; p.bestFloor = Math.max(p.bestFloor, floors);

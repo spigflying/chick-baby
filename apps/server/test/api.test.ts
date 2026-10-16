@@ -6,7 +6,7 @@ import { migrateToLatest } from '../src/migrations';
 import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
 import { createSolo, finish, handleInput, startStairsLoop, matches } from '../src/stairs';
-import { ALWAYS_OPEN, makeClock, STAIRS_PARAMS } from '@chick/engine';
+import { ALWAYS_OPEN, makeClock, STAIRS_PARAMS, STAIRS_CUTOFF_MS } from '@chick/engine';
 import { handleClosed } from '../src/closing';
 import { setClock } from '../src/hours';
 import { feed as feedAction } from '../src/game';
@@ -323,11 +323,21 @@ describe('open hours (v1.2)', () => {
     expect(feeds).toHaveLength(0);
   });
 
-  it('closing (last 5 minutes): cannot start a new stairs match', async () => {
+  it('closing (last 5 minutes): stairs can still start; it is force-ended at the 1-minute cutoff with closing time_up', async () => {
     const a = await login('alice');
     await hatchAlive(a, 'chicken', { energy: 80 });
-    setClock(closingSoon());
-    await expect(createSolo(db, { userId: a.id }, { userId: a.id, send: () => {} }, rid())).rejects.toMatchObject({ code: 'GAME_CLOSING' });
+    const clk = closingSoon(); setClock(clk);
+    const sent: any[] = [];
+    const m = await createSolo(db, { userId: a.id }, { userId: a.id, send: (x) => sent.push(x) }, rid());
+    const closesAt = clk.status(Date.now()).closes_at!;
+    expect(m.closingEnd).toBe(true);
+    expect(sent[0].closing_end).toBe(true);
+    expect(sent[0].ends_at).toBeLessThanOrEqual(closesAt - STAIRS_CUTOFF_MS);
+    expect(sent[0].ends_at).toBeGreaterThan(closesAt - STAIRS_CUTOFF_MS - 100);
+    expect(sent[0].params.matchMaxTicks).toBe(m.state.params.matchMaxTicks);
+    const row = await db.selectFrom('stair_matches').select('config').where('id', '=', m.id).executeTakeFirstOrThrow();
+    expect((row.config as any).matchMaxTicks).toBe(m.state.params.matchMaxTicks); // 重播用的參數
+    await finish(m, 'quit');
   });
 });
 
@@ -335,21 +345,28 @@ describe('review follow-ups (v1.2)', () => {
   afterEach(() => setClock(ALWAYS_OPEN));
   /** 開放中、在 closesAt 關門的假時鐘（毫秒精準，方便測邊界）。 */
   const closesAtClock = (closesAt: number) => ({ ...ALWAYS_OPEN, alwaysOpen: false, isOpen: (t: number) => t < closesAt, status: (t: number) => (t < closesAt ? { open: true, closes_at: closesAt, opens_at: null } : { open: false, closes_at: null, opens_at: null }) });
-  const MAX_MS = (STAIRS_PARAMS.matchMaxTicks / STAIRS_PARAMS.tickRate) * 1000;
 
-  it('a match started just before the 19:55 cutoff is scheduled to end (by the 5-minute cap) before closing', async () => {
+  it('no fixed 5-minute limit during open hours: far from closing the match only has the 60-minute safety cap', async () => {
     const a = await login('alice');
     await hatchAlive(a, 'chicken', { energy: 80 });
-    const closesAt = Date.now() + MAX_MS + 3_000; // 「19:54:57」開局
-    setClock(closesAtClock(closesAt));
+    setClock(closesAtClock(Date.now() + 3 * 3600_000));
     const m = await createSolo(db, { userId: a.id }, { userId: a.id, send: () => {} }, rid());
-    expect(m.startAt + MAX_MS).toBeLessThanOrEqual(closesAt);
+    expect(m.state.params.matchMaxTicks).toBe(STAIRS_PARAMS.matchMaxTicks);
+    expect(m.closingEnd).toBe(false);
     await finish(m, 'quit');
   });
-  it('refuses a match that could not finish before closing even if the phase is still "open" (start delay)', async () => {
+  it('the match ends before the WS connection deadline (not flagged as closing)', async () => {
     const a = await login('alice');
     await hatchAlive(a, 'chicken', { energy: 80 });
-    setClock(closesAtClock(Date.now() + MAX_MS + 200));
+    const m = await createSolo(db, { userId: a.id }, { userId: a.id, send: () => {} }, rid(), Date.now() + 10 * 60_000);
+    expect(m.startAt + m.state.params.matchMaxTicks * 1000 / 30).toBeLessThanOrEqual(Date.now() + 10 * 60_000);
+    expect(m.closingEnd).toBe(false);
+    await finish(m, 'quit');
+  });
+  it('refuses a new match in the last minute before the cutoff (19:58+)', async () => {
+    const a = await login('alice');
+    await hatchAlive(a, 'chicken', { energy: 80 });
+    setClock(closesAtClock(Date.now() + STAIRS_CUTOFF_MS + 60_000 + 200));
     await expect(createSolo(db, { userId: a.id }, { userId: a.id, send: () => {} }, rid())).rejects.toMatchObject({ code: 'GAME_CLOSING' });
   });
 

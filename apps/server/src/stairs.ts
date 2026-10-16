@@ -1,4 +1,4 @@
-import { applyStairsResult, checkStairsStart, phaseAt, cloneStairs, createStairs, ENGINE_VERSION, setInput, STAIRS_PARAMS, stepStairs, type StairsState } from '@chick/engine';
+import { applyStairsResult, checkStairsStart, phaseAt, cloneStairs, createStairs, ENGINE_VERSION, setInput, STAIRS_PARAMS, stepStairs, stairsTimeUp, STAIRS_CUTOFF_MS, STAIRS_MIN_START_MS, type StairsState } from '@chick/engine';
 import type { Db } from './db';
 import { changeBalance, lockWallets, notify, runAction, type ReqCtx } from './core';
 import { fail } from './errors';
@@ -10,7 +10,7 @@ import { clock } from './hours';
 export interface MatchConn { userId: string; send: (msg: unknown) => void }
 interface PendingInput { tick: number; seq: number; left: boolean; right: boolean }
 export interface Match {
-  id: string; userId: string; petId: string; homeId: string; conn: MatchConn; state: StairsState; startAt: number;
+  id: string; userId: string; petId: string; homeId: string; conn: MatchConn; state: StairsState; startAt: number; closingEnd: boolean;
   pending: PendingInput[]; lastSeq: number; lastProcessedSeq: number; late: number; ended: boolean;
 }
 const P = STAIRS_PARAMS;
@@ -22,12 +22,14 @@ export const matches = new Map<string, Match>();
 export function currentTick(m: Match, now = Date.now()) { return Math.floor((now - m.startAt) / TICK_MS); }
 
 /** 單人下樓梯：伺服器權威模擬。 */
-export async function createSolo(db: Db, ctx: ReqCtx, conn: MatchConn, requestId: unknown) {
-  const now = Date.now(), phase = phaseAt(clock(), now);
-  if (phase !== 'open') fail(phase === 'closing' ? 'GAME_CLOSING' : 'GAME_CLOSED'); // 19:55 起不能開新局
-  // 一致性：開局延遲 + 最長 5 分鐘也必須在關門前結束（否則 19:54:59.8 開的局會跨過 20:00）
+/** connDeadline：WS 連線的期限（Cloud Run 60 分鐘），比賽會在那之前時間到。 */
+export async function createSolo(db: Db, ctx: ReqCtx, conn: MatchConn, requestId: unknown, connDeadline = Infinity) {
+  const now = Date.now();
+  if (phaseAt(clock(), now) === 'closed') fail('GAME_CLOSED');
+  // 沒有固定長度：關門前 STAIRS_CUTOFF_MS（19:59）強制時間到；19:58 起不能開新局。
   const closesAt = clock().status(now).closes_at;
-  if (closesAt !== null && now + START_DELAY_MS + P.matchMaxTicks * TICK_MS > closesAt) fail('GAME_CLOSING');
+  const cutoff = closesAt === null ? Infinity : closesAt - STAIRS_CUTOFF_MS;
+  if (now + START_DELAY_MS + STAIRS_MIN_START_MS > cutoff) fail('GAME_CLOSING');
   for (const m of matches.values()) if (m.userId === ctx.userId && !m.ended) fail('ALREADY_IN_MATCH');
   const seed = randomSeed();
   const res = await runAction(db, ctx, 'stairs.start', requestId, {}, async (tx) => {
@@ -44,11 +46,16 @@ export async function createSolo(db: Db, ctx: ReqCtx, conn: MatchConn, requestId
   });
   if ((res as any).replayed) fail('IDEMPOTENCY_REPLAY');
   const players = [{ petId: res.pet_id, speed: res.speed, stamina: res.stamina }];
-  const m: Match = { id: res.match_id, userId: ctx.userId, petId: res.pet_id, homeId: res.home_id, conn, state: createStairs(res.seed, players), startAt: Date.now() + START_DELAY_MS,
+  const startAt = Date.now() + START_DELAY_MS;
+  const endAt = Math.min(cutoff, connDeadline);
+  const ticks = Math.max(1, Math.min(P.matchMaxTicks, Math.floor((endAt - startAt) / TICK_MS)));
+  const mp = { ...P, matchMaxTicks: ticks }; // 這一局的參數（決定性：客戶端與重播都用同一份）
+  await db.updateTable('stair_matches').set({ config: JSON.stringify(mp) }).where('id', '=', res.match_id).execute();
+  const m: Match = { id: res.match_id, userId: ctx.userId, petId: res.pet_id, homeId: res.home_id, conn, state: createStairs(res.seed, players, mp), startAt, closingEnd: ticks < P.matchMaxTicks && endAt === cutoff,
     pending: [], lastSeq: 0, lastProcessedSeq: 0, late: 0, ended: false };
   matches.set(m.id, m);
-  conn.send({ type: 'match.started', match_id: m.id, seed: res.seed, engine_version: ENGINE_VERSION, config_hash: stableHash(P), start_tick: 0,
-    server_time_at_start: m.startAt, params: P, players: [{ user_id: ctx.userId, pet_id: res.pet_id, species: res.species, speed: res.speed, stamina: res.stamina }] });
+  conn.send({ type: 'match.started', match_id: m.id, seed: res.seed, engine_version: ENGINE_VERSION, config_hash: stableHash(mp), start_tick: 0,
+    server_time_at_start: m.startAt, params: mp, ends_at: m.startAt + ticks * TICK_MS, closing_end: m.closingEnd, players: [{ user_id: ctx.userId, pet_id: res.pet_id, species: res.species, speed: res.speed, stamina: res.stamina }] });
   return m;
 }
 
@@ -97,7 +104,7 @@ export async function finish(m: Match, reason: 'over' | 'quit') {
       const row = await lockPet(tx, m.petId);
       const { state } = await settle(tx, row);
       let coins = 0;
-      if (state.status === 'alive') coins = applyStairsResult(state, floors);
+      if (state.status === 'alive') coins = applyStairsResult(state, floors, undefined, m.state.tick);
       await savePet(tx, m.petId, state);
       const balance = coins > 0 ? await changeBalance(tx, m.userId, coins, 'stairs_solo', { type: 'stair_match', id: m.id }) :
         (await tx.selectFrom('wallets').select('balance').where('user_id', '=', m.userId).executeTakeFirstOrThrow()).balance;
@@ -108,7 +115,7 @@ export async function finish(m: Match, reason: 'over' | 'quit') {
       await notify(tx, { t: 'pet', home: m.homeId, pet: m.petId, ev: { type: 'stairs_solo', floors } });
       return { coins, balance, pet: publicPet(row, state) };
     });
-    m.conn.send({ type: 'match.ended', match_id: m.id, floors, coins: result.coins, balance: result.balance, reason, pet: result.pet, final_tick: m.state.tick });
+    m.conn.send({ type: 'match.ended', match_id: m.id, floors, coins: result.coins, balance: result.balance, reason, pet: result.pet, final_tick: m.state.tick, time_up: stairsTimeUp(m.state), closing: m.closingEnd && stairsTimeUp(m.state) });
   } catch (e) {
     console.error('stairs finish failed', e);
     m.conn.send({ type: 'error', code: 'INTERNAL', message: 'stairs settlement failed' });

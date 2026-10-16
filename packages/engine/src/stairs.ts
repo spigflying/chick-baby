@@ -11,7 +11,7 @@ export const STAIRS_PARAMS = {
   boxW: 12, boxH: 14,
   hpBase: 10, hpMaxBonus: 4, speedBase: 1.2, speedMaxBonus: 0.5,
   typeOdds: { normal: 0.46, spiky: 0.12, conveyor: 0.14, bouncy: 0.13, fragile: 0.15 },
-  matchMaxTicks: 30 * 60 * 5, // 5 分鐘：19:55 前開的局一定在 20:00 前結束（requirements §4.7）
+  matchMaxTicks: 30 * 60 * 60, // 安全上限 60 分鐘（防止沒人管的局）；每一局伺服器會再依關門時間縮短（requirements §4.7）
 };
 export type StairsParams = typeof STAIRS_PARAMS;
 export type PlatType = 'normal' | 'spiky' | 'conveyor' | 'bouncy' | 'fragile';
@@ -41,6 +41,10 @@ function addPlat(s: StairsState, y: number) {
   s.plats.push({ id: s.nextId++, x, y, type: pickType(s), dir: nextFloat(s.rng) < 0.5 ? -1 : 1, brk: -1, counted: false, hurt: false });
 }
 
+/** 下樓梯在關門前多久強制結束（時間到）：19:59，留 1 分鐘讓結算在 20:00 關門前完成。 */
+export const STAIRS_CUTOFF_MS = 60_000;
+/** 離收工不到這麼久就不能開新局：19:58 起。 */
+export const STAIRS_MIN_START_MS = 60_000;
 export function createStairs(seed: number, players: PlayerStats[], params: StairsParams = STAIRS_PARAMS): StairsState {
   const s: StairsState = { tick: 0, rng: createRng(seed), made: 0, nextId: 1, plats: [], players: [], over: false, params };
   for (let y = 30; y < params.height + params.gap; y += params.gap) addPlat(s, y);
@@ -109,4 +113,6 @@ export function stepStairs(s: StairsState) {
   if (s.players.every((p) => !p.alive) || s.tick >= P.matchMaxTicks) s.over = true;
 }
 
+/** 是不是撐到這一局的時間上限（matchMaxTicks）才結束：還活著＝時間到，不是死掉。 */
+export function stairsTimeUp(s: StairsState): boolean { return s.over && s.tick >= s.params.matchMaxTicks && s.players.some((p) => p.alive); }
 export function cloneStairs(s: StairsState): StairsState { return JSON.parse(JSON.stringify(s)); }

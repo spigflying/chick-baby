@@ -7,7 +7,7 @@ import { act, api, errText } from './api';
 import { savePetCache } from './sleep';
 import type { Live } from './ws';
 import { StairsClient } from './stairs';
-import { boardHtml, type Board } from './board';
+import { boardHtml, stairsResultHtml, type Board } from './board';
 import { fightBlocker, inviteSecs, resultInput, lockSecs, coinStr, hintFor, padPress, controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
 
 const W = 120, H = 100, GROUND = 86, HUD = 14;
@@ -730,9 +730,8 @@ export class Device {
         if (r.pet) this.pendingPet = r.pet;
         this.menu = 'result';
         const el = this.$('.menu'); el.hidden = false;
-        el.innerHTML = r.aborted ? `<div class="mt">— 遊戲中止 —</div><p>伺服器維護中，這場不計分。</p><div class="mi back on">✕ 離開</div>`
-          : `<div class="mt">— 遊戲結束 —</div><div class="wide"><b>下了</b><span>${r.floors} 樓</span></div><div class="wide"><b>獲得</b><span>◎${r.coins}</span></div><div class="wide"><b>目前</b><span>◎${this.ctx.wallet()}</span></div><div class="mi back on">✕ 離開</div>`;
-        this.say(r.aborted ? '遊戲中止' : `下了 ${r.floors} 樓，賺到 ◎${r.coins}！`);
+        el.innerHTML = stairsResultHtml(r, this.ctx.wallet());
+        this.say(r.aborted ? '遊戲中止' : `${r.time_up ? (r.closing ? '快關門了，時間到！' : '時間到！') : ''}下了 ${r.floors} 樓，賺到 ◎${r.coins}！`);
       },
     });
     this.say('←→ 移動，往下跳！小心尖刺～');

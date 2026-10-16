@@ -25,3 +25,24 @@ describe('v1.6 stairs leaderboard', () => {
   });
 });
 
+
+import { stairsResultHtml } from '../src/board';
+describe('stairs result screen', () => {
+  it('says 時間到 when the 5-minute cap ended the run (pet did not die)', () => {
+    const h = stairsResultHtml({ floors: 269, coins: 269, time_up: true }, 500);
+    expect(h).toContain('時間到'); expect(h).toContain('269 樓'); expect(h).not.toContain('遊戲結束');
+    expect(stairsResultHtml({ floors: 12, coins: 12 }, 50)).toContain('遊戲結束');
+  });
+});
+import { stairsTimeLeft } from '../src/stairs';
+describe('closing-time stairs', () => {
+  it('result says 快關門了，時間到！ when ended by closing', () => {
+    expect(stairsResultHtml({ floors: 5, coins: 5, time_up: true, closing: true }, 9)).toContain('快關門了，時間到！');
+  });
+  it('HUD countdown only in the last 5 minutes before the cutoff', () => {
+    expect(stairsTimeLeft(null, 0)).toBeNull();
+    expect(stairsTimeLeft(10 * 60_000, 0)).toBeNull();
+    expect(stairsTimeLeft(4 * 60_000 + 500, 0)).toBe(241);
+    expect(stairsTimeLeft(0, 5000)).toBe(0);
+  });
+});
