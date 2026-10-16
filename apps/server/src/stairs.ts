@@ -1,4 +1,4 @@
-import { applyStairsResult, checkStairsStart, phaseAt, cloneStairs, createStairs, ENGINE_VERSION, setInput, STAIRS_PARAMS, stepStairs, type StairsState } from '@chick/engine';
+import { applyStairsResult, checkStairsStart, phaseAt, cloneStairs, createStairs, ENGINE_VERSION, setInput, STAIRS_PARAMS, stepStairs, stairsTimeUp, type StairsState } from '@chick/engine';
 import type { Db } from './db';
 import { changeBalance, lockWallets, notify, runAction, type ReqCtx } from './core';
 import { fail } from './errors';
@@ -108,7 +108,7 @@ export async function finish(m: Match, reason: 'over' | 'quit') {
       await notify(tx, { t: 'pet', home: m.homeId, pet: m.petId, ev: { type: 'stairs_solo', floors } });
       return { coins, balance, pet: publicPet(row, state) };
     });
-    m.conn.send({ type: 'match.ended', match_id: m.id, floors, coins: result.coins, balance: result.balance, reason, pet: result.pet, final_tick: m.state.tick });
+    m.conn.send({ type: 'match.ended', match_id: m.id, floors, coins: result.coins, balance: result.balance, reason, pet: result.pet, final_tick: m.state.tick, time_up: stairsTimeUp(m.state) });
   } catch (e) {
     console.error('stairs finish failed', e);
     m.conn.send({ type: 'error', code: 'INTERNAL', message: 'stairs settlement failed' });

@@ -109,4 +109,6 @@ export function stepStairs(s: StairsState) {
   if (s.players.every((p) => !p.alive) || s.tick >= P.matchMaxTicks) s.over = true;
 }
 
+/** 是不是撐到時間上限（matchMaxTicks，5 分鐘）才結束：還活著＝時間到，不是死掉。 */
+export function stairsTimeUp(s: StairsState): boolean { return s.over && s.tick >= s.params.matchMaxTicks && s.players.some((p) => p.alive); }
 export function cloneStairs(s: StairsState): StairsState { return JSON.parse(JSON.stringify(s)); }

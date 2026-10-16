@@ -25,3 +25,12 @@ describe('v1.6 stairs leaderboard', () => {
   });
 });
 
+
+import { stairsResultHtml } from '../src/board';
+describe('stairs result screen', () => {
+  it('says 時間到 when the 5-minute cap ended the run (pet did not die)', () => {
+    const h = stairsResultHtml({ floors: 269, coins: 269, time_up: true }, 500);
+    expect(h).toContain('時間到'); expect(h).toContain('269 樓'); expect(h).not.toContain('遊戲結束');
+    expect(stairsResultHtml({ floors: 12, coins: 12 }, 50)).toContain('遊戲結束');
+  });
+});
