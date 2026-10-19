@@ -1,4 +1,5 @@
-import { TopTip, tipText, evoProgress, type TopKey } from './topTip';
+import { TopTip, tipText, evoProgress, evoEta, type TopKey } from './topTip';
+import { STAT_KEYS, statAt, statHelp } from './statHelp';
 import { ANCHOR, PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID, petSpriteKey, frontSprite, coinHtml } from './sprites';
 import { ACCESSORIES, OUTFITS, OUTFIT_IDS, isAccId } from '@chick/engine';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
@@ -319,8 +320,8 @@ export class Device {
     this.el = document.createElement('div');
     this.el.className = 'device';
     this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
-      <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">${coinHtml(0)}</span><span data-k="age">—</span></div><div class="evobar" data-k="evo" aria-label="下次進化進度"><i></i></div><div class="toptip" role="tooltip" hidden></div>
-      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div></div>
+      <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">${coinHtml(0)}</span><span data-k="age">—</span></div><div class="evobar" data-k="evo" aria-label="下次進化進度"><b>進化</b><span class="trk"><i></i></span><em></em></div><div class="toptip" role="tooltip" hidden></div>
+      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="stathelp" role="tooltip" hidden></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div></div>
       <p class="fightstat" hidden></p>
       <div class="labels"></div>
       <div class="fightbar" hidden><button data-pad="left" aria-label="左">◀</button><button data-pad="jump" aria-label="跳">▲</button><button data-pad="attack">啄</button><button data-pad="upAtk">上啄</button><button data-pad="item">道具</button><button data-pad="right" aria-label="右">▶</button><button class="navbtn">選單</button><button class="fightgo">發起戰鬥</button></div>
@@ -443,6 +444,32 @@ export class Device {
       old.replaceWith(pad);
     });
   }
+  // ---------- 上方狀態圖示的說明（canvas HUD 列，點一下開／點別處關）----------
+  private statShown = -1; private statClosedByDown = -1;
+  /** 點到 HUD 第幾個狀態（-1 = 沒有）；只有一般畫面（非下樓梯）、活著的寵物才有 HUD。 */
+  hudStat(e: { clientX: number; clientY: number }) {
+    if (this.stairs || this.pet?.status !== 'alive') return -1;
+    const r = this.cv.getBoundingClientRect(); if (!r.width) return -1;
+    return statAt((e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height);
+  }
+  private onStatDocDown = (e: PointerEvent) => {
+    if (this.statShown < 0) return;
+    const onSame = e.target === this.cv && this.hudStat(e) === this.statShown;
+    this.statClosedByDown = onSame ? this.statShown : -1; // 點同一個圖示 → 這次按下關掉，接著的 click 不要再打開
+    this.hideStatHelp();
+  };
+  hideStatHelp() { this.statShown = -1; const el = this.el.querySelector<HTMLElement>('.stathelp'); if (el) el.hidden = true; }
+  toggleStatHelp(i: number) {
+    if (this.statClosedByDown === i) { this.statClosedByDown = -1; return; }
+    this.statClosedByDown = -1;
+    const h = statHelp(STAT_KEYS[i]), el = this.$('.stathelp');
+    el.innerHTML = `<b>${esc(h.name)}</b>` + h.lines.map((l) => `<p>${esc(l)}</p>`).join('');
+    el.hidden = false; this.statShown = i;
+    // 對齊到圖示下方，不超出螢幕
+    const scr = this.$('.scr').getBoundingClientRect(), x = ((1 + i * 24 + 6) / W) * scr.width;
+    el.style.top = `${(14 / H) * scr.height}px`;
+    el.style.left = `${Math.max(0, Math.min(scr.width - el.offsetWidth, x - el.offsetWidth / 2))}px`;
+  }
   private topTip = new TopTip(() => this.showTopTip());
   private onDocDown = (e: PointerEvent) => { if (!(e.target as HTMLElement)?.closest?.('.lcd [data-k]')) this.topTip.outside(); };
   private bindTopTip() {
@@ -480,7 +507,7 @@ export class Device {
     const ev = evoProgress(p), bar = this.$('.evobar');
     const hide = !ev || !!this.stairs || !!this.meFighter()?.fight;
     bar.classList.toggle('off', hide);
-    if (ev) (bar.firstElementChild as HTMLElement).style.width = `${(ev.frac * 100).toFixed(1)}%`;
+    if (ev) { bar.querySelector('i')!.style.width = `${(ev.frac * 100).toFixed(1)}%`; const left = Math.ceil(((p!.evolve_need_ms ?? 0) - (p!.evolve_done_ms ?? 0)) / 3_600_000); bar.querySelector('em')!.textContent = left <= 0 ? '快了' : `${left}h`; }
     if (hide && this.topTip.shown === 'evo') this.topTip.outside();
     if (this.topTip.shown) this.showTopTip();
   }
@@ -545,7 +572,9 @@ export class Device {
       if (this.menu === 'shop') { const it = t.closest('.mi') as HTMLElement | null; if (!it) return; const i = +it.dataset.i!; if (i < 0) return this.closeMenu(); this.menuSel = i; return void this.shopPick(i); }
       this.closeMenu();
     });
-    this.cv.addEventListener('click', () => { if (!this.stairs && this.menu) this.closeMenu(); });
+    this.cv.addEventListener('click', (e) => { const i = this.hudStat(e); if (i >= 0 && !this.menu) return void this.toggleStatHelp(i); if (!this.stairs && this.menu) this.closeMenu(); });
+    document.addEventListener('pointerdown', this.onStatDocDown); // 不 stopPropagation（idle.ts 看 window pointerdown）
+    this.off.push(() => document.removeEventListener('pointerdown', this.onStatDocDown));
     this.$('.fightres').addEventListener('click', () => this.tryDismissResult());
     this.$('.invite').addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('[data-acc]') as HTMLElement | null; if (b) this.answerInvite(b.dataset.acc === '1'); });
     // fightbar 的 touchstart 有 preventDefault（擋長按選字），手機不會產生 click → 用 pointerup
@@ -578,7 +607,7 @@ export class Device {
     this.$('.navbtn').addEventListener('click', () => { this.navOpen = !this.navOpen; this.updateControls(); });
     this.$('.navbtn').addEventListener('touchend', (e) => { e.preventDefault(); this.navOpen = !this.navOpen; this.updateControls(); }, { passive: false });
     // 滑鼠：和下樓梯一樣，左鍵按住往左、右鍵按住往右
-    this.cv.addEventListener('pointerdown', (e) => { if (this.mode() !== 'pet' || e.pointerType !== 'mouse') return; if (e.button === 0) this.setPad('left', true); else if (e.button === 2) this.setPad('right', true); });
+    this.cv.addEventListener('pointerdown', (e) => { if (this.mode() !== 'pet' || e.pointerType !== 'mouse' || this.hudStat(e) >= 0) return; if (e.button === 0) this.setPad('left', true); else if (e.button === 2) this.setPad('right', true); });
     window.addEventListener('pointerup', (e) => { if (e.pointerType !== 'mouse') return; this.setPad('left', false); this.setPad('right', false); });
     this.cv.addEventListener('contextmenu', (e) => { if (this.mode() === 'pet') e.preventDefault(); });
     const scr = this.$('.scr');
@@ -643,7 +672,7 @@ export class Device {
   }
 
   // ---------- 選單 ----------
-  openMenu(m: 'feed' | 'status' | 'hatch' | 'shop') { this.menu = m; this.menuSel = m === 'feed' ? (this.isOwner ? 0 : 1) : 0; this.renderMenu(); }
+  openMenu(m: 'feed' | 'status' | 'hatch' | 'shop') { this.hideStatHelp(); this.menu = m; this.menuSel = m === 'feed' ? (this.isOwner ? 0 : 1) : 0; this.renderMenu(); }
   closeMenu() { this.menu = null; this.navOpen = false; this.renderMenu(); this.updateControls(); }
   renderMenu() {
     const el = this.$('.menu');
@@ -671,7 +700,7 @@ export class Device {
       if (!p) { el.innerHTML = '<div class="mt">— 狀態 —</div><p>還沒有寵物。</p><div class="mi back">✕ 關閉</div>'; return; }
       const row = (k: string, v: unknown) => `<div><b>${k}</b><span>${v}</span></div>`;
       const born = new Date(p.born_at);
-      el.innerHTML = '<div class="mt">— 狀態 —</div><div class="front"></div><div class="wide acc"><b>配件</b><span>' + esc(accessoryLine(p)) + '</span></div><div class="grid">' + row('名字', esc(p.name)) + row('種類', SPECIES_LABEL[p.species]) + row('性格', p.personality) +
+      el.innerHTML = '<div class="mt">— 狀態 —</div><div class="front"></div><div class="wide acc"><b>配件</b><span>' + esc(accessoryLine(p)) + '</span></div>' + (evoEta(p) ? '<div class="wide acc"><b>下次進化</b><span>' + esc(evoEta(p)!) + '</span></div>' : '') + '<div class="grid">' + row('名字', esc(p.name)) + row('種類', SPECIES_LABEL[p.species]) + row('性格', p.personality) +
         row('力量', p.strength) + row('速度', p.speed) + row('體力', p.stamina) + row('體重', p.weight + 'g') + row('最深', p.best_floor + '樓') +
         row('飽足', Math.round(p.hunger)) + row('心情', Math.round(p.happiness)) + row('精力', Math.round(p.energy)) + row('清潔', Math.round(p.cleanliness)) + row('健康', Math.round(p.health)) + row('便便', p.poop) + '</div>' +
         `<div class="wide"><b>出生</b><span>${born.getMonth() + 1}/${born.getDate()} ${String(born.getHours()).padStart(2, '0')}:${String(born.getMinutes()).padStart(2, '0')}</span></div>` +

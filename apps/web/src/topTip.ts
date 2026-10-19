@@ -8,6 +8,14 @@ export function evoProgress(p: { status: string; evolve_done_ms?: number | null;
   const h = Math.ceil((p.evolve_need_ms - p.evolve_done_ms) / 3_600_000);
   return { frac, text: h <= 0 ? '下次進化：快了！' : `下次進化：還有 ${h} 小時` };
 }
+/** 狀態頁：下次進化的剩餘營業時數與大約的台北時間（evolve_at 由伺服器依營業時間算好）。 */
+export function evoEta(p: { status: string; evolve_at?: number | null; evolve_done_ms?: number | null; evolve_need_ms?: number | null } | null | undefined): string | null {
+  const ev = evoProgress(p); if (!ev || !p?.evolve_at) return null;
+  const h = Math.max(0, Math.ceil(((p.evolve_need_ms ?? 0) - (p.evolve_done_ms ?? 0)) / 3_600_000));
+  const d = new Date(p.evolve_at), f = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('zh-TW', { timeZone: 'Asia/Taipei', ...o }).format(d);
+  const md = f({ month: 'numeric', day: 'numeric' }), wd = f({ weekday: 'narrow' }), hm = f({ hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
+  return `${h <= 0 ? '快了' : `還有 ${h} 小時`}（營業時間）・約 ${md}（${wd}）${hm}`;
+}
 export const TIP_HIDE_MS = 2000;
 
 export function tipText(k: TopKey, value: string, isEgg = false): string {
