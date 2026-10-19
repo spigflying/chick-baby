@@ -1,5 +1,6 @@
 import { TopTip, tipText, evoProgress, evoEta, type TopKey } from './topTip';
-import { STAT_KEYS, statAt, statHelp } from './statHelp';
+import { STAT_KEYS, statAt, statHelp, evoHelp } from './statHelp';
+const EVO_HELP = 99; // 說明框：進化（其他是 HUD 第 0–4 格）
 import { ANCHOR, PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID, petSpriteKey, frontSprite, coinHtml } from './sprites';
 import { ACCESSORIES, OUTFITS, OUTFIT_IDS, isAccId } from '@chick/engine';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
@@ -454,7 +455,7 @@ export class Device {
   }
   private onStatDocDown = (e: PointerEvent) => {
     if (this.statShown < 0) return;
-    const onSame = e.target === this.cv && this.hudStat(e) === this.statShown;
+    const onSame = this.statShown === EVO_HELP ? !!(e.target as HTMLElement)?.closest?.('.evobar') : e.target === this.cv && this.hudStat(e) === this.statShown;
     this.statClosedByDown = onSame ? this.statShown : -1; // 點同一個圖示 → 這次按下關掉，接著的 click 不要再打開
     this.hideStatHelp();
   };
@@ -462,24 +463,26 @@ export class Device {
   toggleStatHelp(i: number) {
     if (this.statClosedByDown === i) { this.statClosedByDown = -1; return; }
     this.statClosedByDown = -1;
-    const h = statHelp(STAT_KEYS[i]), el = this.$('.stathelp');
+    const h = i === EVO_HELP ? evoHelp(this.pet) : statHelp(STAT_KEYS[i]), el = this.$('.stathelp');
     el.innerHTML = `<b>${esc(h.name)}</b>` + h.lines.map((l) => `<p>${esc(l)}</p>`).join('');
     el.hidden = false; this.statShown = i;
     // 對齊到圖示下方，不超出螢幕
-    const scr = this.$('.scr').getBoundingClientRect(), x = ((1 + i * 24 + 6) / W) * scr.width;
-    el.style.top = `${(14 / H) * scr.height}px`;
+    const scr = this.$('.scr').getBoundingClientRect(), x = i === EVO_HELP ? scr.width / 2 : ((1 + i * 24 + 6) / W) * scr.width;
+    el.style.top = `${i === EVO_HELP ? 1 : (14 / H) * scr.height}px`;
     el.style.left = `${Math.max(0, Math.min(scr.width - el.offsetWidth, x - el.offsetWidth / 2))}px`;
   }
   private topTip = new TopTip(() => this.showTopTip());
   private onDocDown = (e: PointerEvent) => { if (!(e.target as HTMLElement)?.closest?.('.lcd [data-k]')) this.topTip.outside(); };
   private bindTopTip() {
-    this.el.querySelectorAll<HTMLElement>('.lcd-top [data-k], .evobar').forEach((s) => {
+    this.el.querySelectorAll<HTMLElement>('.lcd-top [data-k]').forEach((s) => {
       const k = s.dataset.k as TopKey;
       s.addEventListener('pointerenter', (e) => { if (e.pointerType === 'mouse') this.topTip.hover(k); });
       s.addEventListener('pointerleave', (e) => { if (e.pointerType === 'mouse') this.topTip.leave(k); });
       s.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
       s.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (this.topTip.shown === k && matchMedia('(hover:hover)').matches) return; this.topTip.tap(k); });
     });
+    // 進度條：點一下打開進化說明（和上方狀態圖示同一種說明框）；不 stopPropagation
+    this.$('.evobar').addEventListener('click', () => this.toggleStatHelp(EVO_HELP));
     document.addEventListener('pointerdown', this.onDocDown);
     this.off.push(() => { document.removeEventListener('pointerdown', this.onDocDown); this.topTip.outside(); });
   }
@@ -509,6 +512,7 @@ export class Device {
     bar.classList.toggle('off', hide);
     if (ev) { bar.querySelector('i')!.style.width = `${(ev.frac * 100).toFixed(1)}%`; const left = Math.ceil(((p!.evolve_need_ms ?? 0) - (p!.evolve_done_ms ?? 0)) / 3_600_000); bar.querySelector('em')!.textContent = left <= 0 ? '快了' : `${left}h`; }
     if (hide && this.topTip.shown === 'evo') this.topTip.outside();
+    if ((hide && this.statShown === EVO_HELP) || this.stairs) { if (this.statShown >= 0) this.hideStatHelp(); }
     if (this.topTip.shown) this.showTopTip();
   }
 

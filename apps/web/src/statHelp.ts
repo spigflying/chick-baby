@@ -44,3 +44,21 @@ export function statHelp(k: StatKey, c: GameConfig = GAME): { name: string; line
   };
   return { name: STAT_NAME[k], lines: L[k] };
 }
+import { CARE_POOL, ACCESSORIES } from '@chick/engine';
+import { evoEta } from './topTip';
+const CAT_NAME: Record<string, string> = { strength: '力量', speed: '速度', stamina: '體力', weight: '體重' };
+/** 進度條的說明：進化規則（照 bao.ts 的 rollBao／GAME.bao）＋這隻的階段與下次時間。 */
+export function evoHelp(p: { status: string; bao_stage?: number | null; evolve_at?: number | null; evolve_done_ms?: number | null; evolve_need_ms?: number | null } | null | undefined, c: GameConfig = GAME): { name: string; lines: string[] } {
+  const h1 = Math.round(c.bao.evolveOpenMs / 3_600_000), h2 = Math.round(c.bao.reevolveOpenMs / 3_600_000);
+  const st = p?.bao_stage ?? 0, eta = evoEta(p);
+  const care = CARE_POOL.map((id) => ACCESSORIES[id].name).join('、');
+  return {
+    name: `進化（${st > 0 ? `第 ${st} 階` : '還沒進化'}）`,
+    lines: [
+      ...(eta ? [`下次：${eta}`] : []),
+      `孵化後營業時間累計 ${h1} 小時第一次進化，之後每 ${h2} 小時再變一次；晚上和週末不算`,
+      `主配件看成長最多的數值（${Object.values(CAT_NAME).join('／')}），第二名有第一名的 80% 以上再加一個副配件`,
+      `照顧得好（少生病、少餓、少髒）會多一個小配件：50 分以上蝴蝶結或小花，80 分以上從${care}挑`,
+    ],
+  };
+}

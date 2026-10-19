@@ -29,3 +29,16 @@ describe('status panel next evolution', () => {
     expect(evoEta({ status: 'egg', evolve_at: at, evolve_done_ms: 0, evolve_need_ms: 1 })).toBeNull();
   });
 });
+import { evoHelp } from '../src/statHelp';
+describe('evolution bar help', () => {
+  it('explains the rules from the engine config, plus stage and next time', () => {
+    const at = Date.UTC(2026, 9, 21, 7, 30);
+    const h = evoHelp({ status: 'alive', bao_stage: 1, evolve_at: at, evolve_done_ms: 10 * 3_600_000, evolve_need_ms: 77 * 3_600_000 });
+    expect(h.name).toBe('進化（第 1 階）');
+    expect(h.lines[0]).toBe('下次：還有 67 小時（營業時間）・約 10/21（三）15:30');
+    const all = h.lines.join('\n');
+    expect(all).toContain(`${GAME.bao.evolveOpenMs / 3_600_000} 小時第一次進化`); expect(all).toContain(`每 ${GAME.bao.reevolveOpenMs / 3_600_000} 小時`);
+    expect(all).toContain('晚上和週末不算'); expect(all).toContain('80%'); expect(all).toContain('50 分以上');
+    expect(evoHelp({ status: 'alive', bao_stage: 0 }).name).toBe('進化（還沒進化）');
+  });
+});
