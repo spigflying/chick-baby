@@ -112,8 +112,8 @@ export function speciesSprite(species: string, kind: 1 | 2 | 's') {
  * 值是相對於雞的位移（側面、未翻轉的座標）。
  */
 export const SPECIES_ANCHORS = SIDE_ANCHORS;
-const SLOT_ANCHOR: Record<string, Anchor> = { head: 'head', deco: 'head', face: 'eye', back: 'back', hand: 'hand', feet: 'feet', body: 'body' };
-/** 例外：圍巾跟著脖子。 */
+const SLOT_ANCHOR: Record<string, Anchor> = { head: 'head', deco: 'head', face: 'eye', back: 'back', hand: 'hand', feet: 'feet', body: 'body', neck: 'neck' };
+/** 例外：圍巾跟著脖子（領帶、圍兜是 neck 欄位，本來就跟著脖子）。 */
 const ITEM_ANCHOR: Record<string, Anchor> = { scarf: 'neck' };
 export function accAnchor(id: string): Anchor { return ITEM_ANCHOR[id] ?? SLOT_ANCHOR[(ACCESSORIES as any)[id]?.slot] ?? 'body'; }
 /** 正面（狀態面板）：只有雞有正面精靈；其他物種回傳側面。 */
@@ -170,7 +170,7 @@ export function ensureComposite(name: string) {
   for (const [x, y, c] of g.values()) out[y - y0][x - x0] = c;
   S[name] = out.map((r) => r.join('')); ANCHOR[name] = { ox: -x0, oy: -y0, bw, bh };
 }
-const GROUNDED = new Set(['shoes', 'soccer']);
+const GROUNDED = new Set(['shoes', 'soccer', 'skateboard', 'skates']);
 /** v1.7 頂部列金幣圖示（9×9，四階綠）。 */
 export const COIN9 = ['..33333..', '.3222223.', '321011123', '320111123', '321111123', '321111123', '321111223', '.3222223.', '..33333..'];
 let coinUrl = '';
