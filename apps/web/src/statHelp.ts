@@ -5,8 +5,16 @@ export type StatKey = (typeof STAT_KEYS)[number];
 export const STAT_NAME: Record<StatKey, string> = { hunger: '飽足', happiness: '心情', energy: '精力', cleanliness: '清潔', health: '健康' };
 /** HUD 每格：x = 1 + i×24，寬 23（圖示 11＋條 11）；y 0–12（canvas 座標，120×100）。 */
 export const HUD_CELL = { x0: 1, step: 24, w: 23, h: 13 };
+/** HUD 下方的分隔線（canvas y = 13）兼進化進度：點擊範圍上 2、下 3 格，方便手機點。 */
+export const EVO_HELP = 99, EVO_LINE_Y = 13, EVO_HIT = { y0: 11, y1: 17 };
+/** 進度線「還沒到」那段的顏色：比 PAL[3]（#0f380f）亮一點點的深綠。 */
+export const EVO_LINE_TRACK = '#24502a';
+export function hudTarget(x: number, y: number): number {
+  if (y >= EVO_HIT.y0 && y < EVO_HIT.y1 && x >= 0 && x < 120) return EVO_HELP;
+  return statAt(x, y);
+}
 export function statAt(x: number, y: number): number {
-  if (y < 0 || y >= HUD_CELL.h || x < HUD_CELL.x0) return -1;
+  if (y < 0 || y >= EVO_HIT.y0 || x < HUD_CELL.x0) return -1;
   const i = Math.floor((x - HUD_CELL.x0) / HUD_CELL.step);
   return i >= 0 && i < STAT_KEYS.length && x - HUD_CELL.x0 - i * HUD_CELL.step < HUD_CELL.w ? i : -1;
 }

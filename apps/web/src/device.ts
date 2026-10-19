@@ -1,6 +1,5 @@
 import { TopTip, tipText, evoProgress, evoEta, type TopKey } from './topTip';
-import { STAT_KEYS, statAt, statHelp, evoHelp } from './statHelp';
-const EVO_HELP = 99; // 說明框：進化（其他是 HUD 第 0–4 格）
+import { STAT_KEYS, hudTarget, statHelp, evoHelp, EVO_HELP, EVO_LINE_TRACK } from './statHelp';
 import { ANCHOR, PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID, petSpriteKey, frontSprite, coinHtml } from './sprites';
 import { ACCESSORIES, OUTFITS, OUTFIT_IDS, isAccId } from '@chick/engine';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
@@ -321,7 +320,7 @@ export class Device {
     this.el = document.createElement('div');
     this.el.className = 'device';
     this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
-      <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">${coinHtml(0)}</span><span data-k="age">—</span></div><div class="evobar" data-k="evo" aria-label="下次進化進度"><b>進化</b><span class="trk"><i></i></span><em></em></div><div class="toptip" role="tooltip" hidden></div>
+      <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">${coinHtml(0)}</span><span data-k="age">—</span></div><div class="toptip" role="tooltip" hidden></div>
       <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="stathelp" role="tooltip" hidden></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div></div>
       <p class="fightstat" hidden></p>
       <div class="labels"></div>
@@ -447,15 +446,18 @@ export class Device {
   }
   // ---------- 上方狀態圖示的說明（canvas HUD 列，點一下開／點別處關）----------
   private statShown = -1; private statClosedByDown = -1;
-  /** 點到 HUD 第幾個狀態（-1 = 沒有）；只有一般畫面（非下樓梯）、活著的寵物才有 HUD。 */
+  /** 點到 HUD 第幾個狀態（0–4）、HUD 下方那條線（EVO_HELP，進化進度），或 -1；只有一般畫面（非下樓梯）、活著的寵物才有 HUD。 */
   hudStat(e: { clientX: number; clientY: number }) {
     if (this.stairs || this.pet?.status !== 'alive') return -1;
     const r = this.cv.getBoundingClientRect(); if (!r.width) return -1;
-    return statAt((e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height);
+    const t = hudTarget((e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height);
+    return t === EVO_HELP && !evoProgress(this.pet) ? -1 : t;
   }
   private onStatDocDown = (e: PointerEvent) => {
+    this.statClosedByDown = -1;
     if (this.statShown < 0) return;
-    const onSame = this.statShown === EVO_HELP ? !!(e.target as HTMLElement)?.closest?.('.evobar') : e.target === this.cv && this.hudStat(e) === this.statShown;
+    // 點同一個圖示／同一條線，或點在說明框上 → 只關掉（說明框消失後 click 會落到 canvas，不要又打開）
+    const onSame = (e.target === this.cv && this.hudStat(e) === this.statShown) || !!(e.target as HTMLElement)?.closest?.('.stathelp');
     this.statClosedByDown = onSame ? this.statShown : -1; // 點同一個圖示 → 這次按下關掉，接著的 click 不要再打開
     this.hideStatHelp();
   };
@@ -468,7 +470,7 @@ export class Device {
     el.hidden = false; this.statShown = i;
     // 對齊到圖示下方，不超出螢幕
     const scr = this.$('.scr').getBoundingClientRect(), x = i === EVO_HELP ? scr.width / 2 : ((1 + i * 24 + 6) / W) * scr.width;
-    el.style.top = `${i === EVO_HELP ? 1 : (14 / H) * scr.height}px`;
+    el.style.top = `${(17 / H) * scr.height}px`; // 在進化線的點擊範圍下面，不擋住線
     el.style.left = `${Math.max(0, Math.min(scr.width - el.offsetWidth, x - el.offsetWidth / 2))}px`;
   }
   private topTip = new TopTip(() => this.showTopTip());
@@ -481,8 +483,6 @@ export class Device {
       s.addEventListener('pointerdown', (e) => { e.stopPropagation(); });
       s.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); if (this.topTip.shown === k && matchMedia('(hover:hover)').matches) return; this.topTip.tap(k); });
     });
-    // 進度條：點一下打開進化說明（和上方狀態圖示同一種說明框）；不 stopPropagation
-    this.$('.evobar').addEventListener('click', () => this.toggleStatHelp(EVO_HELP));
     document.addEventListener('pointerdown', this.onDocDown);
     this.off.push(() => { document.removeEventListener('pointerdown', this.onDocDown); this.topTip.outside(); });
   }
@@ -506,13 +506,8 @@ export class Device {
       const a = Math.max(0, Math.floor((Date.now() - (p.hatched_at ?? p.born_at)) / 60000));
       t('age', p.status === 'egg' ? `${Math.max(0, Math.ceil((p.hatch_at - this.ctx.live.serverNow()) / 1000))}秒` : a < 60 ? a + '分' : a < 1440 ? Math.floor(a / 60) + '時' : Math.floor(a / 1440) + '天');
     } else t('age', '—');
-    // v1.7 寶：低調的進化進度條（蛋／死亡不顯示；下樓梯、戰鬥中隱藏）
-    const ev = evoProgress(p), bar = this.$('.evobar');
-    const hide = !ev || !!this.stairs || !!this.meFighter()?.fight;
-    bar.classList.toggle('off', hide);
-    if (ev) { bar.querySelector('i')!.style.width = `${(ev.frac * 100).toFixed(1)}%`; const left = Math.ceil(((p!.evolve_need_ms ?? 0) - (p!.evolve_done_ms ?? 0)) / 3_600_000); bar.querySelector('em')!.textContent = left <= 0 ? '快了' : `${left}h`; }
-    if (hide && this.topTip.shown === 'evo') this.topTip.outside();
-    if ((hide && this.statShown === EVO_HELP) || this.stairs) { if (this.statShown >= 0) this.hideStatHelp(); }
+    // 進化說明框：下樓梯中、或沒有進度（蛋／死亡）時關掉
+    if (this.statShown === EVO_HELP && (this.stairs || !evoProgress(p))) this.hideStatHelp();
     if (this.topTip.shown) this.showTopTip();
   }
 
@@ -865,7 +860,10 @@ export class Device {
     const f = Math.floor(this.frame / 4) % 2;
     g.fillStyle = p?.sleeping ? PAL[2] : PAL[0]; g.fillRect(0, 0, W, H);
     if (p && p.status === 'alive') (['i_hunger', 'i_happy', 'i_energy', 'i_clean', 'i_health'] as const).forEach((ic, i) => this.bar(1 + i * 24, 1, ic, p[['hunger', 'happiness', 'energy', 'cleanliness', 'health'][i]]));
+    // HUD 下方的分隔線＝進化進度（彩蛋）：已完成的部分用原本的深色，剩下的用很接近的深色，仔細看才看得出來
     g.fillStyle = PAL[3]; g.fillRect(0, HUD - 1, W, 1);
+    const evo = p && p.status === 'alive' ? evoProgress(p) : null;
+    if (evo) { const done = Math.round(W * evo.frac); g.fillStyle = EVO_LINE_TRACK; g.fillRect(done, HUD - 1, W - done, 1); }
     g.fillStyle = PAL[1]; g.fillRect(0, GROUND, W, 1);
     for (let i = 0; i < W; i += 6) g.fillRect(i, GROUND + 2 + ((i / 6) % 2), 2, 1);
     if (this.ownerAway && p && p.status !== 'dead') {
