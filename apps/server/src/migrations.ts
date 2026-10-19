@@ -192,6 +192,18 @@ const migrations: Record<string, Migration> = {
         ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus'));`.execute(db);
     },
   },
+  '0006_outfits_v2': {
+    async up(db: Kysely<unknown>) {
+      // v2.0：服飾多 6 款
+      await sql`ALTER TABLE user_outfits DROP CONSTRAINT IF EXISTS user_outfits_outfit_id_check;
+        ALTER TABLE user_outfits ADD CONSTRAINT user_outfits_outfit_id_check CHECK (outfit_id IN ('shades','crown','eyepatch','paperbag','monocle','headphones','wizard','eggshell'));`.execute(db);
+    },
+    async down(db: Kysely<unknown>) {
+      await sql`DELETE FROM user_outfits WHERE outfit_id NOT IN ('shades','crown');
+        ALTER TABLE user_outfits DROP CONSTRAINT IF EXISTS user_outfits_outfit_id_check;
+        ALTER TABLE user_outfits ADD CONSTRAINT user_outfits_outfit_id_check CHECK (outfit_id IN ('shades','crown'));`.execute(db);
+    },
+  },
 };
 
 const provider: MigrationProvider = { getMigrations: async () => migrations };

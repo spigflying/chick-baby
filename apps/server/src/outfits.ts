@@ -1,5 +1,5 @@
-// v1.7 服飾（皇冠、墨鏡）：道具店購買，每位使用者擁有一次（永久）；穿在自己目前的寵物上，可穿脫。
-import { OUTFITS, OUTFIT_IDS, isOutfitId, type OutfitId } from '@chick/engine';
+// v1.7 服飾（皇冠、墨鏡；v2.0 加 6 款）：道具店購買，每位使用者擁有一次（永久）；穿在自己目前的寵物上，可穿脫。
+import { OUTFITS, OUTFIT_IDS, isOutfitId, wearOutfitList, type OutfitId } from '@chick/engine';
 import type { Db, Tx } from './db';
 import { changeBalance, lockWallets, notify, runAction, type ReqCtx } from './core';
 import { fail } from './errors';
@@ -33,7 +33,7 @@ export async function buyOutfit(db: Db, ctx: ReqCtx, outfitId: unknown, requestI
     await tx.insertInto('user_outfits').values({ user_id: ctx.userId, outfit_id: id }).execute();
     const row = await livingPet(tx, ctx.userId);
     let pet = null;
-    if (row) { const { state } = await settle(tx, row); const worn = (row.outfits ?? []) as string[]; if (!worn.includes(id)) await setWorn(tx, row, [...worn, id]); pet = publicPet(row, state); }
+    if (row) { const { state } = await settle(tx, row); const worn = (row.outfits ?? []) as string[]; if (!worn.includes(id)) await setWorn(tx, row, wearOutfitList(worn, id, true)); pet = publicPet(row, state); }
     return { ok: true, outfit_id: id, balance, owned: await ownedOutfits(tx, ctx.userId), pet };
   }, { type: 'outfit', id });
 }
@@ -47,8 +47,7 @@ export async function wearOutfit(db: Db, ctx: ReqCtx, outfitId: unknown, on: unk
     const row = await livingPet(tx, ctx.userId);
     if (!row) fail('PET_DEAD');
     const { state } = await settle(tx, row);
-    const worn = ((row.outfits ?? []) as string[]).filter((x) => x !== id);
-    await setWorn(tx, row, on ? [...worn, id] : worn);
+    await setWorn(tx, row, wearOutfitList(row.outfits as string[], id, on)); // 同部位只穿一件
     return { ok: true, outfits: row.outfits as string[], pet: publicPet(row, state) };
   }, { type: 'outfit', id });
 }

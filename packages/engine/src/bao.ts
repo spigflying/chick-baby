@@ -9,7 +9,7 @@ import type { PetState, Counters } from './pet';
 import type { Clock } from './hours';
 
 export type StatCat = 'strength' | 'speed' | 'stamina' | 'weight';
-export type Slot = 'head' | 'deco' | 'face' | 'back' | 'hand' | 'body' | 'feet';
+export type Slot = 'head' | 'deco' | 'face' | 'back' | 'hand' | 'body' | 'feet' | 'neck';
 export interface AccDef { name: string; slot: Slot; /** 0 = 低調，1 = 最誇張（領先越多越容易抽到） */ drama: number }
 export const ACCESSORIES = {
   sword: { name: '背劍', slot: 'back', drama: 1 }, hammer: { name: '鐵鎚', slot: 'hand', drama: 0.6 }, unicorn: { name: '獨角', slot: 'head', drama: 0.8 }, horns: { name: '小彎角', slot: 'head', drama: 0.3 },
@@ -18,21 +18,52 @@ export const ACCESSORIES = {
   jacket: { name: '外套', slot: 'body', drama: 0.3 }, scarf: { name: '圍巾', slot: 'body', drama: 0.2 }, santa: { name: '聖誕帽', slot: 'head', drama: 1 }, hat: { name: '帽子', slot: 'head', drama: 0.4 },
   bow: { name: '蝴蝶結', slot: 'deco', drama: 0 }, flower: { name: '小花', slot: 'deco', drama: 0 }, leaf: { name: '葉子毛', slot: 'head', drama: 0 }, double: { name: '雙呆毛', slot: 'head', drama: 0 },
   crown: { name: '皇冠', slot: 'head', drama: 1 }, shades: { name: '墨鏡', slot: 'face', drama: 1 },
+  // v2.0：35 件新配件（力量／速度／耐力／體重各 6、照顧 5、服飾 6）
+  pan: { name: '平底鍋', slot: 'head', drama: 0.7 }, dumbbell: { name: '啞鈴', slot: 'hand', drama: 0.4 }, gloves: { name: '拳擊手套', slot: 'hand', drama: 0.6 },
+  mace: { name: '狼牙棒', slot: 'hand', drama: 1 }, shield: { name: '盾牌', slot: 'hand', drama: 0.5 }, armband: { name: '肌肉臂章', slot: 'body', drama: 0.2 },
+  skateboard: { name: '滑板', slot: 'feet', drama: 0.7 }, skates: { name: '直排輪', slot: 'feet', drama: 0.6 }, boltband: { name: '閃電頭巾', slot: 'head', drama: 0.4 },
+  goggles: { name: '飛行員護目鏡', slot: 'face', drama: 0.3 }, copter: { name: '竹蜻蜓', slot: 'head', drama: 0.5 }, cape: { name: '披風', slot: 'back', drama: 1 },
+  propcap: { name: '螺旋槳帽', slot: 'head', drama: 0.4 }, monitor: { name: '電腦螢幕', slot: 'body', drama: 1 }, hardhat: { name: '安全帽', slot: 'head', drama: 0.5 },
+  flashlight: { name: '手電筒', slot: 'hand', drama: 0.5 }, bottle: { name: '水壺', slot: 'body', drama: 0.2 }, snorkel: { name: '潛水呼吸管', slot: 'face', drama: 0.7 },
+  tie: { name: '領帶', slot: 'neck', drama: 0.2 }, chef: { name: '廚師帽', slot: 'head', drama: 0.8 }, donut: { name: '甜甜圈游泳圈', slot: 'body', drama: 0.7 },
+  bib: { name: '圍兜', slot: 'neck', drama: 0.3 }, nightcap: { name: '睡帽', slot: 'head', drama: 0.6 }, beanie: { name: '毛線帽', slot: 'head', drama: 0.4 },
+  heartclip: { name: '愛心髮夾', slot: 'deco', drama: 0 }, cherry: { name: '櫻桃髮飾', slot: 'deco', drama: 0 }, dandelion: { name: '蒲公英', slot: 'deco', drama: 0 },
+  star: { name: '小星星', slot: 'deco', drama: 0 }, rainbow: { name: '彩虹頭帶', slot: 'head', drama: 0 },
+  wizard: { name: '魔法帽', slot: 'head', drama: 1 }, eyepatch: { name: '海盜眼罩', slot: 'face', drama: 1 }, headphones: { name: '耳機', slot: 'head', drama: 1 },
+  monocle: { name: '單片眼鏡', slot: 'face', drama: 1 }, paperbag: { name: '紙袋頭套', slot: 'head', drama: 1 }, eggshell: { name: '蛋殼帽', slot: 'head', drama: 1 },
 } satisfies Record<string, AccDef>;
 export type AccId = keyof typeof ACCESSORIES;
 export const BAO_POOLS: Record<StatCat, AccId[]> = {
-  strength: ['sword', 'hammer', 'unicorn', 'horns'],
-  speed: ['wings', 'shoes', 'soccer', 'basketball', 'curl'],
-  stamina: ['ring', 'pickaxe', 'shovel', 'pack'],
-  weight: ['jacket', 'scarf', 'santa', 'hat'],
+  strength: ['sword', 'hammer', 'unicorn', 'horns', 'pan', 'dumbbell', 'gloves', 'mace', 'shield', 'armband'],
+  speed: ['wings', 'shoes', 'soccer', 'basketball', 'curl', 'skateboard', 'skates', 'boltband', 'goggles', 'copter', 'cape'],
+  stamina: ['ring', 'pickaxe', 'shovel', 'pack', 'propcap', 'monitor', 'hardhat', 'flashlight', 'bottle', 'snorkel'],
+  weight: ['jacket', 'scarf', 'santa', 'hat', 'tie', 'chef', 'donut', 'bib', 'nightcap', 'beanie'],
 };
-export const CARE_POOL: AccId[] = ['bow', 'flower', 'leaf', 'double'];
-/** 服飾（道具店購買、每位使用者擁有、可穿脫）。 */
-export const OUTFITS = { shades: { name: '墨鏡', price: 200 }, crown: { name: '皇冠', price: 1000 } } as const;
+/** 照顧 ≥ 80 的獎勵池。 */
+export const CARE_POOL: AccId[] = ['bow', 'flower', 'leaf', 'double', 'heartclip', 'cherry', 'dandelion', 'star', 'rainbow'];
+/** 照顧 50–79 的獎勵池（比較少）。 */
+export const CARE_POOL_MID: AccId[] = ['bow', 'flower', 'heartclip', 'star'];
+/** 服飾（道具店購買、每位使用者擁有、可穿脫）。同一個部位（頭／臉）一次只穿一件：穿新的會自動脫下同部位的舊的。 */
+export const OUTFITS = {
+  shades: { name: '墨鏡', price: 200 }, crown: { name: '皇冠', price: 1000 },
+  eyepatch: { name: '海盜眼罩', price: 150 }, paperbag: { name: '紙袋頭套', price: 180 }, monocle: { name: '單片眼鏡', price: 250 },
+  headphones: { name: '耳機', price: 300 }, wizard: { name: '魔法帽', price: 500 }, eggshell: { name: '蛋殼帽', price: 600 },
+} as const;
 export type OutfitId = keyof typeof OUTFITS;
 export const OUTFIT_IDS = Object.keys(OUTFITS) as OutfitId[];
 export function isOutfitId(x: unknown): x is OutfitId { return typeof x === 'string' && x in OUTFITS; }
 export function isAccId(x: unknown): x is AccId { return typeof x === 'string' && x in ACCESSORIES; }
+/** 穿上／脫下一件服飾後的穿著清單：穿上時先脫掉同部位（slot）的其他服飾。 */
+export function wearOutfitList(worn: readonly string[] | null | undefined, id: OutfitId, on: boolean): OutfitId[] {
+  const cur = (worn ?? []).filter(isOutfitId).filter((x) => x !== id);
+  if (!on) return cur;
+  const slot = ACCESSORIES[id].slot;
+  return [...cur.filter((x) => ACCESSORIES[x].slot !== slot), id];
+}
+/** 戴在頭上會擋住頭頂裝飾（蝴蝶結、小花、愛心髮夾…）的帽子類。 */
+export const HATS: ReadonlySet<string> = new Set(['crown', 'hat', 'santa', 'pan', 'boltband', 'copter', 'propcap', 'hardhat', 'chef', 'nightcap', 'beanie', 'rainbow', 'wizard', 'headphones', 'paperbag', 'eggshell']);
+/** 整個罩住臉的（紙袋、蛋殼、電腦螢幕）：臉上的配件（眼鏡、眼罩…）就不畫。 */
+export const COVERS: ReadonlySet<string> = new Set(['paperbag', 'eggshell', 'monitor']);
 export interface BaoLook { items: AccId[]; cat: StatCat; second: StatCat | null; care: number; n: number; stage?: number }
 
 /** 照顧品質 0–100：生病次數、飢餓與骯髒的開放分鐘數扣分。 */
@@ -103,7 +134,8 @@ export function rollBao(petId: string, p: PetState, n = 0, stage = 1, prev: read
   const care = careScore(p.counters);
   if (care >= 50) {
     const used = new Set(items.map((i) => ACCESSORIES[i].slot));
-    const pool = (care >= 80 ? CARE_POOL : ['bow', 'flower'] as AccId[]).filter((id) => !used.has(ACCESSORIES[id].slot));
+    const hatty = items.some((i) => HATS.has(i)); // 戴帽子的話頭頂裝飾會被擋住，就不抽 deco
+    const pool = (care >= 80 ? CARE_POOL : CARE_POOL_MID).filter((id) => !used.has(ACCESSORIES[id].slot) && !(hatty && ACCESSORIES[id].slot === 'deco'));
     const c = pickWeighted(rng, pool, () => 1); if (c) items.push(c);
   }
   return { items, cat: top, second, care, n, stage };
@@ -112,7 +144,7 @@ export function rollBao(petId: string, p: PetState, n = 0, stage = 1, prev: read
 export const lookKey = (items: readonly string[]) => [...items].sort().join(',');
 /**
  * 實際要畫的配件（含服飾）與畫的順序。衝突規則：服飾優先；同一個欄位（slot）只留一個；
- * 帽子類（皇冠、帽子、聖誕帽）會擋掉頭上的 deco（蝴蝶結、小花）。
+ * 帽子類（HATS）會擋掉頭上的 deco（蝴蝶結、小花…）；紙袋／蛋殼／螢幕（COVERS）會擋掉臉上的配件。
  */
 export function resolveLook(items: readonly string[] | null | undefined, outfits: readonly string[] | null | undefined): AccId[] {
   const out: AccId[] = []; const slots = new Set<Slot>();
@@ -120,6 +152,6 @@ export function resolveLook(items: readonly string[] | null | undefined, outfits
     if (!isAccId(id)) continue; const s = ACCESSORIES[id].slot;
     if (slots.has(s)) continue; slots.add(s); out.push(id);
   }
-  const hatty = out.some((id) => id === 'crown' || id === 'hat' || id === 'santa');
-  return out.filter((id) => !(hatty && ACCESSORIES[id].slot === 'deco'));
+  const hatty = out.some((id) => HATS.has(id)), covered = out.some((id) => COVERS.has(id));
+  return out.filter((id) => !(hatty && ACCESSORIES[id].slot === 'deco') && !(covered && ACCESSORIES[id].slot === 'face'));
 }

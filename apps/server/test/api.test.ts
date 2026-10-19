@@ -6,7 +6,7 @@ import { migrateToLatest } from '../src/migrations';
 import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
 import { createSolo, finish, handleInput, startStairsLoop, matches } from '../src/stairs';
-import { ALWAYS_OPEN, makeClock, STAIRS_PARAMS, STAIRS_CUTOFF_MS, rollBao, lookKey, resolveLook } from '@chick/engine';
+import { ALWAYS_OPEN, makeClock, STAIRS_PARAMS, STAIRS_CUTOFF_MS, rollBao, lookKey, resolveLook, BAO_POOLS } from '@chick/engine';
 import { rowToState } from '../src/pets';
 import { handleClosed } from '../src/closing';
 import { setClock } from '../src/hours';
@@ -737,7 +737,7 @@ describe('寶 evolution & outfits (v1.7)', () => {
     await evolveDue(id);
     me = await a.call('GET', '/api/me');
     const bao = me.json.pet.bao;
-    expect(bao.cat).toBe('strength'); expect(['sword', 'hammer', 'unicorn', 'horns']).toContain(bao.items[0]);
+    expect(bao.cat).toBe('strength'); expect(BAO_POOLS.strength).toContain(bao.items[0]);
     expect(me.json.pet.look).toBe(resolveLook(bao.items, []).join(','));
     const again = await a.call('GET', '/api/me');
     expect(again.json.pet.bao).toEqual(bao);
@@ -798,7 +798,35 @@ describe('寶 evolution & outfits (v1.7)', () => {
     const s = await a.call('POST', '/api/outfits/buy', { outfit_id: 'shades', request_id: rid() });
     expect(s.json.balance).toBe(100); expect(s.json.pet.look).toBe('shades,horns,bow');
     const cat = await a.call('GET', '/api/outfits');
-    expect(cat.json.catalog.map((c: any) => [c.id, c.price])).toEqual([['shades', 200], ['crown', 1000]]);
+    expect(cat.json.catalog.map((c: any) => [c.id, c.price])).toEqual([['shades', 200], ['crown', 1000], ['eyepatch', 150], ['paperbag', 180], ['monocle', 250], ['headphones', 300], ['wizard', 500], ['eggshell', 600]]);
     expect((await a.call('GET', '/api/me')).json.outfits.sort()).toEqual(['crown', 'shades']);
+  });
+  it('v2.0 outfits: the 6 new ones can be bought once, worn and removed; one per slot (head / face); bag hides face items', async () => {
+    const a = await login('outv2'); const id = await hatchAlive(a);
+    await db.updateTable('pets').set({ bao: JSON.stringify({ items: ['sword', 'heartclip'], cat: 'strength', care: 100, n: 0, key: 'heartclip,sword' }) } as any).where('id', '=', id).execute();
+    await db.updateTable('wallets').set({ balance: 5000 }).where('user_id', '=', a.id).execute();
+    const w = await a.call('POST', '/api/outfits/buy', { outfit_id: 'wizard', request_id: rid() });
+    expect(w.status).toBe(200); expect(w.json.balance).toBe(4500); expect(w.json.pet.outfits).toEqual(['wizard']);
+    expect(w.json.pet.look).toBe('wizard,sword'); // 魔法帽擋住頭頂的愛心髮夾
+    expect((await a.call('POST', '/api/outfits/buy', { outfit_id: 'wizard', request_id: rid() })).json.error).toBe('ALREADY_OWNED');
+    const m = await a.call('POST', '/api/outfits/buy', { outfit_id: 'monocle', request_id: rid() });
+    expect(m.json.pet.outfits).toEqual(['wizard', 'monocle']); expect(m.json.pet.look).toBe('wizard,monocle,sword');
+    // 同部位只穿一件：耳機（頭）換掉魔法帽、眼罩（臉）換掉單片眼鏡
+    const h = await a.call('POST', '/api/outfits/buy', { outfit_id: 'headphones', request_id: rid() });
+    expect(h.json.pet.outfits).toEqual(['monocle', 'headphones']);
+    const e = await a.call('POST', '/api/outfits/buy', { outfit_id: 'eyepatch', request_id: rid() });
+    expect(e.json.pet.outfits).toEqual(['headphones', 'eyepatch']);
+    const back = await a.call('POST', '/api/outfits/wear', { outfit_id: 'wizard', on: true, request_id: rid() });
+    expect(back.json.pet.outfits).toEqual(['eyepatch', 'wizard']);
+    // 紙袋整個罩住：臉上的眼罩不畫（但還是穿著）
+    const bag = await a.call('POST', '/api/outfits/buy', { outfit_id: 'paperbag', request_id: rid() });
+    expect(bag.json.pet.outfits).toEqual(['eyepatch', 'paperbag']); expect(bag.json.pet.look).toBe('paperbag,sword');
+    const off = await a.call('POST', '/api/outfits/wear', { outfit_id: 'paperbag', on: false, request_id: rid() });
+    expect(off.json.pet.outfits).toEqual(['eyepatch']); expect(off.json.pet.look).toBe('eyepatch,sword,heartclip');
+    const egg = await a.call('POST', '/api/outfits/buy', { outfit_id: 'eggshell', request_id: rid() });
+    expect(egg.json.balance).toBe(5000 - 500 - 250 - 300 - 150 - 180 - 600);
+    expect((await a.call('GET', '/api/outfits')).json.owned.sort()).toEqual(['eggshell', 'eyepatch', 'headphones', 'monocle', 'paperbag', 'wizard']);
+    const led = await db.selectFrom('coin_ledger').select('delta').where('user_id', '=', a.id).where('reason', '=', 'outfit').execute();
+    expect(led.map((r: any) => r.delta).sort((x: number, y: number) => x - y)).toEqual([-600, -500, -300, -250, -180, -150]);
   });
 });

@@ -694,7 +694,7 @@ export class Device {
       }).join('') + '<div class="mt">— 服飾 —</div>' + OUTFIT_IDS.map((id, j) => {
         const i = ITEM_ORDER.length + j, o = OUTFITS[id], own = this.myOutfits.includes(id), on = (this.pet?.outfits ?? []).includes(id);
         return `<div class="mi${i === this.menuSel ? ' on' : ''}${!own && o.price > coins ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(o.name)}${own ? `<small>${on ? '穿著' : '已擁有'}</small>` : ''}</span><em>${own ? (on ? '脫下' : '穿上') : coinHtml(o.price)}</em></div>`;
-      }).join('') + `<div class="note">${esc(this.menuSel < ITEM_ORDER.length ? (ITEM_INFO[ITEM_ORDER[this.menuSel]]?.desc ?? '') + '・Z 使用、X 切換' : '服飾買一次永久擁有，可隨時穿脫')}</div><div class="mi back" data-i="-1">✕ 關閉</div>`;
+      }).join('') + `<div class="note">${esc(this.menuSel < ITEM_ORDER.length ? (ITEM_INFO[ITEM_ORDER[this.menuSel]]?.desc ?? '') + '・Z 使用、X 切換' : '服飾買一次永久擁有，可隨時穿脫；頭上、臉上各穿一件')}</div><div class="mi back" data-i="-1">✕ 關閉</div>`;
     } else if (this.menu === 'status') {
       if (!p) { el.innerHTML = '<div class="mt">— 狀態 —</div><p>還沒有寵物。</p><div class="mi back">✕ 關閉</div>'; return; }
       const row = (k: string, v: unknown) => `<div><b>${k}</b><span>${v}</span></div>`;
