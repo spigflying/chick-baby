@@ -49,10 +49,10 @@ describe('divider line under the HUD doubles as the evolution progress (easter e
     for (const y of [11, 12, EVO_LINE_Y, 14, 16]) expect(hudTarget(60, y)).toBe(EVO_HELP);
     expect(hudTarget(60, 17)).toBe(-1); expect(hudTarget(5, 5)).toBe(0); expect(hudTarget(1 + 4 * 24 + 5, 10)).toBe(4);
   });
-  it('remainder colour is a close dark shade: darker than PAL[2], distinct from PAL[3]', () => {
+  it('remainder colour is a mid-tone (the LCD palette mid shade): clearly lighter than the line, still well darker than the screen', () => {
     const lum = (h: string) => { const n = parseInt(h.replace('#', ''), 16); return 0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255); };
-    expect(EVO_LINE_TRACK).not.toBe(PAL[3]);
-    expect(lum(EVO_LINE_TRACK) - lum(PAL[3])).toBeGreaterThan(8);
-    expect(lum(EVO_LINE_TRACK)).toBeLessThan(lum(PAL[2]) - 10);
+    expect(EVO_LINE_TRACK).toBe(PAL[2]);
+    expect(lum(EVO_LINE_TRACK) - lum(PAL[3])).toBeGreaterThan(30);
+    expect(lum(PAL[0]) - lum(EVO_LINE_TRACK)).toBeGreaterThan(60);
   });
 });

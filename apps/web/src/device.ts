@@ -1,5 +1,5 @@
 import { TopTip, tipText, evoProgress, evoEta, type TopKey } from './topTip';
-import { STAT_KEYS, hudTarget, statHelp, evoHelp, EVO_HELP, EVO_LINE_TRACK } from './statHelp';
+import { STAT_KEYS, hudTarget, statHelp, evoHelp, EVO_HELP, EVO_LINE_TRACK, EVO_LINE_TRACK_SLEEP } from './statHelp';
 import { ANCHOR, PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_LABEL, FOOD_SPRITE, CUP_LIQUID, petSpriteKey, frontSprite, coinHtml } from './sprites';
 import { ACCESSORIES, OUTFITS, OUTFIT_IDS, isAccId } from '@chick/engine';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
@@ -863,7 +863,7 @@ export class Device {
     // HUD 下方的分隔線＝進化進度（彩蛋）：已完成的部分用原本的深色，剩下的用很接近的深色，仔細看才看得出來
     g.fillStyle = PAL[3]; g.fillRect(0, HUD - 1, W, 1);
     const evo = p && p.status === 'alive' ? evoProgress(p) : null;
-    if (evo) { const done = Math.round(W * evo.frac); g.fillStyle = EVO_LINE_TRACK; g.fillRect(done, HUD - 1, W - done, 1); }
+    if (evo) { const done = Math.round(W * evo.frac); g.fillStyle = p.sleeping ? EVO_LINE_TRACK_SLEEP : EVO_LINE_TRACK; g.fillRect(done, HUD - 1, W - done, 1); }
     g.fillStyle = PAL[1]; g.fillRect(0, GROUND, W, 1);
     for (let i = 0; i < W; i += 6) g.fillRect(i, GROUND + 2 + ((i / 6) % 2), 2, 1);
     if (this.ownerAway && p && p.status !== 'dead') {

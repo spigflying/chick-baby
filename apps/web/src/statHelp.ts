@@ -7,8 +7,10 @@ export const STAT_NAME: Record<StatKey, string> = { hunger: '飽足', happiness:
 export const HUD_CELL = { x0: 1, step: 24, w: 23, h: 13 };
 /** HUD 下方的分隔線（canvas y = 13）兼進化進度：點擊範圍上 2、下 3 格，方便手機點。 */
 export const EVO_HELP = 99, EVO_LINE_Y = 13, EVO_HIT = { y0: 11, y1: 17 };
-/** 進度線「還沒到」那段的顏色：比 PAL[3]（#0f380f）亮一點點的深綠。 */
-export const EVO_LINE_TRACK = '#24502a';
+/** 進度線「還沒到」那段的顏色：LCD 調色盤的中間色 PAL[2]（#306230），介於最深色和螢幕底色之間，一般看就分得出兩段。 */
+export const EVO_LINE_TRACK = '#306230';
+/** 睡覺時螢幕底色就是 PAL[2]，剩下那段改用介於 PAL[3] 和 PAL[2] 之間的顏色，線才不會斷掉。 */
+export const EVO_LINE_TRACK_SLEEP = '#1f4d20';
 export function hudTarget(x: number, y: number): number {
   if (y >= EVO_HIT.y0 && y < EVO_HIT.y1 && x >= 0 && x < 120) return EVO_HELP;
   return statAt(x, y);
