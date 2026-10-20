@@ -210,7 +210,7 @@ export class Device {
       const flash = this.fxHits.some((h) => h.u === x.u && now - h.t < 120);
       if (x.inv > 0 && !flash && this.frame % 2 && !this.frozen) continue; // 無敵中閃爍
       const n = speciesSprite(x.sp, this.arena && !x.out ? (f ? 2 : 'w') : 1), w = sw(n), h = sh(n);
-      const px = x.x + (x.atk > 0 && x.sw !== 'beam' ? x.dir * 2 : 0), py = x.y + 12 - h;
+      const px = x.x + 6 - w / 2 + (x.atk > 0 && x.sw !== 'beam' ? x.dir * 2 : 0), py = x.y + 12 - h; // 精靈置中在 12px 判定框上（判定框不變）
       const spectator = !!this.arena?.cur.fights.length && !x.fight;
       if (x.out) g.globalAlpha = 0.35; else if (spectator) g.globalAlpha = 0.4;
       if (x.u === this.ctx.me.id) this.outline(n, px, py, x.dir > 0);
