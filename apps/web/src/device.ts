@@ -209,8 +209,8 @@ export class Device {
     for (const x of fs) {
       const flash = this.fxHits.some((h) => h.u === x.u && now - h.t < 120);
       if (x.inv > 0 && !flash && this.frame % 2 && !this.frozen) continue; // 無敵中閃爍
-      const n = speciesSprite(x.sp, f && this.arena && !x.out ? 2 : 1), w = sw(n), h = sh(n);
-      const px = x.x + (x.atk > 0 && x.sw !== 'beam' ? x.dir * 2 : 0), py = x.y + 12 - h;
+      const n = speciesSprite(x.sp, this.arena && !x.out ? (f ? 2 : 'w') : 1), w = sw(n), h = sh(n);
+      const px = Math.max(0, Math.min(W - w, x.x + 6 - w / 2)) + (x.atk > 0 && x.sw !== 'beam' ? x.dir * 2 : 0), py = x.y + 12 - h; // 精靈置中在 12px 判定框上（判定框不變），靠牆時不超出畫面
       const spectator = !!this.arena?.cur.fights.length && !x.fight;
       if (x.out) g.globalAlpha = 0.35; else if (spectator) g.globalAlpha = 0.4;
       if (x.u === this.ctx.me.id) this.outline(n, px, py, x.dir > 0);
@@ -931,7 +931,7 @@ export class Device {
       if (this.frame % 3 === 0) { this.petX += this.petDir; if (this.petX < rg.min || this.petX > rg.max || Math.random() < 0.02) this.petDir *= -1; }
       this.petX = Math.max(rg.min, Math.min(rg.max, this.petX));
     }
-    spr(g, p.sleeping ? speciesSprite(pk, 's') : speciesSprite(pk, alt ? 2 : 1), this.petX, py, flip && !p.sleeping);
+    spr(g, p.sleeping ? speciesSprite(pk, 's') : speciesSprite(pk, alt ? 2 : 'w'), this.petX, py, flip && !p.sleeping);
     if (this.evoT > 0) this.drawEvolve(pw, ph, baseY);
     if (p.sleeping) { spr(g, 'z', this.petX + pw + 2, baseY - 6 - f * 3); spr(g, 'z', this.petX + pw + 8, baseY - 14 - f * 3); }
     if (p.sick) spr(g, 'skull', this.petX - 7, baseY - 6 + f);

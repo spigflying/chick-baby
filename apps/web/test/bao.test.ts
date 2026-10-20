@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ACCESSORIES } from '@chick/engine';
 import { S, ANCHOR, sw, sh, speciesSprite, frontSprite, petSpriteKey, COIN9 } from '../src/sprites';
 import { ACC_SPRITES } from '../src/bao-sprites';
+import { SPECIES_FRONT } from '../src/species-acc';
 
 describe('寶 sprites (v1.7)', () => {
   it('every engine accessory has side and front pixel data', () => {
@@ -14,15 +15,15 @@ describe('寶 sprites (v1.7)', () => {
     expect(S[n].length).toBeGreaterThan(S.chicken_1.length); expect(ANCHOR[n].oy).toBeGreaterThan(0); // 皇冠在頭上
     expect(S[n].join('')).not.toBe(S.chicken_1.join(''));
   });
-  it('crown hides the hair; walk frame 2 moves body accessories with the bob', () => {
-    const n1 = speciesSprite('chicken|crown', 1), n2 = speciesSprite('chicken|crown', 2);
-    expect(ANCHOR[n2].oy).toBe(ANCHOR[n1].oy - 1);
+  it('walk frames do not bob (Benson frames): accessories stay put on both walk frames', () => {
+    const n1 = speciesSprite('chicken|crown', 1), nw = speciesSprite('chicken|crown', 'w'), n2 = speciesSprite('chicken|crown', 2);
+    expect(ANCHOR[nw].oy).toBe(ANCHOR[n1].oy); expect(ANCHOR[n2].oy).toBe(ANCHOR[n1].oy);
   });
   it('other species get accessories composited on their own sprite', () => {
     expect(speciesSprite('duck|sword', 1)).toBe('duck_1|sword'); expect(speciesSprite('chicken', 's')).toBe('chicken_s');
   });
   it('front view for the status panel', () => {
-    const n = frontSprite('chicken|shades'); expect(S[n]).toBeDefined(); expect(ANCHOR[n].bw).toBe(16);
+    const n = frontSprite('chicken|shades'); expect(S[n]).toBeDefined(); expect(ANCHOR[n].bw).toBe(SPECIES_FRONT.chicken[0].length);
   });
   it('9×9 top-bar coin', () => { expect(COIN9).toHaveLength(9); for (const r of COIN9) expect(r).toHaveLength(9); });
 });
