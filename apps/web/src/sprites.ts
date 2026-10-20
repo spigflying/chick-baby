@@ -1,6 +1,7 @@
 // 雞（chicken = adult 精靈）圓頂頭（3 列收窄的弧形）＋正中央一根 1px 呆毛（尖端微捲），取代原本的雞冠（v1.5）
 import { ACC_SPRITES } from './bao-sprites';
 import { BENSON } from './species-sprites';
+import { POSE_ART, type Pose } from './pose-art';
 import { ACCESSORIES } from '@chick/engine';
 import { SPECIES_FRONT, HAIR_ROWS, FEET_FROM, SIDE_ANCHORS, SLEEP_ANCHORS, FRONT_ANCHORS, SIDE_EXTRA, SIDE_ART, FRONT_ART, coatPoints, type Anchor, type View } from './species-acc';
 // 由根目錄原型 script.js 移植的像素精靈（Game Boy 四階綠）
@@ -100,6 +101,7 @@ export function ensureComposite(name: string) {
   const [base, look = ''] = name.split('|');
   const sp0 = base.split('_')[0], front = base.endsWith('_front');
   const view: View = front ? 'front' : base.endsWith('_s') ? 'sleep' : 'side';
+  const pose: Pose = front ? 'front' : ({ '1': 'side', w: 'walk1', '2': 'walk2', s: 'sleep' } as Record<string, Pose>)[base.split('_')[1]] ?? 'side';
   const rows = front ? SPECIES_FRONT[sp0] : S[base];
   if (!rows) return;
   const ids = look.split(',').filter((id) => ACC_SPRITES[id]);
@@ -111,6 +113,8 @@ export function ensureComposite(name: string) {
     const v = front ? ACC_SPRITES[id].front : ACC_SPRITES[id].side;
     if (id === 'jacket') return { id, a: ACC_SPRITES[id], v: { back: [], front: coatPoints(sp0, rows, front, 0, view), fx: [] } }; // 依身形畫
     if (art[id]) return { id, a: ACC_SPRITES[id], v: { back: [], front: shift(art[id], [0, 0]), fx: [] } };
+    const pa = POSE_ART[sp0]?.[pose]?.[id]; // Benson 逐姿勢畫的披風／翅膀：直接用底圖座標
+    if (pa && pa.back.length + pa.front.length > 0) return { id, a: { ...ACC_SPRITES[id], nohair: false, nofeet: false }, v: { back: pa.back, front: pa.front, fx: [] } };
     const a0 = anchors[accAnchor(id)], ex = extra[id] ?? [0, 0], o: [number, number] = [a0[0] + ex[0], a0[1] + ex[1]];
     return { id, a: ACC_SPRITES[id], v: { back: shift(v.back, o), front: shift(v.front, o), fx: shift(v.fx, o) }, o };
   });
