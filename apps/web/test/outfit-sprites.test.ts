@@ -12,7 +12,7 @@ describe('purchased outfits are drawn on every species and view', () => {
       });
     }
     it(`${sp}: shades cover the eye pixel`, () => {
-      const eye: Record<string, [number, number]> = { chicken: [5, 6], duck: [6, 2], penguin: [5, 3], dino: [2, 3] };
+      const eye: Record<string, [number, number]> = { chicken: [5, 10], duck: [8, 9], penguin: [9, 9], dino: [10, 9] };
       const plain = S[`${sp}_1`], n = speciesSprite(`${sp}|shades`, 1), out = S[n];
       const [x, y] = eye[sp]; expect(plain[y][x]).not.toBe('.');
       const a = ANCHOR[n]; let changed = 0;

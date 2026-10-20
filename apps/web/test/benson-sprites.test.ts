@@ -12,10 +12,10 @@ describe('Benson sprites', () => {
       expect(SPECIES_FRONT[sp]).toEqual(b.front); expect(S[frontSprite(sp)]).toEqual(b.front);
     }
   });
-  it('only the 4 palette shades, fits 20×18, and side / walk / sleep share one size so they stand on the same ground line', () => {
+  it('only the 4 palette shades, fits 32×32, stores the left / right / back views, and side / walk / sleep share one size so they stand on the same ground line', () => {
     for (const sp of SP) {
       const b = BENSON[sp], frames = [b.side, b.walk1, b.walk2, b.sleep];
-      for (const f of [...frames, b.front]) { expect(f.length).toBeLessThanOrEqual(18); expect(f[0].length).toBeLessThanOrEqual(20); for (const r of f) expect(r).toMatch(/^[.0123]+$/); }
+      for (const f of [...frames, b.front, b.left, b.right, b.back]) { expect(f.length).toBeLessThanOrEqual(32); expect(f[0].length).toBeLessThanOrEqual(32); for (const r of f) expect(r).toMatch(/^[.0123]+$/); }
       for (const f of frames) { expect(f.length).toBe(b.side.length); expect(f[0].length).toBe(b.side[0].length); }
       expect(b.side[b.side.length - 1]).not.toMatch(/^\.+$/); // 裁掉了底下的透明列：腳踩在地上
     }
