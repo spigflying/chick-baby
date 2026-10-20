@@ -19,7 +19,7 @@ describe('visitors on the egg screen', () => {
     expect(presenceDiff([u('me'), u('a')], [u('me'), u('b')], 'me')).toEqual({ joined: ['Ub'], left: ['Ua'] });
   });
   it('picks sprites for alive / sleeping / egg / dead / no pet', () => {
-    expect(guestSprite(pet(), 0)).toBe('duck_1');
+    expect(guestSprite(pet(), 0)).toBe('duck_w');
     expect(guestSprite(pet(), 1)).toBe('duck_2');
     expect(guestSprite(pet({ sleeping: true }), 0)).toBe('duck_s');
     expect(guestSprite(pet({ status: 'egg' }), 0)).toBe('egg');

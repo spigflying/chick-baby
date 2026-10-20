@@ -1,7 +1,8 @@
 // 雞（chicken = adult 精靈）圓頂頭（3 列收窄的弧形）＋正中央一根 1px 呆毛（尖端微捲），取代原本的雞冠（v1.5）
-import { ACC_SPRITES, CHICKEN_FRONT } from './bao-sprites';
+import { ACC_SPRITES } from './bao-sprites';
+import { BENSON } from './species-sprites';
 import { ACCESSORIES } from '@chick/engine';
-import { SPECIES_FRONT, FRONT_HAIR_ROWS, SIDE_ANCHORS, FRONT_ANCHORS, SIDE_EXTRA, SIDE_ART, FRONT_ART, coatPoints, type Anchor } from './species-acc';
+import { SPECIES_FRONT, HAIR_ROWS, FEET_FROM, SIDE_ANCHORS, SLEEP_ANCHORS, FRONT_ANCHORS, SIDE_EXTRA, SIDE_ART, FRONT_ART, coatPoints, type Anchor, type View } from './species-acc';
 // 由根目錄原型 script.js 移植的像素精靈（Game Boy 四階綠）
 export const PAL = ['#9bbc0f', '#8bac0f', '#306230', '#0f380f'];
 export const S: Record<string, string[]> = {
@@ -41,37 +42,8 @@ export const S: Record<string, string[]> = {
   i_health: ['.33..33.','32233223','32122223','32222223','.322223.','..3223..','...33...','........']
 };
 
-// ===== 物種精靈（預設面向左；第 2 格由程式產生上下彈跳）=====
-const SPECIES_F1: Record<string, string[]> = {
-  chicken: S.adult,
-  duck: [
-    '....3333........','...300003.......','..30003003......','2222000003......','2222200003......',
-    '.333000003......','...3000003..33..','..30000000033003','.30000000000000 3'.replace(' ', '') ,
-    '.300022220000003','.300002222000003','..30000000000003.','...33333333333..','.....3....3.....','....22...22.....'],
-  penguin: [
-    '....33333.......','...3333333......','..333033333.....','.22333333333....','2223003333333...',
-    '..30000033333...','.3300000033333..','33300000003333 .'.replace(' ', ''),'3.30000000033.3.','..30000000033...',
-    '..30000000033...','..3300000033....','...33333333.....','...22....22.....','..222...222.....'],
-  dino: [
-    '..33333............','.3222223...........','3222222233.3.3.....','3203222223333333...','3222222222222223...',
-    '3222211222222223...','.33111122222222233.','...3111222222222223','..33111122222222233','..3.31112222222223.',
-    '....311112222223...','.....3111122223....','......33333333.....','......32...32......','.....332..332......'],
-};
-// 閉眼：[x, y, 顏色]（以第 1 格座標）
-const SLEEP_EYES: Record<string, [number, number, string][]> = {
-  chicken: [[4, 6, '3'], [5, 6, '3']],
-  duck: [[6, 2, '3'], [7, 2, '3']],
-  penguin: [[5, 2, '3'], [4, 3, '0'], [5, 3, '0']],
-  dino: [[2, 3, '3'], [3, 3, '3']],
-};
-function bob(rows: string[]) { const w = rows[0].length; return ['.'.repeat(w), ...rows.slice(0, -3), ...rows.slice(-2)]; }
-function normalize(rows: string[]) { const w = Math.max(...rows.map((r) => r.length)); return rows.map((r) => r.padEnd(w, '.')); }
-for (const [id, f1raw] of Object.entries(SPECIES_F1)) {
-  const f1 = normalize(f1raw), f2 = bob(f1);
-  const sl = f2.map((r) => [...r]);
-  for (const [x, y, c] of SLEEP_EYES[id]) if (sl[y + 1]) sl[y + 1][x] = c;
-  S[`${id}_1`] = f1; S[`${id}_2`] = f2; S[`${id}_s`] = sl.map((r) => r.join(''));
-}
+// ===== 物種精靈：Benson 的設計（面向左）。_1 站著（側面）、_w／_2 走路兩格、_s 睡覺 =====
+for (const [id, f] of Object.entries(BENSON)) { S[`${id}_1`] = f.side; S[`${id}_w`] = f.walk1; S[`${id}_2`] = f.walk2; S[`${id}_s`] = f.sleep; }
 export const SPECIES_LABEL: Record<string, string> = { chicken: '雞', duck: '鴨', penguin: '企鵝', dino: '恐龍' };
 S.i_home = ['....3....', '...323...', '..32223..', '.3222223.', '333333333', '.3111113.', '.3133313.', '.3133313.', '.3333333.'];
 S.i_wake = ['...3...', '3..3..3', '.3...3.', '..333..', '33313 33'.replace(' ', ''), '..333..', '.3...3.', '3..3..3'];
@@ -100,7 +72,7 @@ export function num(ctx: CanvasRenderingContext2D, n: number, x: number, y: numb
 /**
  * species 可以帶配件：`chicken|sword,bow`（伺服器的 spriteKey）。目前配件只對齊雞的精靈；其他物種先畫原本的樣子。
  */
-export function speciesSprite(species: string, kind: 1 | 2 | 's') {
+export function speciesSprite(species: string, kind: 1 | 2 | 'w' | 's') {
   const [sp0, look] = species.split('|');
   const sp = S[`${sp0}_1`] ? sp0 : 'chicken';
   if (!look) return `${sp}_${kind}`;
@@ -119,44 +91,43 @@ export function accAnchor(id: string): Anchor { return ITEM_ANCHOR[id] ?? SLOT_A
 /** 正面（狀態面板）：只有雞有正面精靈；其他物種回傳側面。 */
 export function frontSprite(species: string) {
   const [sp0, look] = species.split('|');
-  const sp = sp0 === 'chicken' || SPECIES_FRONT[sp0] ? sp0 : 'chicken';
+  const sp = SPECIES_FRONT[sp0] ? sp0 : 'chicken';
   const name = `${sp}_front|${look ?? ''}`; ensureComposite(name); return name;
 }
 /** 依 `base|a,b,c` 合成並登錄到 S／ANCHOR（快取）。 */
 export function ensureComposite(name: string) {
   if (S[name]) return;
   const [base, look = ''] = name.split('|');
-  const sp0 = base.split('_')[0], front = base.endsWith('_front'), kind = base.endsWith('_2') || base.endsWith('_s') ? 2 : 1;
-  const rows = front ? (sp0 === 'chicken' ? CHICKEN_FRONT : SPECIES_FRONT[sp0]) : S[base];
+  const sp0 = base.split('_')[0], front = base.endsWith('_front');
+  const view: View = front ? 'front' : base.endsWith('_s') ? 'sleep' : 'side';
+  const rows = front ? SPECIES_FRONT[sp0] : S[base];
   if (!rows) return;
-  const isChicken = sp0 === 'chicken';
   const ids = look.split(',').filter((id) => ACC_SPRITES[id]);
-  const anchors = (front ? FRONT_ANCHORS : SIDE_ANCHORS)[sp0] ?? SIDE_ANCHORS.chicken;
+  const anchors = (view === 'front' ? FRONT_ANCHORS : view === 'sleep' ? SLEEP_ANCHORS : SIDE_ANCHORS)[sp0] ?? SIDE_ANCHORS.chicken;
   const art = (front ? FRONT_ART : SIDE_ART)[sp0] ?? {}, extra = front ? {} : SIDE_EXTRA[sp0] ?? {};
-  const dyOf = (id: string) => (kind === 2 && !GROUNDED.has(id) ? 1 : 0); // 走路第 2 格：身體往下 1px，配件跟著動（地上的球、鞋子不動）
-  const shift = (l: any[], [ox, oy]: [number, number], dy: number) => l.map(([x, y, c]) => [x + ox, y + oy + dy, c] as [number, number, number | string]);
+  // Benson 的走路格身體不上下彈跳，配件不用跟著位移
+  const shift = (l: any[], [ox, oy]: [number, number]) => l.map(([x, y, c]) => [x + ox, y + oy, c] as [number, number, number | string]);
   const accs = ids.map((id) => {
-    const v = front ? ACC_SPRITES[id].front : ACC_SPRITES[id].side, dy = dyOf(id);
-    if (!isChicken && id === 'jacket') return { id, a: ACC_SPRITES[id], v: { back: [], front: coatPoints(sp0, rows, front, 0), fx: [] } }; // 依身形畫（rows 已含走路位移）
-    if (art[id]) return { id, a: ACC_SPRITES[id], v: { back: [], front: shift(art[id], [0, 0], dy), fx: [] } };
+    const v = front ? ACC_SPRITES[id].front : ACC_SPRITES[id].side;
+    if (id === 'jacket') return { id, a: ACC_SPRITES[id], v: { back: [], front: coatPoints(sp0, rows, front, 0, view), fx: [] } }; // 依身形畫
+    if (art[id]) return { id, a: ACC_SPRITES[id], v: { back: [], front: shift(art[id], [0, 0]), fx: [] } };
     const a0 = anchors[accAnchor(id)], ex = extra[id] ?? [0, 0], o: [number, number] = [a0[0] + ex[0], a0[1] + ex[1]];
-    return { id, a: ACC_SPRITES[id], v: { back: shift(v.back, o, dy), front: shift(v.front, o, dy), fx: shift(v.fx, o, dy) }, o };
+    return { id, a: ACC_SPRITES[id], v: { back: shift(v.back, o), front: shift(v.front, o), fx: shift(v.fx, o) }, o };
   });
   const g = new Map<string, [number, number, string]>();
   const put = (x: number, y: number, c: string) => g.set(`${x},${y}`, [x, y, c]);
   for (const { v } of accs) for (const [x, y, c] of v.back) put(x, y, String(c));
-  const hairRows = front ? FRONT_HAIR_ROWS[sp0] ?? -1 : isChicken ? 1 : -1;
-  const nohair = hairRows >= 0 && accs.some((a) => a.a.nohair), nofeet = isChicken && accs.some((a) => a.a.nofeet);
-  const hairTo = hairRows + (kind === 2 ? 1 : 0);
+  const hairTo = HAIR_ROWS[sp0]?.[view] ?? -1, feetFrom = FEET_FROM[sp0]?.[view] ?? 99;
+  const nohair = hairTo >= 0 && accs.some((a) => a.a.nohair), nofeet = accs.some((a) => a.a.nofeet);
   rows.forEach((r, y) => [...r].forEach((c, x) => {
     if (c === '.' || c === ' ') return;
     if (nohair && y <= hairTo) return;
-    if (nofeet && y >= 16) return;
+    if (nofeet && y >= feetFrom) return;
     put(x, y, c);
   }));
-  // 雞以外的側面：墨鏡的鏡腳超出頭的部分（底圖是空白）拿掉，免得浮在半空中
+  // 側面：墨鏡的鏡腳超出頭的部分（底圖是空白）拿掉，免得浮在半空中
   const empty = (x: number, y: number) => (rows[y]?.[x] ?? '.') === '.';
-  const clip = (id: string, o: [number, number] | undefined, x: number, y: number) => !isChicken && !front && id === 'shades' && !!o && x > 5 + o[0] + 3 && empty(x, y);
+  const clip = (id: string, o: [number, number] | undefined, x: number, y: number) => !front && id === 'shades' && !!o && x > 5 + o[0] + 3 && empty(x, y);
   const shadePx = new Set<string>();
   for (const { id, o, v } of accs) for (const [x, y, c] of v.front) if (!clip(id, o, x, y)) { put(x, y, String(c)); if (id === 'shades') shadePx.add(`${x},${y}`); }
   for (const { v } of accs) for (const [x, y, c] of v.fx) put(x, y, String(c));
@@ -170,7 +141,6 @@ export function ensureComposite(name: string) {
   for (const [x, y, c] of g.values()) out[y - y0][x - x0] = c;
   S[name] = out.map((r) => r.join('')); ANCHOR[name] = { ox: -x0, oy: -y0, bw, bh };
 }
-const GROUNDED = new Set(['shoes', 'soccer', 'skateboard', 'skates']);
 /** v1.7 頂部列金幣圖示（9×9，四階綠）。 */
 export const COIN9 = ['..33333..', '.3222223.', '321011123', '320111123', '321111123', '321111123', '321111223', '.3222223.', '..33333..'];
 let coinUrl = '';

@@ -98,7 +98,7 @@ export class StairsClient {
       else { g.fillStyle = p.brk > 0 && frame % 2 ? PAL[1] : PAL[2]; for (let i = 0; i < PW; i += 3) g.fillRect(x + i, y + (p.brk > 0 ? i % 2 : 0), 2, 3); }
     }
     const moving = pl.on != null && (pl.left || pl.right);
-    const name = speciesSprite(this.species, moving && Math.floor(frame / 4) % 2 ? 2 : 1);
+    const name = speciesSprite(this.species, moving ? (Math.floor(frame / 4) % 2 ? 2 : 'w') : 1);
     const pw = sw(name), ph = sh(name);
     const px = pl.x + this.corr.x + P.boxW / 2 - pw / 2, py = pl.y + this.corr.y + P.boxH - ph;
     if (!(pl.inv > 0 && frame % 4 < 2)) spr(g, name, px, py, pl.dir > 0);

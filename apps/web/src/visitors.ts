@@ -25,7 +25,7 @@ export function guestSprite(p: PetSummary | null, alt: number): string | null {
   if (!p) return null;
   if (p.status === 'dead') return 'ghost';
   if (p.status === 'egg') return 'egg';
-  return speciesSprite(petSpriteKey(p), p.sleeping ? 's' : alt ? 2 : 1);
+  return speciesSprite(petSpriteKey(p), p.sleeping ? 's' : alt ? 2 : 'w');
 }
 export function spriteW(name: string | null) { return name && S[name] ? sw(name) : 10; }
 export function spriteH(name: string | null) { return name && S[name] ? sh(name) : 6; }
