@@ -22,11 +22,17 @@ export const STAIRS_NOTICE: Record<string, string> = {
   INTERNAL: '伺服器出錯了，稍後再試',
 };
 export const stairsNotice = (code: string) => STAIRS_NOTICE[code] ?? code;
+export const RACE_NOTICE: Record<string, string> = {
+  RACE_BUSY: '已經有人發起或正在一起賽車', STAIRS_BUSY: '有人在下樓梯，等一下再一起賽車', FIGHT_BUSY: '有人在打架，等一下再一起賽車',
+  RACE_CLOSING: '快關門了，關門前 8 分鐘不開新比賽', GAME_CLOSED: '現在沒有開放', ALREADY_IN_MATCH: '你正在另一場比賽中', NOT_IN_HOME: '要在家裡才能邀請',
+  CANCELLED: '一起賽車取消了', INTERNAL: '伺服器出錯了，稍後再試', TRACK_LOCKED: '這個國家還沒解鎖',
+};
+export const raceNotice = (code: string) => RACE_NOTICE[code] ?? code;
 
-export interface StairsInvite { id: string; from: string; from_name: string; to: string[]; until: number; answered: boolean; count: number }
+export interface StairsInvite { id: string; from: string; from_name: string; to: string[]; until: number; answered: boolean; count: number; game?: 'stairs' | 'race'; track_name?: string }
 export function inviteHtml(v: StairsInvite, now: number): string {
   const s = Math.max(0, Math.ceil((v.until - now) / 1000));
-  return `<div class="it">${esc(v.from_name)} 邀大家一起下樓梯！</div><div class="ib"><button data-sacc="1">參加</button><button data-sacc="0">不要</button></div><div class="ic">${s} 秒後自動不參加</div>`;
+  return `<div class="it">${esc(v.from_name)} ${v.game === 'race' ? `邀大家一起賽車！${v.track_name ? `（${esc(v.track_name)}）` : ''}` : '邀大家一起下樓梯！'}</div><div class="ib"><button data-sacc="1">參加</button><button data-sacc="0">不要</button></div><div class="ic">${s} 秒後自動不參加</div>`;
 }
 
 /** 名次的中文說法。 */

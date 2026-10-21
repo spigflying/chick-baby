@@ -14,18 +14,25 @@
 - **賽季**：一個日曆月（台北時間）。換月時把上季存進 `race_seasons`，積分／勝場／解鎖／錦標賽進度歸零；獎金、零件、車款保留。排行榜只看本季。
 - **換匯**：1 金幣 → $500 賽車獎金；$1,000 → 1 金幣。每個方向每天（台北日）最多 50 枚，走金幣帳本（`race_exchange_in` / `race_exchange_out`）。
 - **關門保護**：關門前 8 分鐘不開新比賽（`RACE_CLOSING`）；比賽最長 9 分鐘。
-- **私人房間**：`race.create` 拿到 6 碼房號；朋友用 `race.join {code}` 加入；房主 `race.invite {share_code}` 邀請線上朋友（對方收到 `race.invited`）；房主 `race.start` 開賽（或 2 分鐘後自動開）。空位一樣由電腦補。
+- **一起賽車（跟一起下樓梯同一套流程）**：沒有公開配對、沒有房號。在家裡按「樓梯 → 一起賽車」，家裡其他在場的人收到同樣的邀請框（參加／不要，15 秒後自動不參加）。全部回覆或時間到，發起人＋參加的人一起跑，空位由灰色電腦車補到 20 台；賽道＝發起人目前的錦標賽站。家裡只有自己時直接單人跑。同一個家同時只能有一個邀請／比賽，和一起下樓梯、打架互斥。
+- **單人**：賽車頁按「單人出發」，不用在家裡，全部電腦車。
+- **跨執行個體**：邀請由「這個家目前有連線的最小 instance id」負責（同多人下樓梯，走 LISTEN/NOTIFY）；開賽後由開賽的執行個體模擬，輸入帶著 instance id 轉過去，畫面快照用 NOTIFY 廣播給所有執行個體上的參賽者，所以參賽者被帶到賽車頁、離開家也照樣比完。
 
 ## 車庫（TG2 結構）
 零件分 4 級（含原廠），要一級一級買：引擎、變速箱、乾地胎、雨胎、氮氣、前／側／後裝甲。車款 9 種（隼 GT 免費起步，最貴 F1 $160k），買過的可以隨時換，6 種免費塗裝。起始獎金 $15,000。
 
 ## API
 - REST：`GET /api/race/profile`、`POST /api/race/buy {kind,tier}|{car,paint?}`、`POST /api/race/exchange {dir:'in'|'out',coins}`、`GET /api/race/leaderboard/:track`。
-- WS：`race.join {track}|{code}`、`race.create {track}`、`race.start`、`race.invite {share_code}`、`race.input`、`race.leave`；伺服器送 `race.lobby`、`race.room`、`race.started`、`race.snap`（每 2 tick）、`race.ended`（含 `qualified`、`champion`、`standings`）。
+- WS：`race.invite`、`race.reply {invite, accept}`、`race.cancel`（在家裡）、`race.solo {track?}`、`race.input`、`race.leave`；伺服器送 `race.event`（kind = invite／reply／invite_cancel／start，同 `stairs.event`）、`race.notice`、`race.started`、`race.snap`（每 2 tick）、`race.ended`（含 `qualified`、`champion`、`standings`）。前端收到 `race.started` 時如果不在賽車頁，會自動帶過去。
 - 伺服器權威模擬（20 Hz），比賽中 `live.inMatch = true`。
 
+## 平衡（v6）
+- 升級效果收斂：極速 =（64 + 3.5×變速箱檔 + 1.5×引擎）× 車款係數；加速 = 13 + 2.5×引擎（+1 變速箱 ≥ 2）。
+- 電腦車速度 = 78 × 實力 × 賽道係數（0.78 + 0.055×國家 + 0.012×站）。
+- 模擬（會閃車的機器人，4 個種子）：原廠車台灣第 1 站約第 10 名；小升級約第 4 名（以前會直接贏好幾分鐘）；中升級＋彗星約 1–5 名；全滿 F1 通常第 1，但只領先 5–37 秒。
+
 ## 限制（原型）
-- 房間只存在單一 Cloud Run 執行個體的記憶體；邀請只送得到同一個執行個體上的連線。
+- 開賽的執行個體如果中途被關掉（部署、縮容），那場比賽中止，不結算。
 - 資料表：`race_profiles`、`race_results`、`race_seasons`（migration `0008_racing`，還沒部署）。
 
 ## 開發預覽

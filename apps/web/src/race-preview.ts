@@ -68,7 +68,7 @@ async function page() {
   const emit = (m: any) => handlers.forEach((h) => h(m));
   let sim: any = null, timer = 0;
   const live: any = { inMatch: false, inFight: false, inLobby: false, serverNow: () => Date.now(), on: (h: any) => { handlers.add(h); return () => handlers.delete(h); },
-    send: (m: any) => { if (m.type === 'race.input' && sim) setRaceInput(sim, 'me', m); if (m.type === 'race.join' || m.type === 'race.create') emit({ type: 'race.lobby', race_id: 'r1', track: m.track, starts_at: Date.now() + 6000, code: m.type === 'race.create' ? 'K7Q2PX' : null, host: 'me', players: [{ user_id: 'me', name: 'racer' }, { user_id: 'b', name: 'benson' }] }); return true; } };
+    send: (m: any) => { if (m.type === 'race.input' && sim) setRaceInput(sim, 'me', m);  return true; } };
   const w = window as any;
   w.__start = (track: string) => {
     sim = createRace(5, track, fillField([{ id: 'b', name: 'benson', car: 'muscle', color: 1, parts: prof.parts }, { id: 'me', name: 'racer', car: 'falcon', color: 0, parts: prof.parts as any }]));

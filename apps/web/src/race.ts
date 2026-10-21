@@ -9,7 +9,7 @@ const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
 const fmtMs = (ms: number | null) => ms === null ? '—' : `${Math.floor(ms / 60000)}'${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}"${String(Math.floor(ms / 10) % 100).padStart(2, '0')}`;
 const WEATHER: Record<string, string> = { clear: '晴', rain: '雨', night: '夜', snow: '雪', fog: '霧' };
-const ERR: Record<string, string> = { TRACK_LOCKED: '這個國家還沒解鎖（拿下前一國的國家冠軍）', INSUFFICIENT_RACE_CASH: '賽車獎金不夠', INSUFFICIENT_COINS: '金幣不夠', EXCHANGE_CAP: '今天的換匯額度用完了（50 枚）', TIER_LOCKED: '要先買前一級', ALREADY_OWNED: '已經有了', ALREADY_IN_MATCH: '你正在另一場比賽中', RACE_CLOSING: '快關門了，關門前 8 分鐘不開新比賽', GAME_CLOSING: '快關門了', ROOM_NOT_FOUND: '找不到這個房間', ROOM_FULL: '房間滿了', FORBIDDEN: '只有房主可以開始', NOT_FOUND: '找不到這個分享碼' };
+const ERR: Record<string, string> = { TRACK_LOCKED: '這個國家還沒解鎖（拿下前一國的國家冠軍）', INSUFFICIENT_RACE_CASH: '賽車獎金不夠', INSUFFICIENT_COINS: '金幣不夠', EXCHANGE_CAP: '今天的換匯額度用完了（50 枚）', TIER_LOCKED: '要先買前一級', ALREADY_OWNED: '已經有了', ALREADY_IN_MATCH: '你正在另一場比賽中', RACE_CLOSING: '快關門了，關門前 8 分鐘不開新比賽', GAME_CLOSING: '快關門了', GAME_CLOSED: '現在沒有開放', INTERNAL: '伺服器出錯了，稍後再試' };
 
 interface Snap { at: number; tick: number; countdown: number; cars: Map<string, any[]> }
 export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (s: string) => void): () => void {
@@ -32,7 +32,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   let attract: RaceState | null = null, frame = 0, raf = 0, dead = false;
   let race: { id: string; track: string; laps: number; len: number; cars: any[]; snaps: Snap[]; ended: any | null } | null = null;
   const keys = { gas: false, brake: false, left: false, right: false, nitro: false };
-  let seq = 0, lastSent = '', sendTimer = 0; let lobbyPlayers: string[] = [], lobbyStarts = 0, lobbyCode: string | null = null, lobbyHost: string | null = null, invite: any = null;
+  let seq = 0, lastSent = '', sendTimer = 0; let lobbyPlayers: string[] = [], lobbyStarts = 0;
 
   const setMatch = (on: boolean) => { if (live) live.inMatch = on; };
   async function load() {
@@ -47,27 +47,20 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     if (mode === 'results' && race?.ended && !race.ended.aborted) return showResults(race.ended);
     const head = `<p class="race-cash">賽車獎金 <b>${money(prof.cash)}</b>　積分 <b>${prof.points}</b>　勝場 ${prof.wins}/${prof.races}<br><span class="muted">賽季 ${esc(prof.season)}（每月重置積分與解鎖，獎金和零件保留）</span></p>`;
     if (mode === 'lobby' || mode === 'race') {
-      const priv = mode === 'lobby' && lobbyCode;
-      body.innerHTML = head + (priv ? `<h3>私人房間 <b class="code">${esc(lobbyCode)}</b></h3><p>玩家：${lobbyPlayers.map(esc).join('、')}</p>
-        <p><input id="rinv" placeholder="朋友的分享碼" maxlength="16"> <button id="rinvb">邀請</button></p>${lobbyHost === me.user.id ? '<button id="rstart" class="big">開始比賽</button>' : '<p class="muted">等房主開始…</p>'}` : `<p>${mode === 'lobby' ? '等待發車…' : '比賽進行中…'}</p>`) + `<button id="rleave">離開比賽</button>`;
+      body.innerHTML = head + `<p>${mode === 'lobby' ? '準備發車…' : '比賽進行中…'}</p><button id="rleave">離開比賽</button>`;
       (body.querySelector('#rleave') as HTMLElement).onclick = leave;
-      const ib = body.querySelector('#rinvb') as HTMLElement | null; if (ib) ib.onclick = () => live?.send({ type: 'race.invite', share_code: (body.querySelector('#rinv') as HTMLInputElement).value.trim() });
-      const sb = body.querySelector('#rstart') as HTMLElement | null; if (sb) sb.onclick = () => live?.send({ type: 'race.start' });
       return;
     }
     if (tab === 'cup') {
       const ct = cupTrack(prof.cup); const st = Object.entries(prof.cup.points ?? {}).sort((a: any, b: any) => b[1] - a[1]) as [string, number][];
-      body.innerHTML = head + (invite ? `<p class="invite">${esc(invite.from)} 邀你到私人房間（${esc(trackById(invite.track)?.name)}） <button id="rinvok">加入</button></p>` : '') +
+      body.innerHTML = head +
         COUNTRIES.map((c, ci) => { const lock = ci >= prof.unlocked; return `<h3>${lock ? '🔒 ' : ''}${esc(c.name)}${ci === prof.cup.country ? ' <span class="muted">← 目前</span>' : ''}</h3><ul class="tracks">${c.tracks.map((id) => { const t = trackById(id)!, cur = ct?.id === id; return `<li class="${t.id === sel ? 'sel' : ''} ${lock ? 'lock' : ''}" data-tr="${t.id}"><span>${t.raceIdx + 1}. <b>${esc(t.name)}</b> <span class="muted">${WEATHER[t.weather]}・${t.laps} 圈</span></span><span>${cur ? '錦標賽站' : ''}</span></li>`; }).join('')}</ul>`; }).join('') +
         `<p class="muted">從最後一名起跑，共 ${RACE_SLOTS} 台。前 ${QUALIFY_RANK} 名晉級下一站；前 6 名有獎金 ${PRIZES.map(money).join('/')} 和積分 ${POINTS.join('/')}。每個國家 ${RACES_PER_COUNTRY} 站，國家積分第一解鎖下一國。</p>
         ${st.length ? `<h3>${esc(COUNTRIES[prof.cup.country]?.name)} 國家積分（第 ${prof.cup.race + 1} 站）</h3>${standingsHtml(st)}` : ''}
-        <button id="rgo" class="big">出發：${esc(trackById(sel)!.name)}</button> <button id="rpriv">開私人房間</button>
-        <p><input id="rcode" placeholder="房號" maxlength="6" size="8"> <button id="rjoin">用房號加入</button></p>`;
+        <button id="rgo" class="big">單人出發：${esc(trackById(sel)!.name)}</button>
+        <p class="muted">想和朋友一起跑？到家裡按「玩 → 一起賽車」，在場的人會收到邀請（跟一起下樓梯一樣）；空位由灰色電腦車補滿 ${RACE_SLOTS} 台。</p>`;
       body.querySelectorAll('li[data-tr]').forEach((li) => (li as HTMLElement).onclick = () => { const id = (li as HTMLElement).dataset.tr!; if (trackById(id)!.countryIdx >= prof.unlocked) return toast(ERR.TRACK_LOCKED); sel = id; setAttract(); renderPanel(); });
       (body.querySelector('#rgo') as HTMLElement).onclick = () => join();
-      (body.querySelector('#rpriv') as HTMLElement).onclick = () => join({ type: 'race.create', track: sel });
-      (body.querySelector('#rjoin') as HTMLElement).onclick = () => join({ type: 'race.join', code: (body.querySelector('#rcode') as HTMLInputElement).value.trim().toUpperCase() });
-      const ok = body.querySelector('#rinvok') as HTMLElement | null; if (ok) ok.onclick = () => { const c = invite.code; invite = null; join({ type: 'race.join', code: c }); };
     } else if (tab === 'garage') {
       const st = carStats(prof.parts, prof.car);
       const partRow = (k: PartKind) => { const p = PARTS[k], lv = prof.parts[k], next = p.tiers[lv + 1];
@@ -100,18 +93,16 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   root.querySelectorAll('#rtabs button').forEach((b) => (b as HTMLElement).onclick = () => { tab = (b as HTMLElement).dataset.t!; renderPanel(); });
 
   // ---------- 連線 ----------
-  function join(extra: any = { type: 'race.join', track: sel }) {
-    if (!live?.send(extra)) return toast('連線中，請稍候');
-    mode = 'lobby'; setMatch(true); msg.textContent = extra.type === 'race.create' ? '建立私人房間…' : '尋找對手中…'; renderPanel();
+  function join() {
+    if (!live?.send({ type: 'race.solo', track: sel })) return toast('連線中，請稍候');
+    mode = 'lobby'; setMatch(true); lobbyPlayers = [me.user.display_name]; lobbyStarts = Date.now() + 1000; msg.textContent = '準備發車…'; renderPanel();
   }
-  function leave() { live?.send({ type: 'race.leave' }); race = null; mode = 'menu'; lobbyCode = null; setMatch(false); msg.textContent = '已離開比賽'; renderPanel(); }
+  function leave() { live?.send({ type: 'race.leave' }); race = null; mode = 'menu'; setMatch(false); msg.textContent = '已離開比賽'; renderPanel(); }
+  function onStarted(m: any) { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null }; mode = 'race'; setMatch(true); const hum = m.cars.filter((c: any) => !c.ai).length; msg.textContent = `${trackById(m.track)!.name}・${hum > 1 ? `${hum} 位玩家＋` : ''}電腦 ${m.cars.length - hum} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
   const off = live?.on((m) => {
-    if (m.type === 'error' && ['race.join', 'race.create', 'race.start', 'race.invite'].includes(m.for)) { if (m.for !== 'race.invite' && m.for !== 'race.start') { mode = 'menu'; setMatch(false); } msg.textContent = ERR[m.code] ?? m.code; toast(ERR[m.code] ?? m.code); renderPanel(); }
-    else if (m.type === 'race.room') { lobbyCode = m.code; renderPanel(); }
-    else if (m.type === 'race.invited') { invite = m; toast(`${m.from} 邀你賽車（房號 ${m.code}）`); if (mode === 'menu') renderPanel(); }
-    else if (m.type === 'race.invite_sent') toast(m.online ? '邀請已送出' : '對方目前不在線上');
-    else if (m.type === 'race.lobby') { const first = mode !== 'lobby'; mode = 'lobby'; lobbyPlayers = m.players.map((p: any) => p.name); lobbyStarts = m.starts_at; lobbyCode = m.code; lobbyHost = m.host; const s = Math.max(0, Math.ceil((m.starts_at - (live?.serverNow() ?? Date.now())) / 1000)); msg.textContent = `等待玩家 ${m.players.length} 人（${s} 秒後發車，空位由電腦補上）`; if (first || m.code) renderPanel(); }
-    else if (m.type === 'race.started') { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null }; mode = 'race'; lobbyCode = null; setMatch(true); msg.textContent = `${trackById(m.track)!.name}・${m.cars.length} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
+    if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('race.')) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; toast(ERR[m.code] ?? m.code); renderPanel(); }
+    else if (m.type === 'race.notice' && !m.home_id) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; renderPanel(); }
+    else if (m.type === 'race.started') onStarted(m);
     else if (m.type === 'race.snap' && race && m.race_id === race.id) {
       race.snaps.push({ at: performance.now(), tick: m.tick, countdown: m.countdown, cars: new Map(m.cars.map((c: any[]) => [c[0], c])) }); if (race.snaps.length > 6) race.snaps.shift();
     }
@@ -195,7 +186,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     zh(x, `${t.country}　${t.name}`, 22, 44, 0, 12);
     const km = (trackSegs(t.id).length * SEG_LEN / 1000).toFixed(1);
     zh(x, `賽道長 ${km} km × ${t.laps} 圈`, 22, 62, 1); zh(x, `天氣：${WEATHER[t.weather]}　冠軍獎金 ${money(prizeFor(1))}`, 22, 78, 1);
-    zh(x, `玩家 ${lobbyPlayers.length} 人＋電腦 ${RACE_SLOTS - lobbyPlayers.length} 台${lobbyCode ? `　房號 ${lobbyCode}` : ''}`, 22, 94, 1);
+    zh(x, `玩家 ${lobbyPlayers.length} 人＋電腦 ${RACE_SLOTS - lobbyPlayers.length} 台`, 22, 94, 1);
     lobbyPlayers.slice(0, 4).forEach((n, i) => zh(x, `・${n}`, 22 + (i % 2) * 90, 112 + Math.floor(i / 2) * 15, 0));
     drawMinimap(x, { track: t, me: null, cars: [], tick: 0, countdown: 0, laps: t.laps, len: 1, rank: 0, frame, hud: false }, W - 86, 22, 64, 56);
     const left = Math.max(0, Math.ceil((lobbyStarts - (live?.serverNow() ?? Date.now())) / 1000));
@@ -214,5 +205,6 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     zh(x, e.champion ? '國家冠軍！下一個國家解鎖' : e.country_done ? `本國結束：積分第 ${myPos} 名` : `國家積分第 ${myPos || '-'} 名（${st.find((s) => s[0] === ME)?.[1] ?? 0} 分）`, 26, H - 26, 0);
   }
   setAttract(); loop(); void load();
+  const pend = (window as any).__pendingRace; if (pend) { (window as any).__pendingRace = null; onStarted(pend); } // 在家裡接受邀請後被帶過來
   return () => { dead = true; cancelAnimationFrame(raf); clearInterval(sendTimer); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); off?.(); if (mode === 'lobby' || mode === 'race') live?.send({ type: 'race.leave' }); setMatch(false); };
 }

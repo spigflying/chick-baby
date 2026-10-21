@@ -8,11 +8,10 @@ import { fastForwardRace, inRace, startRaceLoop } from '../src/racing';
 import { partPrice, prizeFor, RACE_SLOTS, seasonOf, setRaceInput, TRACKS } from '@chick/engine';
 import { CLOSING_GUARD_MS } from '../src/racing';
 
-process.env.RACE_LOBBY_MS = '300';
 const { db } = createDb();
 const bus = new Bus();
 let app: Awaited<ReturnType<typeof buildApp>>['app'];
-beforeAll(async () => { await migrateToLatest(db as any); await bus.start(); ({ app } = await buildApp(db, bus, { logger: false })); loop = startRaceLoop(db); });
+beforeAll(async () => { await migrateToLatest(db as any); await bus.start(); ({ app } = await buildApp(db, bus, { logger: false })); loop = startRaceLoop(); });
 let loop: NodeJS.Timeout;
 afterAll(async () => { clearInterval(loop); await app.close(); await bus.stop(); await db.destroy(); });
 beforeEach(async () => {
@@ -72,17 +71,18 @@ describe('racing (server) v5', () => {
     const arch = await (db as any).selectFrom('race_seasons').selectAll().where('user_id', '=', a.id).execute();
     expect(arch[0].season).toBe('2000-01'); expect(arch[0].points).toBe(99);
   });
-  it('public race: 20 cars, humans start last, settles flat prize + points + cup', async () => {
+  it('solo race (no home needed): 20 cars, 19 grey AI, human starts last; settles flat prize + points + cup', async () => {
     const a = await login('racer2');
     const w = await openWs(a.cookie);
-    w.ws.send(JSON.stringify({ type: 'race.join', track: 'jp1' }));
+    w.ws.send(JSON.stringify({ type: 'race.solo', track: 'jp1' }));
     expect((await w.wait((m) => m.type === 'error')).code).toBe('TRACK_LOCKED');
-    w.ws.send(JSON.stringify({ type: 'race.join', track: 'tw1' }));
-    await w.wait((m) => m.type === 'race.lobby');
+    w.ws.send(JSON.stringify({ type: 'race.solo' })); // 預設＝目前錦標賽站
     const st = await w.wait((m) => m.type === 'race.started');
-    expect(st.cars.length).toBe(RACE_SLOTS); expect(st.cars.filter((c: any) => c.ai).length).toBe(19);
+    expect(st.track).toBe('tw1'); expect(st.cars.length).toBe(RACE_SLOTS); expect(st.cars.filter((c: any) => c.ai).length).toBe(19);
+    expect(st.cars.every((c: any) => !c.ai || c.car === 'ai')).toBe(true);
     expect(st.cars[st.cars.length - 1].id).toBe(a.id);
     expect(inRace(a.id)).toBe(true);
+    w.ws.send(JSON.stringify({ type: 'race.solo' })); expect((await w.wait((m) => m.type === 'error' && m.code === 'ALREADY_IN_MATCH')).for).toBe('race.solo');
     await fastForwardRace(st.race_id, drive(a.id));
     const end = await w.wait((m) => m.type === 'race.ended');
     expect(end.ranking.length).toBe(20); expect(end.me.prize).toBe(prizeFor(end.me.rank)); expect(end.me.qualified).toBe(end.me.rank <= 10);
@@ -92,22 +92,35 @@ describe('racing (server) v5', () => {
     const lb = (await a.call('GET', '/race/leaderboard/tw1')).json; expect(lb.best.length).toBe(end.me.time_ms === null ? 0 : 1); expect(lb.championship.length).toBe(1);
     expect(inRace(a.id)).toBe(false); w.ws.close();
   });
-  it('private room: create code, friend joins + invite, host starts', async () => {
-    const a = await login('host'), b = await login('friend');
-    const wa = await openWs(a.cookie), wb = await openWs(b.cookie);
-    wa.ws.send(JSON.stringify({ type: 'race.create', track: 'tw1' }));
-    const { code } = await wa.wait((m) => m.type === 'race.room'); expect(code).toMatch(/^[A-Z0-9]{6}$/);
-    const sc = (await (db as any).selectFrom('users').select('share_code').where('id', '=', b.id).executeTakeFirst()).share_code;
-    wa.ws.send(JSON.stringify({ type: 'race.invite', share_code: sc }));
-    const inv = await wb.wait((m) => m.type === 'race.invited'); expect(inv.code).toBe(code);
-    wb.ws.send(JSON.stringify({ type: 'race.join', code }));
-    await wa.wait((m) => m.type === 'race.lobby' && m.players.length === 2);
-    wb.ws.send(JSON.stringify({ type: 'race.start' })); expect((await wb.wait((m) => m.type === 'error')).code).toBe('FORBIDDEN');
-    wa.ws.send(JSON.stringify({ type: 'race.start' }));
-    const st = await wa.wait((m) => m.type === 'race.started'); expect(st.cars.filter((c: any) => !c.ai).length).toBe(2);
+  it('home invite (same flow as multi stairs): accept / decline; accepted race together, AI fill to 20; alone = solo', async () => {
+    const a = await login('host'), b = await login('friend'), c = await login('shy');
+    const home = (await a.call('GET', '/me')).json.home.id;
+    const wa = await openWs(a.cookie), wb = await openWs(b.cookie), wc = await openWs(c.cookie);
+    wa.ws.send(JSON.stringify({ type: 'race.invite' })); expect((await wa.wait((m) => m.type === 'error')).code).toBe('NOT_IN_HOME');
+    for (const w of [wa, wb, wc]) w.ws.send(JSON.stringify({ type: 'home.join', home_id: home }));
+    await wc.wait((m) => m.type === 'home.presence' && m.users.length === 3);
+    wa.ws.send(JSON.stringify({ type: 'race.invite' }));
+    const inv = await wb.wait((m) => m.type === 'race.event' && m.kind === 'invite');
+    expect(inv.from).toBe(a.id); expect(inv.to.sort()).toEqual([b.id, c.id].sort()); expect(inv.track).toBe('tw1');
+    await wc.wait((m) => m.type === 'race.event' && m.kind === 'invite');
+    // 邀請中：同一個家不能再開下樓梯
+    wb.ws.send(JSON.stringify({ type: 'stairs.invite' })); const sn = await wb.wait((m) => m.type === 'stairs.notice' || (m.type === 'error' && m.for === 'stairs.invite')); expect(sn.code).toBe('FIGHT_BUSY');
+    wb.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: true }));
+    wc.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: false }));
+    const st = await wa.wait((m) => m.type === 'race.started'); await wb.wait((m) => m.type === 'race.started');
+    const humans = st.cars.filter((x: any) => !x.ai).map((x: any) => x.id).sort();
+    expect(humans).toEqual([a.id, b.id].sort()); expect(st.cars.length).toBe(20);
+    const ev = await wc.wait((m) => m.type === 'race.event' && m.kind === 'start'); expect(ev.users.sort()).toEqual(humans);
+    expect(wc.msgs.some((m) => m.type === 'race.started')).toBe(false);
     await fastForwardRace(st.race_id, (s) => { drive(a.id)(s); drive(b.id)(s); });
-    await wb.wait((m) => m.type === 'race.ended');
-    wa.ws.close(); wb.ws.close();
+    const ea = await wa.wait((m) => m.type === 'race.ended'), eb = await wb.wait((m) => m.type === 'race.ended');
+    expect(ea.me.user_id).toBe(a.id); expect(eb.me.user_id).toBe(b.id);
+    // 家裡只剩自己 → 邀請直接變單人
+    wa.msgs.length = 0; wb.ws.terminate(); wc.ws.terminate();
+    await wa.wait((m) => m.type === 'home.presence' && m.users.length === 1); wa.ws.send(JSON.stringify({ type: 'race.invite' }));
+    const solo = await wa.wait((m) => m.type === 'race.started'); expect(solo.cars.filter((x: any) => !x.ai).length).toBe(1);
+    await fastForwardRace(solo.race_id); await wa.wait((m) => m.type === 'race.ended');
+    wa.ws.close();
   });
   it('closing guard constant is 8 minutes', () => { expect(CLOSING_GUARD_MS).toBe(480000); });
 });

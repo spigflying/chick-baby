@@ -58,8 +58,8 @@ export function carStats(partsIn: Partial<Parts>, carId = 'falcon'): CarStats {
   const tough = (c.tough - 1) * 0.4;
   const arm = (lv: number) => Math.max(0, Math.min(0.75, lv * 0.2 + tough));
   return {
-    topSpeed: (62 + gear * 6 + p.engine * 2) * c.top,       // 約 223 → 317 km/h
-    accel: (13 + p.engine * 3.5 + (p.gearbox >= 2 ? 1.5 : 0)) * c.accel,
+    topSpeed: (64 + gear * 3.5 + p.engine * 1.5) * c.top,   // 平衡：升級幫助有限，約 230 → 285 km/h（再乘車款）
+    accel: (13 + p.engine * 2.5 + (p.gearbox >= 2 ? 1 : 0)) * c.accel,
     grip: (1 + p.dry * 0.18) * c.grip,
     wetGrip: (0.62 + p.wet * 0.17) * c.grip,
     nitroBoost: 1.22 + p.nitro * 0.09,
@@ -98,7 +98,7 @@ function makePieces(seed: number, hard: number): Piece[] {
 }
 export const COUNTRIES: Country[] = COUNTRY_DEFS.map(([id, name, ts]) => ({ id, name, tracks: ts.map((t) => t[0]) }));
 export const TRACKS: Track[] = COUNTRY_DEFS.flatMap(([cid, cname, ts], ci) => ts.map(([id, name, scenery, weather, laps, seed], ri) => ({
-  id, name, country: cname, countryId: cid, countryIdx: ci, raceIdx: ri, scenery, weather, laps, ai: 0.76 + ci * 0.06 + ri * 0.01, pieces: makePieces(seed, ci),
+  id, name, country: cname, countryId: cid, countryIdx: ci, raceIdx: ri, scenery, weather, laps, ai: 0.78 + ci * 0.055 + ri * 0.012, pieces: makePieces(seed, ci),
 })));
 export const trackById = (id: string) => TRACKS.find((t) => t.id === id) ?? null;
 export interface Segment { curve: number; y: number }
@@ -185,7 +185,7 @@ export function createRace(seed: number, trackId: string, entrants: Entrant[], d
   const cars: RaceCar[] = order.map(({ e, form }, i) => {
     const st = carStats(e.parts ?? STOCK_PARTS, e.ai ? 'falcon' : e.car);
     const skill = t.ai * difficulty * form;
-    if (e.ai) { st.topSpeed = 76 * skill; st.accel = 17 * skill; st.grip = 1.15 + 0.1 * form; st.wetGrip = 1.0 + 0.1 * form; st.nitroBoost = 1.3; st.armor = { F: 0.3, S: 0.3, R: 0.3 }; }
+    if (e.ai) { st.topSpeed = 78 * skill; st.accel = 17 * skill; st.grip = 1.15 + 0.1 * form; st.wetGrip = 1.0 + 0.1 * form; st.nitroBoost = 1.3; st.armor = { F: 0.3, S: 0.3, R: 0.3 }; }
     return { id: e.id, name: e.name, ai: !!e.ai, car: e.ai ? 'ai' : (e.car ?? 'falcon'), color: e.color ?? i % PAINTS,
       z: -(Math.floor(i / 2) * 10) - 6, x: i % 2 ? 0.45 : -0.45, speed: 0, damage: 0, nitro: NITRO_PER_RACE, nitroT: 0, lap: 0,
       finishedTick: null, stats: st, input: { ...NO_INPUT }, prevNitro: false, nitroQ: false,

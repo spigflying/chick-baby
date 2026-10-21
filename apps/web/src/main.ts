@@ -285,6 +285,8 @@ function startLive() {
     else if (m.type === 'home.state' && device?.home && m.home.id === device.home.id) device.setHome(m);
     else if (m.type === 'home.kicked' && device?.home?.id === m.home_id) { toast('主人變更了存取設定，你被請出去了'); nav('/'); }
     else if (m.type === 'wallet.updated') setWallet(m.balance);
+    // 一起賽車開跑（在家裡接受邀請的）：帶到賽車頁，頁面接手這場比賽
+    else if (m.type === 'race.started' && location.pathname !== '/race') { (window as any).__pendingRace = m; live!.inLobby = false; nav('/race'); }
     else if (m.type === 'game.closing') toast('小雞 5 分鐘後要睡覺囉～');
   });
   live.start();
