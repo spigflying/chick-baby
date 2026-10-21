@@ -39,7 +39,8 @@ export interface MultiResultRow { user_id: string; name: string; num: number; ra
 export function multiResultHtml(r: { aborted?: boolean; error?: string; time_up?: boolean; closing?: boolean; players: MultiResultRow[]; me: MultiResultRow | null }): string {
   if (r.aborted || r.error) return `<div class="mt">— 遊戲中止 —</div><p>${r.error ? '結算失敗，這場不計分。' : '伺服器維護中，這場不計分。'}</p><div class="mi back on">✕ 離開</div>`;
   const head = r.time_up ? (r.closing ? '— 快關門了，時間到！ —' : '— 時間到！ —') : '— 一起下樓梯 —';
-  const rows = r.players.map((p) => `<div class="wide brow${p.user_id === r.me?.user_id ? ' mine' : ''}"><span>${p.rank}. ${esc(p.name)}${causeText(p) ? `<small>${esc(causeText(p))}</small>` : ''}</span><em>${p.floor} 樓 +${p.coins}</em></div>`).join('');
+  // 出局原因另起一行（名字長時不會被截掉）
+  const rows = r.players.map((p) => `<div class="wide brow${p.user_id === r.me?.user_id ? ' mine' : ''}"><span>${p.rank}. ${esc(p.name)}</span><em>${p.floor} 樓 +${p.coins}</em></div>${causeText(p) ? `<div class="bwhy">${esc(causeText(p))}</div>` : ''}`).join('');
   const mine = r.me ? `<div class="wide"><b>${rankText(r.me.rank)}</b><span>${coinHtml(r.me.coins)}</span></div>` : '';
   return `<div class="board"><div class="mt">${head}</div><div class="blist">${rows}</div>${mine}<div class="mi back on">✕ 離開</div></div>`;
 }

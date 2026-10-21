@@ -4,7 +4,7 @@ import { ANCHOR, PAL, S, spr, sw, sh, num, speciesSprite, spriteCanvas, SPECIES_
 import { ACCESSORIES, OUTFITS, OUTFIT_IDS, isAccId } from '@chick/engine';
 import { GuestWalkers, guestsOf, guestSprite, lanes, spriteH, spriteW, type PresenceUser } from './visitors';
 import { drawShell, SHELL_COLORS, eggE, EGG_SAFE_E } from './shell';
-import { fitWidth } from './eggfit';
+import { fitWidth, FIT_KEEP_EGG } from './eggfit';
 import { accessoryLine } from './accLine';
 import { act, api, errText } from './api';
 import { savePetCache } from './sleep';
@@ -350,8 +350,9 @@ export class Device {
   paintShell(sc: { palette: string[]; rim: string }) { this.shellSc = sc; drawShell(this.$('canvas.shell') as HTMLCanvasElement, sc.palette, sc.rim); }
   /**
    * 讓蛋殼永遠包住畫面，蛋的比例固定 40:56（不拉長）。依序嘗試：
-   * 畫面寬度在蛋寬 55–56% 之間微調 → 整顆蛋等比例放大（最多到視窗寬 96%，頁面可捲動）
-   * → 精簡模式 1（戰鬥按鈕 2 列、按鈕高 36px）→ 精簡模式 2（字再小一點）。
+   * 原本大小：畫面寬度在蛋寬 55–56% 之間微調 → 精簡模式 1（戰鬥按鈕 2 列、按鈕高 36px）→ 精簡模式 2（字再小一點）
+   * → 畫面縮窄到蛋寬的 FIT_KEEP_EGG；都放不下才把整顆蛋等比例放大（最多到視窗寬 96%，頁面可捲動）。
+   * v1.8：先試精簡模式再放大——進別人家（多了戰鬥按鈕列）時蛋不會整個變大。
    */
   fitEgg() {
     const dev = this.el;
@@ -359,13 +360,13 @@ export class Device {
     const base = dev.getBoundingClientRect().width; if (!base) return;
     const maxW = Math.max(base, Math.min(document.documentElement.clientWidth * 0.96, 900));
     const done = () => { this.fitLcdH = this.$('.lcd').offsetHeight; };
-    for (const level of [0, 1, 2]) {
-      dev.classList.toggle('fit1', level >= 1); dev.classList.toggle('fit2', level >= 2);
-      for (let w = base; ; w = Math.min(maxW, w * 1.08)) {
-        dev.style.width = w === base ? '' : `${Math.round(w)}px`;
-        if (this.fitInner(0.55)) return done();
-        if (w >= maxW) break;
-      }
+    const level = (n: number) => { dev.classList.toggle('fit1', n >= 1); dev.classList.toggle('fit2', n >= 2); };
+    for (const n of [0, 1, 2]) { level(n); if (this.fitInner(0.55)) return done(); }
+    if (this.fitInner(FIT_KEEP_EGG)) return done(); // 蛋維持原本大小，畫面窄一點
+    for (let w = base * 1.08; ; w = Math.min(maxW, w * 1.08)) {
+      dev.style.width = `${Math.round(w)}px`;
+      if (this.fitInner(0.55)) return done();
+      if (w >= maxW) break;
     }
     dev.style.width = `${Math.round(maxW)}px`; this.fitInner(0.3); done(); // 最後手段：畫面再窄一點
   }
@@ -867,7 +868,8 @@ export class Device {
     lab.hidden = true; bar.hidden = false; this.el.classList.add('playing');
     const P = m.params;
     const hh = Math.min(h0 - bar.offsetHeight + 22, Math.round(this.cv.offsetWidth * P.height / P.width));
-    this.cv.width = P.width; this.cv.height = P.height; this.cv.style.height = hh + 'px'; this.cv.style.width = Math.round(hh * P.width / P.height) + 'px';
+    // 寬度用 min(100%, …)：進下樓梯後按鈕列變了、蛋會重新量一次大小（fitEgg），畫面變窄時畫布不能超出液晶框
+    this.cv.width = P.width; this.cv.height = P.height; this.cv.style.height = 'auto'; this.cv.style.width = `min(100%, ${Math.round(hh * P.width / P.height)}px)`;
     const multi = m.mode === 'multi';
     this.sinvite = null; this.showSInvite(); this.setLobby(false);
     const mine = multi ? m.players.find((p: any) => p.user_id === this.ctx.me.id) : null;

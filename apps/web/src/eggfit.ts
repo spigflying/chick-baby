@@ -1,5 +1,7 @@
 /** 畫面寬度（佔蛋寬的比例）的上下限。 */
 export const FIT_MAX = 0.56, FIT_MIN = 0.3;
+/** 為了讓蛋維持原本大小（不放大），畫面最窄可以縮到蛋寬的多少。 */
+export const FIT_KEEP_EGG = 0.36;
 /** 二分搜尋：fits(w) 隨 w 單調（越窄越容易放進蛋裡），回傳能放進去的最大寬度；全都放不進去時回傳最小值。 */
 export function fitWidth(fits: (w: number) => boolean, max = FIT_MAX, min = FIT_MIN, steps = 9): number {
   if (fits(max)) return max;

@@ -14,7 +14,7 @@ describe('M2 一起下樓梯 (web helpers)', () => {
       { user_id: 'c', name: 'C寶', num: 3, rank: 3, floor: 3, coins: 5, cause: 'left', killed_by_name: null },
     ];
     const h = multiResultHtml({ players, me: players[1] });
-    expect(h).toContain('1. A寶（阿）'); expect(h).toContain('被A寶推'); expect(h).not.toContain('<small></small>'); expect(h).not.toContain('目前'); expect(h).toContain('離開'); expect(h).toContain('12 樓 +8');
+    expect(h).toContain('1. A寶（阿）'); expect(h).toContain('<div class="bwhy">被A寶推</div>'); expect(h).not.toContain('<small'); expect(h).not.toContain('目前'); expect(h).toContain('離開'); expect(h).toContain('12 樓 +8');
     expect(h).toContain('brow mine'); expect(h).toContain(rankText(2));
     expect(multiResultHtml({ aborted: true, players: [], me: null })).toContain('遊戲中止');
   });

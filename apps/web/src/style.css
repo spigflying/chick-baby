@@ -152,6 +152,7 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .menu .brow{font-size:.9em}
 .menu .brow span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 .menu .brow em{white-space:nowrap}
+.menu .bwhy{font-size:.75em;opacity:.75;padding-left:1.4em;margin-top:-1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* v1.6.3 新版本提示：右上角小型提示，不遮畫面、沒有遮罩 */
 .update-toast{position:fixed;right:6px;top:6px;z-index:20;max-width:min(64vw,250px);background:var(--g3);color:var(--g0);border:3px solid #000;box-shadow:3px 3px 0 #000;font-family:var(--px);font-size:11px;padding:3px 4px;image-rendering:pixelated}

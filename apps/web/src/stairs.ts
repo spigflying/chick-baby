@@ -93,7 +93,7 @@ export class StairsClient {
     if (err <= 8) { this.corr.x += dx; this.corr.y += dy; } else { this.corr.x = this.corr.y = 0; this.stats.snaps++; }
   }
   draw(g: CanvasRenderingContext2D) {
-    const s = this.state, P = this.P, W = P.width, GH = P.height, PW = P.platW, frame = this.frame;
+    const s = this.state, P = this.P, W = P.width, GH = P.height, frame = this.frame;
     const pl = s.players[this.me];
     g.fillStyle = PAL[0]; g.fillRect(0, 0, W, GH);
     g.fillStyle = PAL[3]; g.fillRect(0, 0, W, 7);
@@ -103,7 +103,7 @@ export class StairsClient {
     if (left !== null) { const x0 = W / 2 - 9, ss = String(left % 60).padStart(2, '0'); num(g, Math.floor(left / 60), x0, 1, 0); g.fillStyle = PAL[0]; g.fillRect(x0 + 4, 2, 1, 1); g.fillRect(x0 + 4, 4, 1, 1); num(g, +ss[0], x0 + 6, 1, 0); num(g, +ss[1], x0 + 10, 1, 0); }
     g.fillStyle = PAL[2]; for (let x = 0; x < W; x += 4) { g.fillRect(x, 7, 4, 1); g.fillRect(x + 1, 8, 2, 1); g.fillRect(x + 1, 9, 1, 1); }
     for (const p of s.plats) {
-      const x = Math.round(p.x), y = Math.round(p.y);
+      const x = Math.round(p.x), y = Math.round(p.y), PW = p.w ?? this.P.platW; // 多人局的起始平台是全寬
       if (p.type === 'normal') { g.fillStyle = PAL[3]; g.fillRect(x, y, PW, 3); g.fillStyle = PAL[1]; g.fillRect(x + 1, y + 1, PW - 2, 1); }
       else if (p.type === 'spiky') { g.fillStyle = PAL[3]; g.fillRect(x, y + 1, PW, 2); for (let i = 0; i < PW; i += 3) g.fillRect(x + i + 1, y - 1, 1, 2); }
       else if (p.type === 'conveyor') { g.fillStyle = PAL[3]; g.fillRect(x, y, PW, 3); g.fillStyle = PAL[0]; for (let i = 0; i < PW; i += 4) g.fillRect(x + ((i + Math.floor(s.tick / 3) * p.dir) % PW + PW) % PW, y + 1, 2, 1); }
@@ -120,13 +120,18 @@ export class StairsClient {
     if (this.ended || s.over) { g.fillStyle = PAL[3]; g.fillRect(18, 34, 60, 22); g.fillStyle = PAL[0]; g.fillRect(19, 35, 58, 20); num(g, pl.floor, 48 - String(pl.floor).length * 2, 38); spr(g, 'heart', 45, 47); }
     else if (s.tick <= 0) { const c = Math.max(0, Math.ceil(-this.estServerTick() / this.P.tickRate)); if (c) num(g, c, W / 2 - 2, 40); }
   }
-  /** 多人：其他寵物畫在最近兩個快照之間（約延後一個快照），頭上有畫面編號。 */
+  /**
+   * 多人：其他寵物畫在最近兩個快照之間（約延後一個快照），頭上有畫面編號。
+   * 平台是本地預測的（比伺服器快照超前幾個 tick、已經多往上捲），所以其他寵物的 y 要加上同一個平台在兩邊的高度差，才會踩在平台上。
+   */
   private drawOthers(g: CanvasRenderingContext2D) {
     const s = this.server ?? this.state, P = this.P, frame = this.frame;
     const t = (Date.now() - this.curAt) / (this.tickMs * P.snapshotEvery);
+    const local = new Map(this.state.plats.map((p) => [p.id, p.y]));
+    const same = s.plats.find((p) => local.has(p.id)), dy = same ? local.get(same.id)! - same.y : 0;
     s.players.forEach((q, i) => {
       if (i === this.me || !q.alive) return;
-      const cur = this.curPos.get(q.petId) ?? { x: q.x, y: q.y }, pos = lerpPos(this.prevPos.get(q.petId), cur, t);
+      const cur = this.curPos.get(q.petId) ?? { x: q.x, y: q.y }, p0 = lerpPos(this.prevPos.get(q.petId), cur, t), pos = { x: p0.x, y: p0.y + dy };
       const moving = q.on != null && (q.left || q.right);
       const name = speciesSprite(this.roster[i]?.sp ?? 'chicken', moving ? (Math.floor(frame / 4) % 2 ? 2 : 'w') : 1);
       const pw = sw(name), ph = sh(name), px = pos.x + P.boxW / 2 - pw / 2, py = pos.y + P.boxH - ph;
