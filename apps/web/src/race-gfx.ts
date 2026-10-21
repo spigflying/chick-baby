@@ -1,8 +1,10 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
 import { SEG_LEN, trackSegs, trackById, NITRO_PER_RACE, type Track } from '@chick/engine';
-import { carArt, carPixels, LODS, type CarLook } from './race-cars';
+import { carBodyH, carPixels, LODS, type CarLook } from './race-cars';
 
-export const W = 120, H = 100;
+/** v3：內部解析度加倍（240×200）；HUD 仍以 120×100 座標畫、放大 2 倍（像經典賽車的粗 HUD）。 */
+export const W = 240, H = 200, R = 2;
+const HW = 120, HH = 100;
 // 0 最亮 … 3 最暗
 export const G = ['#9bbc0f', '#8bac0f', '#306230', '#0f380f'];
 const NIGHT = ['#306230', '#306230', '#0f380f', '#0f380f'];
@@ -15,7 +17,7 @@ export function carCanvas(model: string, color: number, opts: CarLook = {}, lod 
   const px = carPixels(model, color, lod, opts);
   c = document.createElement('canvas'); c.width = px[0].length; c.height = px.length; const x = c.getContext('2d')!;
   px.forEach((row, j) => row.forEach((v, i) => { if (v !== null) { x.fillStyle = G[v]; x.fillRect(i, j, 1, 1); } }));
-  (c as any).bodyH = carArt(model, lod).length; // 車身高度（不含火焰），用來對齊地面
+  (c as any).bodyH = carBodyH(lod); // 車身高度（不含火焰），用來對齊地面
   carCache.set(key, c); return c;
 }
 /** 依照畫面上應有的寬度挑 LOD：挑「不超過目標寬度」的最大一張，原尺寸畫，不縮放。 */
@@ -43,7 +45,20 @@ function propCanvas(name: string, night: boolean) {
   const key = name + night; let c = propCache.get(key); if (c) return c;
   const art = PROPS[name]; c = document.createElement('canvas'); c.width = art[0].length; c.height = art.length; const x = c.getContext('2d')!;
   art.forEach((r, j) => [...r].forEach((ch, i) => { if (ch !== '.') { x.fillStyle = (night ? NIGHT : G)[+ch]; x.fillRect(i, j, 1, 1); } }));
-  propCache.set(key, c); return c;
+  c = epx(c); propCache.set(key, c); return c;
+}
+/** EPX/Scale2x：把小像素圖放大成 2 倍細節（邊緣變平滑但仍是純四色像素）。 */
+function epx(src: HTMLCanvasElement) {
+  const w = src.width, h = src.height, d = src.getContext('2d')!.getImageData(0, 0, w, h).data;
+  const px = (x: number, y: number) => { x = Math.max(0, Math.min(w - 1, x)); y = Math.max(0, Math.min(h - 1, y)); const i = (y * w + x) * 4; return (d[i] << 24 | d[i + 1] << 16 | d[i + 2] << 8 | d[i + 3]) >>> 0; };
+  const out = document.createElement('canvas'); out.width = w * 2; out.height = h * 2; const o = out.getContext('2d')!; const img = o.createImageData(w * 2, h * 2);
+  const set = (x: number, y: number, v: number) => { const i = (y * w * 2 + x) * 4; img.data[i] = v >>> 24; img.data[i + 1] = v >>> 16 & 255; img.data[i + 2] = v >>> 8 & 255; img.data[i + 3] = v & 255; };
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const P = px(x, y), A = px(x, y - 1), B = px(x + 1, y), C = px(x - 1, y), D = px(x, y + 1);
+    set(2 * x, 2 * y, C === A && C !== D && A !== B ? A : P); set(2 * x + 1, 2 * y, A === B && A !== C && B !== D ? B : P);
+    set(2 * x, 2 * y + 1, D === C && D !== B && C !== A ? C : P); set(2 * x + 1, 2 * y + 1, B === D && B !== A && D !== C ? D : P);
+  }
+  o.putImageData(img, 0, 0); return out;
 }
 const hash = (n: number) => { let x = (n * 2654435761) >>> 0; x ^= x >>> 13; x = Math.imul(x, 1274126177) >>> 0; return x / 4294967296; };
 
@@ -63,7 +78,7 @@ export const textW = (s: string, scale = 1) => s.length * 4 * scale - scale;
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean }
 export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number }
 
-const ROAD_W = 0.75, CAM_H = 6, DEPTH = 0.9, DRAW = 60, HORIZON = 40;
+const ROAD_W = 0.75, CAM_H = 6, DEPTH = 0.9, DRAW = 60, HORIZON = 80;
 /** 玩家深度的半路寬（px）。車寬一律 = CAR_W × 半路寬 × 2 再乘同一個常數，所以只跟深度有關。 */
 const playerPw = () => ROAD_W * (DEPTH * 6 / (PLAYER_DZ + 4)) * (W / 2);
 /** 畫一個畫面。 */
@@ -77,8 +92,8 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   // 天空與遠景（隨彎道視差移動）
   const bend = segs.slice(0, ((base % n) + n) % n).reduce((a, s) => a + s.curve, 0) * 0.8;
   x.fillStyle = night ? G[3] : G[0]; x.fillRect(0, 0, W, H);
-  if (night) { for (let i = 0; i < 18; i++) { x.fillStyle = G[i % 3 ? 2 : 1]; x.fillRect(Math.floor(((hash(i) * 240 - bend * 0.3) % 120 + 120) % 120), Math.floor(hash(i + 50) * 30), 1, 1); } x.fillStyle = G[1]; x.fillRect(Math.floor(((90 - bend * 0.3) % 120 + 120) % 120), 6, 4, 4); }
-  else if (t.weather === 'clear') { x.fillStyle = G[1]; x.fillRect(Math.floor(((96 - bend * 0.3) % 140 + 140) % 140) - 10, 8, 6, 6); }
+  if (night) { for (let i = 0; i < 36; i++) { x.fillStyle = G[i % 3 ? 2 : 1]; x.fillRect(Math.floor(((hash(i) * 480 - bend * 0.6) % W + W) % W), Math.floor(hash(i + 50) * 60), 1, 1); } const mx = Math.floor(((180 - bend * 0.6) % W + W) % W); x.fillStyle = G[1]; x.fillRect(mx + 1, 12, 6, 8); x.fillRect(mx, 13, 8, 6); x.fillStyle = G[3]; x.fillRect(mx + 4, 13, 3, 5); }
+  else if (t.weather === 'clear') { x.fillStyle = G[1]; const sx0 = Math.floor(((192 - bend * 0.6) % 280 + 280) % 280) - 20; x.fillRect(sx0 + 2, 16, 8, 12); x.fillRect(sx0, 18, 12, 8); }
   drawSkyline(x, t.scenery, bend, P);
   // 道路：由近到遠投影，再由遠到近畫
   const pts: { y: number; x: number; w: number; scale: number; i: number; clip: number; wx: number; wy: number }[] = [];
@@ -139,12 +154,12 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   for (const c of v.cars) {
     const isMe = !!v.me && c.id === v.me.id, p = place(c); if (!p) continue;
     if (!isMe && p.py > p.clip + 2) continue; // 被坡頂擋住
-    const target = CAR_W * p.pw * 2 * (24 / (CAR_W * 2 * playerPw())), lod = isMe ? 0 : pickLod(target);
+    const target = 48 * p.pw / playerPw(), lod = isMe ? 0 : pickLod(target);
     const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 70 && v.frame % 20 < 2), frame: v.frame }, lod);
     const bh = (img as any).bodyH as number;
     const bob = isMe && c.speed > 5 && v.frame % 4 < 2 ? 1 : 0, shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
     // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
-    const scale = !isMe && target > 26 ? target / 24 : 1;
+    const scale = !isMe && target > 52 ? target / 48 : 1;
     const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
     const sx = Math.round(p.pxc + c.x * p.pw - dw / 2) + shake, sy = Math.round(p.py - bh * scale) - bob;
     sprites.push({ k: p.k + (isMe ? -0.5 : 0), draw: () => {
@@ -155,28 +170,29 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   }
   sprites.sort((p, q) => q.k - p.k).forEach((s) => s.draw());
   // 天氣
-  if (t.weather === 'rain') { x.fillStyle = G[1]; for (let i = 0; i < 40; i++) { const rx = Math.floor((hash(i) * W + v.frame * 3 + i * 7) % W), ry = Math.floor((hash(i + 99) * H + v.frame * 9) % H); x.fillRect(rx, ry, 1, 3); x.fillRect(rx - 1, ry + 3, 1, 1); } }
-  if (t.weather === 'snow') { x.fillStyle = G[0]; for (let i = 0; i < 45; i++) { const sx = Math.floor((hash(i) * W + Math.sin((v.frame + i * 13) / 9) * 3 - (v.me?.x ?? 0) * 10 + W) % W), sy = Math.floor((hash(i + 7) * H + v.frame * (1 + (i % 3))) % H); x.fillRect(sx, sy, i % 4 ? 1 : 2, 1); } }
+  if (t.weather === 'rain') { x.fillStyle = G[1]; for (let i = 0; i < 90; i++) { const rx = Math.floor((hash(i) * W + v.frame * 6 + i * 7) % W), ry = Math.floor((hash(i + 99) * H + v.frame * 18) % H); x.fillRect(rx, ry, 1, 5); x.fillRect(rx - 1, ry + 5, 1, 2); } }
+  if (t.weather === 'snow') { x.fillStyle = G[0]; for (let i = 0; i < 90; i++) { const sx = Math.floor((hash(i) * W + Math.sin((v.frame + i * 13) / 9) * 3 - (v.me?.x ?? 0) * 10 + W) % W), sy = Math.floor((hash(i + 7) * H + v.frame * (1 + (i % 3))) % H); x.fillRect(sx, sy, i % 4 ? 1 : 2, 1); } }
   if (v.hud) drawHud(x, v);
 }
 function drawSkyline(x: CanvasRenderingContext2D, scene: string, bend: number, P: string[]) {
-  const off = ((-bend * 0.5) % 120 + 120) % 120;
+  const off = ((-bend) % 240 + 240) % 240;
   for (let px = 0; px < W; px++) {
-    const wx = (px + off) % 120;
+    const wx = ((px + off) % 240) / R;
     let h: number;
     if (scene === 'city') h = 6 + Math.floor(hash(Math.floor(wx / 6)) * 12);
     else if (scene === 'desert') h = 3 + Math.round(4 * Math.abs(Math.sin(wx / 19)) + (wx > 70 && wx < 90 ? 6 - Math.abs(wx - 80) * 0.6 : 0));
     else if (scene === 'coast') h = wx < 40 ? 2 : 4 + Math.round(5 * Math.abs(Math.sin(wx / 13)));
     else if (scene === 'snow') h = 6 + Math.round(9 * Math.abs(Math.sin(wx / 15)) - (wx % 30 < 15 ? (wx % 15) / 3 : 0));
     else h = 4 + Math.round(5 * Math.abs(Math.sin(wx / 11)) + 3 * Math.abs(Math.sin(wx / 4.3)));
-    x.fillStyle = P[2]; x.fillRect(px, HORIZON - h, 1, h + 1);
-    if (scene === 'snow') { x.fillStyle = G[0]; x.fillRect(px, HORIZON - h, 1, 2); }
-    if (scene === 'city' && (wx * 7 + h) % 5 === 0 && h > 8) { x.fillStyle = P[0] === G[0] ? G[1] : G[1]; x.fillRect(px, HORIZON - h + 3, 1, 1); }
+    x.fillStyle = P[2]; x.fillRect(px, HORIZON - h * R, 1, h * R + 1);
+    if (scene === 'snow') { x.fillStyle = G[0]; x.fillRect(px, HORIZON - h * R, 1, 3); }
+    if (scene === 'city' && (wx * 7 + h) % 5 === 0 && h > 8) { x.fillStyle = P[0] === G[0] ? G[1] : G[1]; x.fillRect(px, HORIZON - h * R + 5, 1, 2); }
   }
-  if (scene === 'coast') { x.fillStyle = P[1]; x.fillRect(0, HORIZON - 1, 40, 2); }
+  if (scene === 'coast') { x.fillStyle = P[1]; x.fillRect(0, HORIZON - 2, 80, 3); }
 }
 function drawHud(x: CanvasRenderingContext2D, v: View) {
   const me = v.me; if (!me) return;
+  x.save(); x.scale(R, R);
   const total = v.cars.length;
   // 左上：名次（大字）
   const rk = String(v.rank), bw = 16 + rk.length * 8 + String(total).length * 4 + 4;
@@ -184,21 +200,22 @@ function drawHud(x: CanvasRenderingContext2D, v: View) {
   text(x, 'POS', 2, 2, 1); text(x, rk, 15, 2, 0, 2); text(x, '/' + total, 15 + rk.length * 8, 8, 1);
   // 右上：圈數
   const lap = Math.min(v.laps, Math.floor(Math.max(0, me.z) / v.len) + 1);
-  x.fillStyle = G[3]; x.fillRect(W - 30, 0, 30, 9); text(x, `LAP${lap}/${v.laps}`, W - 29, 2, 0);
+  x.fillStyle = G[3]; x.fillRect(HW - 30, 0, 30, 9); text(x, `LAP${lap}/${v.laps}`, HW - 29, 2, 0);
   // 下方：速度、氮氣、損傷
-  x.fillStyle = G[3]; x.fillRect(0, H - 9, 34, 9); x.fillRect(W - 34, H - 9, 34, 9);
+  x.fillStyle = G[3]; x.fillRect(0, HH - 9, 34, 9); x.fillRect(HW - 34, HH - 9, 34, 9);
   const kmh = String(Math.round(me.speed * 3.6)).padStart(3, ' ');
-  text(x, kmh, 2, H - 7, me.nitroT > 0 && v.frame % 4 < 2 ? 1 : 0); text(x, 'KM', 16, H - 7, 1);
-  for (let i = 0; i < NITRO_PER_RACE; i++) { const on = i < me.nitro; x.fillStyle = on ? G[0] : G[2]; x.fillRect(W - 33 + i * 5, H - 8, 4, 7); if (on) { x.fillStyle = G[3]; x.fillRect(W - 32 + i * 5, H - 7, 2, 1); } }
-  x.fillStyle = G[2]; x.fillRect(W - 17, H - 6, 16, 3); x.fillStyle = me.damage > 70 && v.frame % 6 < 3 ? G[1] : G[0]; x.fillRect(W - 17, H - 6, Math.round(16 * me.damage / 100), 3);
-  text(x, 'D', W - 17, H - 7 - 5, 0);
+  text(x, kmh, 2, HH - 7, me.nitroT > 0 && v.frame % 4 < 2 ? 1 : 0); text(x, 'KM', 16, HH - 7, 1);
+  for (let i = 0; i < NITRO_PER_RACE; i++) { const on = i < me.nitro; x.fillStyle = on ? G[0] : G[2]; x.fillRect(HW - 33 + i * 5, HH - 8, 4, 7); if (on) { x.fillStyle = G[3]; x.fillRect(HW - 32 + i * 5, HH - 7, 2, 1); } }
+  x.fillStyle = G[2]; x.fillRect(HW - 17, HH - 6, 16, 3); x.fillStyle = me.damage > 70 && v.frame % 6 < 3 ? G[1] : G[0]; x.fillRect(HW - 17, HH - 6, Math.round(16 * me.damage / 100), 3);
+  text(x, 'D', HW - 17, HH - 7 - 5, 0);
   // 右側進度條（每台車一個點，自己是方塊）
-  x.fillStyle = G[3]; x.fillRect(W - 4, 12, 3, 70);
+  x.fillStyle = G[3]; x.fillRect(HW - 4, 12, 3, 70);
   const tot = v.len * v.laps;
-  for (const c of v.cars) { const f = Math.max(0, Math.min(1, c.z / tot)); const yy = 81 - Math.round(f * 68); x.fillStyle = c.id === me.id ? G[0] : G[1]; x.fillRect(W - (c.id === me.id ? 5 : 4), yy, c.id === me.id ? 5 : 3, c.id === me.id ? 3 : 1); }
+  for (const c of v.cars) { const f = Math.max(0, Math.min(1, c.z / tot)); const yy = 81 - Math.round(f * 68); x.fillStyle = c.id === me.id ? G[0] : G[1]; x.fillRect(HW - (c.id === me.id ? 5 : 4), yy, c.id === me.id ? 5 : 3, c.id === me.id ? 3 : 1); }
   // 倒數／訊息
-  if (v.countdown > 0) { const s = String(Math.ceil(v.countdown / 20)); x.fillStyle = G[3]; x.fillRect(W / 2 - 9, 22, 18, 16); text(x, s, W / 2 - 5, 24, 0, 4); }
-  else if (v.tick - 60 < 20 && v.tick >= 60) { x.fillStyle = G[3]; x.fillRect(W / 2 - 15, 26, 30, 11); text(x, 'GO!', W / 2 - 11, 28, 0, 2); }
-  if (v.flash && v.frame % 8 < 6) { const w = textW(v.flash) + 4; x.fillStyle = G[3]; x.fillRect(Math.round(W / 2 - w / 2), 3, w, 9); text(x, v.flash, Math.round(W / 2 - w / 2) + 2, 5, 0); }
+  if (v.countdown > 0) { const s = String(Math.ceil(v.countdown / 20)); x.fillStyle = G[3]; x.fillRect(HW / 2 - 9, 22, 18, 16); text(x, s, HW / 2 - 5, 24, 0, 4); }
+  else if (v.tick - 60 < 20 && v.tick >= 60) { x.fillStyle = G[3]; x.fillRect(HW / 2 - 15, 26, 30, 11); text(x, 'GO!', HW / 2 - 11, 28, 0, 2); }
+  if (v.flash && v.frame % 8 < 6) { const w = textW(v.flash) + 4; x.fillStyle = G[3]; x.fillRect(Math.round(HW / 2 - w / 2), 3, w, 9); text(x, v.flash, Math.round(HW / 2 - w / 2) + 2, 5, 0); }
+  x.restore();
 }
 export { trackById };

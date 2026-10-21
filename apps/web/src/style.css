@@ -189,7 +189,7 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 /* ---- 賽車模式 ---- */
 .race-page{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:center}
 .race-dev{width:min(100%,480px);display:flex;flex-direction:column;gap:8px}
-.race-lcd canvas{display:block;width:100%;aspect-ratio:120/100;image-rendering:pixelated;background:var(--g3)}
+.race-lcd canvas{display:block;width:100%;aspect-ratio:240/200;image-rendering:pixelated;background:var(--g3)}
 .race-pad{display:flex;gap:6px;align-items:stretch;user-select:none;-webkit-user-select:none;touch-action:none}
 .race-pad .sp{flex:1}
 .race-pad button{font-family:var(--ui);font-size:16px;min-width:56px;min-height:56px;border:4px solid #000;background:var(--g2);color:var(--g0);box-shadow:3px 3px 0 #000;touch-action:none}
@@ -204,9 +204,9 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .race-panel li[data-tr]{cursor:pointer}
 .race-panel .big{width:100%;margin-top:8px;padding:8px;font-size:15px}
 .race-panel canvas.mini,.garage-car canvas{image-rendering:pixelated;vertical-align:middle}
-.race-panel canvas.mini{width:40px;height:22px}
+.race-panel canvas.mini{width:68px;height:44px}
 .garage-car{display:flex;gap:8px;align-items:center}
-.garage-car canvas{width:120px;height:66px;border:3px solid #000}
+.garage-car canvas{width:156px;height:102px;border:3px solid #000}
 .race-panel ol{margin:0;padding-left:0;list-style:none}
 .race-panel ol li{display:flex;justify-content:space-between;border-bottom:1px dotted #bba}
 .race-panel li.me{font-weight:bold;background:#ffe08a}
