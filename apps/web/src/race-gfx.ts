@@ -1,99 +1,28 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
 import { SEG_LEN, trackSegs, trackById, NITRO_PER_RACE, type Track } from '@chick/engine';
+import { carArt, carPixels, LODS, type CarLook } from './race-cars';
 
 export const W = 120, H = 100;
 // 0 最亮 … 3 最暗
 export const G = ['#9bbc0f', '#8bac0f', '#306230', '#0f380f'];
 const NIGHT = ['#306230', '#306230', '#0f380f', '#0f380f'];
 
-// ---------- 原創車款（車尾視角，20×11）：b=車身 d=深色 w=後窗 l=尾燈 t=輪胎 s=條紋 ----------
-export const CAR_ART: Record<string, string[]> = {
-  // 隼GT：大尾翼、雙圓尾燈、中央條紋
-  falcon: [
-    'dddddddddddddddddddd',
-    'dhhhhhhhhhhhhhhhhhhd',
-    'dddd.d........d.dddd',
-    '....dddddddddddd....',
-    '...dhwwwwwwwwwwhd...',
-    '..dhwwwwwwwwwwwwhd..',
-    '.ddddddddssddddddddd',
-    'dllhbbbbbssbbbbbhlld',
-    'dllbbbbbbssbbbbbblld',
-    'dbbbbbbbbssbbbbbbbbd',
-    'dggdddggggggggdddggd',
-    'ttt..............ttt',
-  ],
-  // 箭RS：低矮楔形、一字型尾燈、中央雙出排氣
-  arrow: [
-    '....................',
-    '....................',
-    '......dddddddd......',
-    '....ddhwwwwwwhdd....',
-    '...dhwwwwwwwwwwhd...',
-    '.ddddddddddddddddd..',
-    'dhhhhhhhhhhhhhhhhhhd',
-    'dllllllllllllllllllld',
-    'dbbbbbbbbbbbbbbbbbbd',
-    'dbbbbbbbgddgbbbbbbbd',
-    'dddddddddggddddddddd',
-    'ttt......dd......ttt',
-  ],
-  // 犀4WD：高車身、車尾備胎、直立尾燈、車頂架
-  rhino: [
-    '..dddddddddddddddd..',
-    '..dhwwwwwwwwwwwwhd..',
-    '..dwwwwwwwwwwwwwwd..',
-    '..dwwwwwwwwwwwwwwd..',
-    '.ddddddddddddddddddd',
-    '.dlbbbbddddddbbbbld.',
-    '.dlbbbdggggggdbbbld.',
-    '.dlbbbdgddddgdbbbld.',
-    '.dbbbbdggggggdbbbbd.',
-    '.dbbbbbddddddbbbbbd.',
-    'ddddddddddddddddddd.',
-    'tttt............tttt',
-  ],
-  // 彗星Z：超寬超跑、四顆尾燈、大擴散器
-  comet: [
-    '....................',
-    '.......dddddd.......',
-    '.....ddwwwwwwdd.....',
-    '...ddhwwwwwwwwhdd...',
-    '.ddhhhhhhhhhhhhhhdd.',
-    'dbbbbbbbbbbbbbbbbbbd',
-    'dlldlldbbsssbdlldlld',
-    'dbbbbbbbbbbbbbbbbbbd',
-    'ddgdgdgdgdgdgdgdgdgd',
-    'dgdgdgdgdgdgdgdgdgdd',
-    'ttt.dd........dd.ttt',
-    'ttt..............ttt',
-  ],
-};
-// 每台車的塗裝：[車身, 亮面, 條紋]；color 索引讓同車款也能分辨
-const LIVERY = [[0, 0, 3], [1, 0, 3], [0, 1, 2], [1, 0, 0], [0, 0, 1], [2, 1, 0]];
+// ---------- 車款（見 race-cars.ts：原創像素車、5 個 LOD 尺寸） ----------
 const carCache = new Map<string, HTMLCanvasElement>();
-export function carCanvas(model: string, color: number, opts: { brake?: boolean; nitro?: boolean; hit?: boolean; frame?: number } = {}) {
-  const key = `${model}:${color}:${+!!opts.brake}:${+!!opts.nitro}:${+!!opts.hit}:${(opts.frame ?? 0) & 1}`;
+export function carCanvas(model: string, color: number, opts: CarLook = {}, lod = 0) {
+  const key = `${model}:${color}:${lod}:${+!!opts.brake}:${+!!opts.nitro}:${+!!opts.hit}:${(opts.frame ?? 0) & 3}`;
   let c = carCache.get(key); if (c) return c;
-  const art = (CAR_ART[model] ?? CAR_ART.falcon).map((r) => r.padEnd(20, '.').slice(0, 20)); const [body, hi, stripe] = LIVERY[color % LIVERY.length];
-  const h = art.length + (opts.nitro ? 3 : 0);
-  c = document.createElement('canvas'); c.width = 20; c.height = h; const x = c.getContext('2d')!;
-  art.forEach((row, j) => [...row].forEach((ch, i) => {
-    let v: number | null = null;
-    if (ch === 'b') v = body; else if (ch === 'h') v = hi; else if (ch === 'd' || ch === 't') v = 3; else if (ch === 'w') v = 2; else if (ch === 's') v = stripe; else if (ch === 'g') v = 2;
-    else if (ch === 'l') v = opts.brake ? 0 : 3;
-    if (ch === 'l' && !opts.brake && (i + j) % 2 === 0) v = 1;
-    if (ch === 'w' && i === j + 2) v = 1; // 後窗反光
-    if (opts.hit && (ch === 'b' || ch === 'h') && (i + j + (opts.frame ?? 0)) % 3 === 0) v = 3;
-    if (ch === 't' && (i + j + (opts.frame ?? 0)) % 2) v = 2; // 輪胎紋
-    if (v !== null) { x.fillStyle = G[v]; x.fillRect(i, j, 1, 1); }
-  }));
-  if (opts.nitro) { // 排氣火焰
-    const f = (opts.frame ?? 0) & 1;
-    for (const ex of [6, 13]) { x.fillStyle = G[0]; x.fillRect(ex, art.length - 2, 2, 2 + f); x.fillStyle = G[2]; x.fillRect(ex, art.length + f, 2, 2); x.fillStyle = G[3]; x.fillRect(ex + (f ? 1 : 0), art.length + 1 + f, 1, 1); }
-  }
+  const px = carPixels(model, color, lod, opts);
+  c = document.createElement('canvas'); c.width = px[0].length; c.height = px.length; const x = c.getContext('2d')!;
+  px.forEach((row, j) => row.forEach((v, i) => { if (v !== null) { x.fillStyle = G[v]; x.fillRect(i, j, 1, 1); } }));
+  (c as any).bodyH = carArt(model, lod).length; // 車身高度（不含火焰），用來對齊地面
   carCache.set(key, c); return c;
 }
+/** 依照畫面上應有的寬度挑 LOD：挑「不超過目標寬度」的最大一張，原尺寸畫，不縮放。 */
+export function pickLod(targetW: number) { for (let i = 0; i < LODS.length; i++) if (LODS[i] <= targetW + 0.5) return i; return LODS.length - 1; }
+/** 車寬（以半個路寬為 1）：玩家在 PLAYER_DZ 時剛好 24px，所以同深度的車都一樣大。 */
+export const CAR_W = 0.66;
+export const PLAYER_DZ = 2.75; // 玩家車在攝影機前方的距離（m）
 
 // ---------- 路邊物 ----------
 const PROPS: Record<string, string[]> = {
@@ -135,11 +64,13 @@ export interface ViewCar { id: string; z: number; x: number; speed: number; dama
 export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number }
 
 const ROAD_W = 0.75, CAM_H = 6, DEPTH = 0.9, DRAW = 60, HORIZON = 40;
+/** 玩家深度的半路寬（px）。車寬一律 = CAR_W × 半路寬 × 2 再乘同一個常數，所以只跟深度有關。 */
+const playerPw = () => ROAD_W * (DEPTH * 6 / (PLAYER_DZ + 4)) * (W / 2);
 /** 畫一個畫面。 */
 export function drawRace(x: CanvasRenderingContext2D, v: View) {
   const t = v.track, segs = trackSegs(t.id), n = segs.length;
   const night = t.weather === 'night', P = night ? NIGHT : G;
-  const camZ = v.camZ ?? (v.me ? v.me.z - 6 : 0), camX = v.camX ?? (v.me ? v.me.x * 0.55 : 0);
+  const camZ = v.camZ ?? (v.me ? v.me.z - PLAYER_DZ : 0), camX = v.camX ?? (v.me ? v.me.x * 0.55 : 0);
   const base = Math.floor(camZ / SEG_LEN), frac = (camZ % SEG_LEN + SEG_LEN) % SEG_LEN / SEG_LEN;
   const segY = (i: number) => segs[((i % n) + n) % n].y * 0.8;
   const camY = segY(base) + (segY(base + 1) - segY(base)) * frac + CAM_H;
@@ -150,15 +81,15 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   else if (t.weather === 'clear') { x.fillStyle = G[1]; x.fillRect(Math.floor(((96 - bend * 0.3) % 140 + 140) % 140) - 10, 8, 6, 6); }
   drawSkyline(x, t.scenery, bend, P);
   // 道路：由近到遠投影，再由遠到近畫
-  const pts: { y: number; x: number; w: number; scale: number; i: number; clip: number }[] = [];
+  const pts: { y: number; x: number; w: number; scale: number; i: number; clip: number; wx: number; wy: number }[] = [];
   let dx = -segs[((base % n) + n) % n].curve * frac, cx = 0, maxy = H;
   for (let k = 0; k < DRAW; k++) {
     const i = base + k, s = segs[((i % n) + n) % n];
-    const zRel = Math.max(1, (k - frac) * SEG_LEN + 4); if (zRel <= 0.5) { pts.push({ y: H, x: W / 2, w: 0, scale: 0, i, clip: H }); cx += dx; dx += s.curve; continue; }
+    const zRel = Math.max(1, (k - frac) * SEG_LEN + 4); if (zRel <= 0.5) { pts.push({ y: H, x: W / 2, w: 0, scale: 0, i, clip: H, wx: cx * 0.06, wy: segY(i) }); cx += dx; dx += s.curve; continue; }
     const scale = DEPTH / zRel * 6;
     const py = HORIZON - (segY(i) - camY) * scale * (W / 2) / 6;
     const pxc = W / 2 + (cx * 0.06 - camX * ROAD_W) * scale * (W / 2) / 6 * 6 / 6;
-    pts.push({ y: py, x: pxc, w: ROAD_W * scale * (W / 2), scale, i, clip: maxy });
+    pts.push({ y: py, x: pxc, w: ROAD_W * scale * (W / 2), scale, i, clip: maxy, wx: cx * 0.06, wy: segY(i) });
     if (py < maxy) maxy = py;
     cx += dx; dx += s.curve;
   }
@@ -195,27 +126,34 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
       sprites.push({ k, draw: () => { x.drawImage(img, Math.round(wx - ww / 2), Math.round(p.y - hh), Math.max(1, Math.round(ww)), Math.max(1, Math.round(hh))); } });
     }
   }
-  for (const c of v.cars) {
-    if (v.me && c.id === v.me.id) continue;
+  // 所有車（含自己）用同一套投影：同深度同尺寸，自己最近所以最大
+  const place = (c: ViewCar) => {
     let dz = c.z - camZ; const L = v.len; dz = ((dz % L) + L) % L; if (dz > L / 2) dz -= L;
-    if (dz < 2 || dz > (DRAW - 2) * SEG_LEN) continue;
-    const kf = dz / SEG_LEN + frac, k = Math.floor(kf), a = pts[k], b = pts[k + 1]; if (!a || !b || !a.scale || !b.scale) continue;
-    const f = kf - k, py = a.y + (b.y - a.y) * f, pxc = a.x + (b.x - a.x) * f, pw = a.w + (b.w - a.w) * f;
-    if (py > a.clip + 2) continue;
-    const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0, frame: v.frame });
-    const sc = pw / 10 * 0.62, ww = img.width * sc, hh = img.height * sc;
-    sprites.push({ k, draw: () => x.drawImage(img, Math.round(pxc + c.x * pw - ww / 2), Math.round(py - hh), Math.max(2, Math.round(ww)), Math.max(1, Math.round(hh))) });
+    if (dz < 0.5 || dz > (DRAW - 2) * SEG_LEN) return null;
+    const kf = (dz - 4 + 4) / SEG_LEN + frac; // pts[k] 的 zRel = (k − frac)·SEG_LEN + 4，車的 zRel = dz + 4
+    const k = Math.floor(kf), a = pts[k], b = pts[k + 1]; if (!a || !b) return null;
+    const f = kf - k, zRel = dz + 4, scale = DEPTH * 6 / zRel; // 直接用真實深度投影（不在 1/z 上做線性內插）
+    const wx = a.wx + (b.wx - a.wx) * f, wy = a.wy + (b.wy - a.wy) * f;
+    return { k, py: HORIZON - (wy - camY) * scale * (W / 2) / 6, pxc: W / 2 + (wx - camX * ROAD_W) * scale * (W / 2), pw: ROAD_W * scale * (W / 2), clip: a.clip };
+  };
+  for (const c of v.cars) {
+    const isMe = !!v.me && c.id === v.me.id, p = place(c); if (!p) continue;
+    if (!isMe && p.py > p.clip + 2) continue; // 被坡頂擋住
+    const target = CAR_W * p.pw * 2 * (24 / (CAR_W * 2 * playerPw())), lod = isMe ? 0 : pickLod(target);
+    const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 70 && v.frame % 20 < 2), frame: v.frame }, lod);
+    const bh = (img as any).bodyH as number;
+    const bob = isMe && c.speed > 5 && v.frame % 4 < 2 ? 1 : 0, shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
+    // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
+    const scale = !isMe && target > 26 ? target / 24 : 1;
+    const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
+    const sx = Math.round(p.pxc + c.x * p.pw - dw / 2) + shake, sy = Math.round(p.py - bh * scale) - bob;
+    sprites.push({ k: p.k + (isMe ? -0.5 : 0), draw: () => {
+      x.drawImage(img, sx, sy, dw, dh);
+      if (isMe && c.damage > 50) for (let i = 0; i < 3; i++) { x.fillStyle = G[i % 2 ? 1 : 2]; x.fillRect(sx + 6 + ((v.frame * 3 + i * 7) % 12), sy - 3 - ((v.frame + i * 3) % 6), 2, 2); }
+      if (isMe && Math.abs(c.x) > 1 && c.speed > 5) for (let i = 0; i < 4; i++) { x.fillStyle = G[1]; x.fillRect(sx + (i % 2 ? dw - 2 : 0) + (v.frame % 3), sy + bh - 2 - (i >> 1) * 2, 2, 1); }
+    } });
   }
   sprites.sort((p, q) => q.k - p.k).forEach((s) => s.draw());
-  // 自己的車
-  if (v.me) {
-    const me = v.me, sx = Math.round(W / 2 + (me.x - camX) * 24 - 10);
-    const bob = me.speed > 5 && v.frame % 4 < 2 ? 1 : 0, shake = me.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
-    const img = carCanvas(me.car, me.color, { brake: me.brake, nitro: me.nitroT > 0, hit: me.hit > 0 || me.damage > 70 && v.frame % 20 < 2, frame: v.frame });
-    x.drawImage(img, sx + shake, H - 15 - bob);
-    if (me.damage > 50) for (let i = 0; i < 3; i++) { x.fillStyle = G[i % 2 ? 1 : 2]; x.fillRect(sx + 4 + ((v.frame * 3 + i * 7) % 12), H - 18 - ((v.frame + i * 3) % 6), 2, 2); } // 冒煙
-    if (Math.abs(me.x) > 1 && me.speed > 5) for (let i = 0; i < 4; i++) { x.fillStyle = G[1]; x.fillRect(sx + (i % 2 ? 17 : 0) + (v.frame % 3), H - 4 - (i >> 1) * 2, 2, 1); } // 揚塵
-  }
   // 天氣
   if (t.weather === 'rain') { x.fillStyle = G[1]; for (let i = 0; i < 40; i++) { const rx = Math.floor((hash(i) * W + v.frame * 3 + i * 7) % W), ry = Math.floor((hash(i + 99) * H + v.frame * 9) % H); x.fillRect(rx, ry, 1, 3); x.fillRect(rx - 1, ry + 3, 1, 1); } }
   if (t.weather === 'snow') { x.fillStyle = G[0]; for (let i = 0; i < 45; i++) { const sx = Math.floor((hash(i) * W + Math.sin((v.frame + i * 13) / 9) * 3 - (v.me?.x ?? 0) * 10 + W) % W), sy = Math.floor((hash(i + 7) * H + v.frame * (1 + (i % 3))) % H); x.fillRect(sx, sy, i % 4 ? 1 : 2, 1); } }
@@ -241,8 +179,9 @@ function drawHud(x: CanvasRenderingContext2D, v: View) {
   const me = v.me; if (!me) return;
   const total = v.cars.length;
   // 左上：名次（大字）
-  x.fillStyle = G[3]; x.fillRect(0, 0, 30, 15);
-  text(x, 'POS', 2, 2, 1); text(x, String(v.rank), 15, 2, 0, 2); text(x, '/' + total, 22, 8, 1);
+  const rk = String(v.rank), bw = 16 + rk.length * 8 + String(total).length * 4 + 4;
+  x.fillStyle = G[3]; x.fillRect(0, 0, bw, 15);
+  text(x, 'POS', 2, 2, 1); text(x, rk, 15, 2, 0, 2); text(x, '/' + total, 15 + rk.length * 8, 8, 1);
   // 右上：圈數
   const lap = Math.min(v.laps, Math.floor(Math.max(0, me.z) / v.len) + 1);
   x.fillStyle = G[3]; x.fillRect(W - 30, 0, 30, 9); text(x, `LAP${lap}/${v.laps}`, W - 29, 2, 0);
