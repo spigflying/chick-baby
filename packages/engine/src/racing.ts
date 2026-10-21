@@ -57,6 +57,8 @@ export const carById = (id: string) => CARS.find((c) => c.id === id) ?? CARS[0];
 export const PAINT_NAMES = ['紅', '灰', '綠', '淺藍', '深藍', '黃', '黑', '紫'];
 export const PAINTS = PAINT_NAMES.length;
 
+/** 雨胎各階抓地（v12b 調整：原廠胎約 12% 時間被甩出路面、1 階約 9%、3 階約 2%；都不碰 slideFactor 上限 1.4） */
+export const WET_GRIP = [0.845, 0.925, 1.03, 1.14];
 export interface CarStats { topSpeed: number; accel: number; grip: number; wetGrip: number; nitroBoost: number; nitroTicks: number; armor: { F: number; S: number; R: number } }
 export function carStats(partsIn: Partial<Parts>, carId = 'falcon'): CarStats {
   const p = normParts(partsIn), c = carById(carId);
@@ -66,7 +68,7 @@ export function carStats(partsIn: Partial<Parts>, carId = 'falcon'): CarStats {
     topSpeed: (64 + p.engine * 2 + p.gearbox * 3) * c.top,   // 引擎、變速箱各自加極速、直接相加（不互相卡）；全滿 79 m/s ≈ 284 km/h
     accel: (13 + p.engine * 2.5 + (p.gearbox >= 2 ? 1 : 0)) * c.accel,
     grip: (1 + p.dry * 0.18) * c.grip,
-    wetGrip: (0.62 + p.wet * 0.17) * c.grip,
+    wetGrip: WET_GRIP[Math.max(0, Math.min(3, p.wet | 0))] * c.grip,
     nitroBoost: 1.22 + p.nitro * 0.09,
     nitroTicks: RACE_TICK_RATE * (3 + p.nitro * 0.4),
     armor: { F: arm(p.armorF), S: arm(p.armorS), R: arm(p.armorR) },
@@ -237,7 +239,7 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
  * 過彎離心力（v12）：每秒往彎外滑 = 彎度 × (速度/70)² × slideFactor(抓地)。
  * slideFactor 隨抓地力 2.5 次方下降：原廠胎在快彎明顯被甩出去，3 階胎幾乎貼著線走（雨天用雨胎抓地）。
  */
-export const slideFactor = (grip: number) => Math.min(1.6, 0.35 * Math.pow(1.4 / Math.max(0.3, grip), 2.5));
+export const slideFactor = (grip: number) => Math.min(1.4, 0.35 * Math.pow(1.4 / Math.max(0.3, grip), 2.5));
 export function gripOf(c: RaceCar, w: Weather) { return w === 'rain' ? c.stats.wetGrip : w === 'snow' ? c.stats.wetGrip * 0.85 : w === 'fog' ? c.stats.grip * 0.95 : c.stats.grip; }
 /** 碰撞：依部位扣完美度（裝甲減免）。每次撞擊都算。 */
 function hurt(c: RaceCar, amount: number, zone: 'F' | 'S' | 'R') {

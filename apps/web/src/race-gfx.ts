@@ -125,17 +125,33 @@ const FONT: Record<string, string> = {
   '"': '01010010100000000000000000000000000',
   ' ': '00000000000000000000000000000000000',
 };
-export function text(x: CanvasRenderingContext2D, s: string, px: number, py: number, col = 3, scale = 1, shadow: number | null = null) {
-  if (shadow !== null) text(x, s, px + scale, py + scale, shadow, scale);
+const TXC = new Map<string, HTMLCanvasElement>();
+/** 文字快取：同字串/顏色/大小只畫一次到離屏畫布，之後一次 drawImage（減少每幀數千次 fillRect / fillText）。 */
+function txCache(key: string, w: number, h: number, paint: (c: CanvasRenderingContext2D) => void): HTMLCanvasElement | null {
+  let c = TXC.get(key); if (c) return c;
+  if (typeof document === 'undefined' || w <= 0 || h <= 0) return null;
+  c = document.createElement('canvas'); c.width = w; c.height = h; const cx = c.getContext('2d'); if (!cx) return null;
+  paint(cx); if (TXC.size > 400) TXC.delete(TXC.keys().next().value!); TXC.set(key, c); return c;
+}
+function textRaw(x: CanvasRenderingContext2D, s: string, px: number, py: number, col: number, scale: number) {
   x.fillStyle = Q[col];
   [...s.toUpperCase()].forEach((ch, k) => { const f = FONT[ch] ?? FONT[' ']; for (let i = 0; i < 35; i++) if (f[i] === '1') x.fillRect(px + (k * 6 + (i % 5)) * scale, py + Math.floor(i / 5) * scale, scale, scale); });
+}
+export function text(x: CanvasRenderingContext2D, s: string, px: number, py: number, col = 3, scale = 1, shadow: number | null = null) {
+  if (shadow !== null) text(x, s, px + scale, py + scale, shadow, scale);
+  const c = txCache(`t${Q[col]}|${scale}|${s}`, Math.max(1, s.length * 6 * scale), 7 * scale, (cx) => textRaw(cx, s, 0, 0, col, scale));
+  if (c && px === Math.round(px) && py === Math.round(py)) x.drawImage(c, px, py); else textRaw(x, s, px, py, col, scale);
 }
 export const textW = (s: string, scale = 1) => s.length * 6 * scale - scale;
 /** 中文字（像素字型 Cubic 11 / Zpix，原生 12px），關掉平滑：用來畫賽前資訊卡等中文。 */
 export function zh(x: CanvasRenderingContext2D, s: string, px: number, py: number, col = 3, size = 12) {
-  x.font = `${size}px 'Cubic 11','Zpix',monospace`; x.textBaseline = 'top'; x.fillStyle = Q[col]; x.fillText(s, Math.round(px), Math.round(py));
+  const font = `${size}px 'Cubic 11','Zpix',monospace`;
+  const c = txCache(`z${Q[col]}|${size}|${s}`, zhW(x, s, size) + 2, size + 4, (cx) => { cx.font = font; cx.textBaseline = 'top'; cx.fillStyle = Q[col]; cx.fillText(s, 0, 0); });
+  if (c) { x.drawImage(c, Math.round(px), Math.round(py)); return; }
+  x.font = font; x.textBaseline = 'top'; x.fillStyle = Q[col]; x.fillText(s, Math.round(px), Math.round(py));
 }
-export const zhW = (x: CanvasRenderingContext2D, s: string, size = 12) => { x.font = `${size}px 'Cubic 11','Zpix',monospace`; return Math.ceil(x.measureText(s).width); };
+const ZW = new Map<string, number>();
+export const zhW = (x: CanvasRenderingContext2D, s: string, size = 12) => { const k = size + '|' + s; let w = ZW.get(k); if (w === undefined) { x.font = `${size}px 'Cubic 11','Zpix',monospace`; w = Math.ceil(x.measureText(s).width); if (ZW.size > 600) ZW.clear(); ZW.set(k, w); } return w; };
 /** 框：最暗底＋1px 中間色邊（HUD 面板） */
 export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: number, h: number, bg = 3, edge = 2) {
   x.fillStyle = Q[edge]; x.fillRect(px, py, w, h); x.fillStyle = Q[bg]; x.fillRect(px + 1, py + 1, w - 2, h - 2);
@@ -242,7 +258,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   role('fx');
   if (t.weather === 'rain') { x.fillStyle = Q[1]; for (let i = 0; i < 90; i++) { const rx = Math.floor((hash(i) * W + v.frame * 6 + i * 7) % W), ry = Math.floor((hash(i + 99) * H + v.frame * 18) % H); x.fillRect(rx, ry, 1, 5); x.fillRect(rx - 1, ry + 5, 1, 2); } }
   if (t.weather === 'snow') { x.fillStyle = Q[0]; for (let i = 0; i < 90; i++) { const sx = Math.floor((hash(i) * W + Math.sin((v.frame + i * 13) / 9) * 3 - (v.me?.x ?? 0) * 10 + W) % W), sy = Math.floor((hash(i + 7) * H + v.frame * (1 + (i % 3))) % H); x.fillRect(sx, sy, i % 4 ? 1 : 2, 1); } }
-  if (t.weather === 'fog') { x.fillStyle = Q[1]; for (let yy = 0; yy < HORIZON + 30; yy++) for (let xx = (yy + v.frame) & 1; xx < W; xx += yy < HORIZON ? 2 : 4 + ((yy - HORIZON) >> 3)) if (yy < HORIZON || hash(xx * 7 + yy) < 0.5) x.fillRect(xx, yy, 1, 1); }
+  if (t.weather === 'fog') { const fc = txCache(`fog${Q[1]}|${v.frame & 1}`, W, HORIZON + 30, (cx) => { cx.fillStyle = Q[1]; for (let yy = 0; yy < HORIZON + 30; yy++) for (let xx = (yy + v.frame) & 1; xx < W; xx += yy < HORIZON ? 2 : 4 + ((yy - HORIZON) >> 3)) if (yy < HORIZON || hash(xx * 7 + yy) < 0.5) cx.fillRect(xx, yy, 1, 1); }); if (fc) x.drawImage(fc, 0, 0); }
   role('hud'); if (v.hud) drawHud(x, v);
   Q = G;
 }
