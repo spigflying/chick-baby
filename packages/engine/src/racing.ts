@@ -32,8 +32,13 @@ export interface CarModel { id: string; name: string; price: number; top: number
 export const CARS: CarModel[] = [
   { id: 'falcon', name: '隼 GT', price: 0, top: 1, accel: 1, grip: 1, tough: 1, desc: '均衡的入門跑車' },
   { id: 'arrow', name: '箭 RS', price: 25000, top: 1.05, accel: 1.06, grip: 0.97, tough: 0.9, desc: '輕量楔形，起步快' },
-  { id: 'rhino', name: '犀 4WD', price: 40000, top: 0.98, accel: 1.02, grip: 1.08, tough: 1.35, desc: '四驅高車身，雨雪穩、耐撞' },
-  { id: 'comet', name: '彗星 Z', price: 90000, top: 1.12, accel: 1.08, grip: 1.04, tough: 1, desc: '寬體超跑，極速最高' },
+  { id: 'rhino', name: '犀 R', price: 40000, top: 0.98, accel: 1.02, grip: 1.08, tough: 1.35, desc: '四驅高車身，雨雪穩、耐撞' },
+  { id: 'muscle', name: '野馬 V8', price: 30000, top: 1.06, accel: 0.98, grip: 0.92, tough: 1.2, desc: '美式肌肉車，直線猛、彎道笨重' },
+  { id: 'rally', name: '鷹 拉力', price: 35000, top: 0.97, accel: 1.08, grip: 1.12, tough: 1.15, desc: '拉力掀背，雨雪路面最穩' },
+  { id: 'drift', name: '鬼 甩尾', price: 45000, top: 1.03, accel: 1.05, grip: 1.0, tough: 1.0, desc: '日系寬體，操控靈活' },
+  { id: 'comet', name: '彗星 Z', price: 90000, top: 1.12, accel: 1.08, grip: 1.04, tough: 1, desc: '後置引擎經典跑車，平衡快速' },
+  { id: 'lmp', name: '曙 LMP', price: 120000, top: 1.15, accel: 1.1, grip: 1.1, tough: 0.95, desc: '利曼原型車，高速下壓力大' },
+  { id: 'f1', name: '燕 F1', price: 160000, top: 1.18, accel: 1.15, grip: 1.15, tough: 0.8, desc: '開輪方程式，最快但最怕碰撞' },
 ];
 export const carById = (id: string) => CARS.find((c) => c.id === id) ?? CARS[0];
 

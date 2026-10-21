@@ -14,6 +14,19 @@ type Op =
   | ['fins', number, number, number, number, number, C, number?]         // 直條紋：x0 y0 x1 y1 間距
   | ['tread', number, number, number, number, number?];                  // 輪胎紋
 const tyres = (x0: number, w: number, y0: number): Op[] => [['rect', x0, y0, x0 + w, 30, 'd'], ['tread', x0 + 1, y0 + 1, x0 + w - 1, 29, 24], ['tread', 48 - x0 - w + 1, y0 + 1, 48 - x0 - 1, 29, 24], ['rect', 48 - x0 - w, y0, 48 - x0, 30, 'd']];
+/** 左右鏡像：給一組左側圖元，自動加上右側 */
+function sym(...ops: Op[]): Op[] {
+  const out: Op[] = [];
+  for (const o of ops) {
+    out.push(o);
+    if (o[0] === 'rect') out.push(['rect', 48 - o[3], o[2], 48 - o[1], o[4], o[5], o[6]]);
+    else if (o[0] === 'ell') out.push(['ell', 48 - o[1], o[2], o[3], o[4], o[5], o[6]]);
+    else if (o[0] === 'trap') out.push(['trap', o[1], o[2], 48 - o[4], 48 - o[3], 48 - o[6], 48 - o[5], o[7], o[8]]);
+    else if (o[0] === 'fins') out.push(['fins', 48 - o[3], o[2], 48 - o[1], o[4], o[5], o[6], o[7]]);
+    else if (o[0] === 'tread') out.push(['tread', 48 - o[3], o[2], 48 - o[1], o[4], o[5]]);
+  }
+  return out;
+}
 export const CAR_SPECS: Record<string, { name: string; ops: Op[] }> = {
   // 隼 GT：GT3 賽車——大尾翼＋端板、寬輪拱、雙圓尾燈、中央單出排氣、大擴散器
   falcon: { name: '隼 GT', ops: [
@@ -84,6 +97,73 @@ export const CAR_SPECS: Record<string, { name: string; ops: Op[] }> = {
     ['ell', 21, 26.5, 1.6, 1.3, 'm', 20], ['ell', 27, 26.5, 1.6, 1.3, 'm', 20],
     ['rect', 13, 13, 35, 14, 'a', 20],              // 升起的尾翼
   ] },
+  // 燕 F1：開輪方程式——外露的大後輪、高尾翼＋端板、頭盔與 halo 護架、引擎進氣罩、中央雨燈、沒有車頂
+  f1: { name: '燕 F1', ops: [
+    ...sym(['rect', 0, 12, 11, 30, 'd'], ['tread', 1, 13, 10, 29, 24], ['rect', 1, 12, 10, 13, 'm', 32]),
+    ['rect', 11, 24, 37, 30, 'd'], ['fins', 13, 25, 35, 30, 3, 'm', 20],          // 擴散器
+    ['rect', 12, 18, 36, 24, 'b'], ['rect', 12, 23, 36, 24, 's', 20],             // 側箱
+    ['trap', 12, 22, 21, 27, 15, 33, 'b'], ['rect', 23, 12, 25, 22, 'h', 32],     // 引擎蓋＋脊線亮面
+    ['ell', 24, 10.5, 3.6, 3, 'a'], ['rect', 21, 10, 27, 11, 'd', 20],            // 頭盔＋護目鏡
+    ['rect', 19, 6, 29, 7, 'd'], ...sym(['rect', 19, 6, 20, 12, 'd']),             // halo
+    ['rect', 5, 0, 43, 3, 'a'], ['rect', 5, 3, 43, 4, 's', 20],                   // 尾翼
+    ...sym(['rect', 4, 0, 6, 11, 'd']), ['rect', 23, 4, 25, 6, 'd'],              // 端板、主支柱
+    ['rect', 22, 25, 26, 28, 'l'], ['rect', 23, 26, 25, 27, 'L', 32],              // 雨燈
+  ] },
+  // 鷹 RALLY：拉力掀背車——高車身、車頂進氣、大車頂尾翼、方燈、單邊排氣、擋泥板
+  rally: { name: '鷹 拉力', ops: [
+    ...tyres(2, 8, 21),
+    ['trap', 3, 15, 13, 35, 9, 39, 'b'],
+    ['trap', 5, 14, 15, 33, 12, 36, 'g'],
+    ['trap', 6, 8, 21, 24, 18, 21, 'r', 32], ['trap', 8, 12, 18, 20, 15, 17, 'r', 32],
+    ['rect', 9, 2, 39, 4, 'a'], ['rect', 20, 0, 28, 2, 'b'],                      // 車頂尾翼＋進氣
+    ['trap', 14, 20, 5, 43, 3, 45, 'b'], ['rect', 4, 14, 44, 15, 'h', 20],
+    ['rect', 3, 20, 45, 25, 'b'], ['rect', 3, 24, 45, 25, 's', 20],
+    ...sym(['rect', 5, 16, 11, 20, 'd'], ['rect', 6, 17, 10, 19, 'l']),
+    ['rect', 19, 19, 29, 22, 'h', 32],
+    ['rect', 9, 25, 39, 29, 'd'], ['ell', 35, 26.5, 1.8, 1.4, 'm', 20],
+    ...sym(['rect', 2, 26, 9, 30, 'a']),                                           // 擋泥板
+  ] },
+  // 野馬 V8：美式肌肉車——長斜背、雙賽車條紋、三段式全寬尾燈、鍍鉻保險桿、兩側雙出
+  muscle: { name: '野馬 V8', ops: [
+    ...tyres(1, 9, 21),
+    ['trap', 6, 14, 14, 34, 10, 38, 'b'],
+    ['trap', 14, 19, 3, 45, 1, 47, 'b'], ['rect', 2, 14, 46, 15, 'h', 20],
+    ['rect', 1, 19, 47, 25, 'b'],
+    ...sym(['rect', 18, 6, 21, 25, 'a', 20]),                                      // 條紋
+    ['trap', 7, 13, 16, 32, 12, 36, 'g'], ['trap', 8, 12, 19, 21, 16, 18, 'r', 32],
+    ['rect', 4, 13, 44, 14, 'a'],                                                  // 鴨尾
+    ...sym(['rect', 3, 19, 17, 22, 'd'], ['rect', 4, 20, 8, 21, 'l'], ['rect', 9, 20, 12, 21, 'l', 20], ['rect', 13, 20, 16, 21, 'l', 32]),
+    ['rect', 4, 25, 44, 27, 'h'], ['rect', 6, 27, 42, 30, 'd'],                     // 鍍鉻保險桿
+    ...sym(['ell', 9, 27.5, 2, 1.4, 'm', 20]),
+  ] },
+  // 曙 LMP：利曼原型車——超寬超低、鯊魚鰭、天鵝頸大尾翼、小座艙罩、細 LED 燈、巨大擴散器
+  lmp: { name: '曙 LMP', ops: [
+    ...tyres(1, 9, 20),
+    ...sym(['ell', 9, 16, 8.5, 5, 'b']),                                           // 輪拱
+    ['trap', 14, 22, 6, 42, 0, 48, 'b'], ['rect', 2, 15, 46, 16, 'h', 20],
+    ['ell', 24, 13, 7, 5, 'b'], ['ell', 24, 13, 5, 3.5, 'g'], ['rect', 21, 11, 23, 12, 'r', 32],
+    ['rect', 23, 2, 25, 13, 'b'],                                                  // 鯊魚鰭
+    ['rect', 3, 4, 45, 7, 'a'], ['rect', 3, 7, 45, 8, 's', 20],
+    ...sym(['rect', 15, 8, 17, 13, 'd'], ['rect', 2, 3, 4, 14, 'd']),              // 天鵝頸、端板
+    ...sym(['rect', 4, 17, 15, 18, 'l']), ['rect', 18, 19, 30, 20, 'L'],
+    ['rect', 6, 22, 42, 30, 'd'], ['fins', 8, 23, 40, 30, 2, 'm', 20],
+    ['rect', 22, 24, 26, 26, 'l', 20],
+  ] },
+  // 鬼 DRIFT：日系甩尾車——方正雙門、高腳大尾翼、寬體鉚釘輪拱、外八輪胎、四方燈、單邊大砲管
+  drift: { name: '鬼 甩尾', ops: [
+    ...sym(['trap', 21, 30, 2, 10, 0, 9, 'd'], ['tread', 1, 23, 9, 29, 24]),
+    ['trap', 7, 15, 14, 34, 10, 38, 'b'],
+    ['trap', 8, 14, 16, 32, 12, 36, 'g'], ['trap', 9, 11, 21, 24, 18, 21, 'r', 32], ['trap', 11, 14, 18, 20, 15, 17, 'r', 32],
+    ['trap', 15, 20, 3, 45, 0, 48, 'b'], ['rect', 2, 15, 46, 16, 'h', 20],
+    ...sym(['rect', 3, 17, 4, 18, 'd', 32], ['rect', 7, 16, 8, 17, 'd', 32]),      // 鉚釘
+    ['rect', 1, 20, 47, 25, 'b'], ['rect', 1, 24, 47, 25, 's', 20],
+    ...sym(['rect', 4, 20, 10, 23, 'd'], ['rect', 5, 21, 9, 22, 'l'], ['rect', 11, 20, 16, 23, 'd'], ['rect', 12, 21, 15, 22, 'l']),
+    ['rect', 8, 25, 40, 30, 'd'], ['fins', 12, 26, 30, 30, 3, 'm', 32],
+    ['ell', 36, 27, 2.8, 2, 'm', 12], ['ell', 36, 27, 1.6, 1.1, 'd', 20],
+    ['rect', 10, 25, 12, 28, 'a', 32],                                             // 拖車鉤
+    ['rect', 4, 1, 44, 4, 'a'], ['rect', 4, 4, 44, 5, 's', 20],
+    ...sym(['rect', 12, 5, 14, 9, 'd'], ['rect', 3, 0, 5, 7, 'd']),
+  ] },
 };
 export const CAR_MODELS = Object.keys(CAR_SPECS);
 /** 塗裝（四階綠）：[車身, 配色] */
@@ -122,7 +202,8 @@ export function carPixels(model: string, livery: number, lod: number, look: CarL
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (g[y][x] === null && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => g[y + dy]?.[x + dx] != null)) out[y][x] = 3;
   if (look.nitro && lod <= 2) { // 排氣火焰（往下噴、閃動）
     const len = Math.round((lod === 0 ? 14 : lod === 1 ? 9 : 5) + ((look.frame ?? 0) & 1) * k * 3), fw = Math.max(1, Math.round(4 * k));
-    const xs = model === 'falcon' ? [X(24) - (fw >> 1)] : model === 'rhino' ? [X(11) - (fw >> 1), X(37) - (fw >> 1)] : [X(21) - (fw >> 1), X(27) - (fw >> 1)];
+    const ex: Record<string, number[]> = { falcon: [24], f1: [24], rhino: [11, 37], muscle: [9, 39], rally: [35], drift: [36], lmp: [20, 28] };
+    const xs = (ex[model] ?? [21, 27]).map((e) => X(e) - (fw >> 1));
     const top = Y(27);
     for (let j = 0; j < len; j++) { const y = top + j; if (y >= out.length) out.push(Array(W).fill(null)); const c = j < len * 0.5 ? 0 : j < len * 0.8 ? 1 : 2; const shrink = j > len * 0.6 ? 1 : 0;
       for (const x0 of xs) for (let d = shrink; d < fw - shrink || d === shrink && d < fw; d++) out[y][x0 + d] = c; }

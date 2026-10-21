@@ -2,7 +2,7 @@
 import { api, errText } from './api';
 import type { Live } from './ws';
 import { createRace, stepRace, trackSegs, SEG_LEN, raceRanking, trackById, CARS, PARTS, PART_KINDS, TRACKS, carStats, NITRO_PER_RACE, type RaceState, type PartKind } from '@chick/engine';
-import { drawRace, carCanvas, text, W, H, G, type ViewCar } from './race-gfx';
+import { drawRace, carCanvas, text, textW, zh, zhW, panel, drawMinimap, W, H, G, type ViewCar } from './race-gfx';
 
 const segAt = (id: string, z: number) => { const s = trackSegs(id); return s[((Math.floor(z / SEG_LEN) % s.length) + s.length) % s.length].curve; };
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -32,7 +32,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   let attract: RaceState | null = null, frame = 0, raf = 0, dead = false;
   let race: { id: string; track: string; laps: number; len: number; cars: any[]; snaps: Snap[]; ended: any | null } | null = null;
   const keys = { gas: false, brake: false, left: false, right: false, nitro: false };
-  let seq = 0, lastSent = '', sendTimer = 0;
+  let seq = 0, lastSent = '', sendTimer = 0; let lobbyPlayers: string[] = [], lobbyStarts = 0;
 
   const setMatch = (on: boolean) => { if (live) live.inMatch = on; };
   async function load() {
@@ -88,7 +88,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   function leave() { live?.send({ type: 'race.leave' }); race = null; mode = 'menu'; setMatch(false); msg.textContent = '已離開比賽'; renderPanel(); }
   const off = live?.on((m) => {
     if (m.type === 'error' && m.for === 'race.join') { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; renderPanel(); }
-    else if (m.type === 'race.lobby') { mode = 'lobby'; const s = Math.max(0, Math.ceil((m.starts_at - (live?.serverNow() ?? Date.now())) / 1000)); msg.textContent = `等待玩家 ${m.players.length} 人（${s} 秒後發車，空位由電腦補上）`; }
+    else if (m.type === 'race.lobby') { mode = 'lobby'; lobbyPlayers = m.players.map((p: any) => p.name); lobbyStarts = m.starts_at; const s = Math.max(0, Math.ceil((m.starts_at - (live?.serverNow() ?? Date.now())) / 1000)); msg.textContent = `等待玩家 ${m.players.length} 人（${s} 秒後發車，空位由電腦補上）`; }
     else if (m.type === 'race.started') { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null }; mode = 'race'; setMatch(true); msg.textContent = `${trackById(m.track)!.name}・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
     else if (m.type === 'race.snap' && race && m.race_id === race.id) {
       race.snaps.push({ at: performance.now(), tick: m.tick, countdown: m.countdown, cars: new Map(m.cars.map((c: any[]) => [c[0], c])) }); if (race.snaps.length > 6) race.snaps.shift();
@@ -154,11 +154,35 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     const lead = raceRanking(attract!)[2];
     const cars = attract!.cars.map((c) => ({ id: c.id, name: c.name, ai: true, car: c.car, color: c.color, z: c.z, x: c.x, speed: c.speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT, fin: c.finishedTick, hit: c.hit }));
     drawRace(x, { track: t, me: cars.find((c) => c.id === lead.id)!, cars, tick: attract!.tick, countdown: 0, laps: attract!.laps, len: attract!.len, rank: 0, frame, hud: false });
-    x.save(); x.scale(2, 2); x.fillStyle = G[3]; x.fillRect(0, 0, 120, 13); text(x, 'GRAND PRIX', 2, 2, 0, 1); text(x, t.id.toUpperCase(), 106, 2, 1);
-    if (frame % 20 < 12) { x.fillStyle = G[3]; x.fillRect(37, 52, 46, 9); text(x, 'PRESS GO', 45, 54, 0); } x.restore();
+    // 選單標題（原生 240×200）
+    panel(x, 0, 0, W, 24); text(x, 'GRAND PRIX', 6, 5, 0, 2); zh(x, `${t.country}・${t.name}`, W - 6 - zhW(x, `${t.country}・${t.name}`), 6, 1);
+    const idx = TRACKS.indexOf(t); panel(x, 4, H - 40, 120, 36); zh(x, `第 ${idx + 1} 站 / 共 ${TRACKS.length} 站`, 10, H - 36, 0); zh(x, `${WEATHER[t.weather]}・${t.laps} 圈・冠軍 ${money(t.prize)}`, 10, H - 21, 1);
+    drawMinimap(x, { track: t, me: null, cars: [], tick: 0, countdown: 0, laps: t.laps, len: attract!.len, rank: 0, frame, hud: false }, W - 72, H - 64, 68, 60);
+    if (frame % 20 < 13) { panel(x, W / 2 - 52, 84, 104, 22); text(x, 'PRESS GO', W / 2 - 46, 88, 0, 2); }
   }
-  function drawWait() { const t = trackById(race?.track ?? sel)!; drawRace(x, { track: t, me: null, cars: [], tick: 0, countdown: 0, laps: t.laps, len: 1, rank: 0, frame, hud: false, camZ: 0, camX: 0 }); x.save(); x.scale(2, 2); x.fillStyle = G[3]; x.fillRect(30, 44, 60, 11); text(x, 'WAITING' + '.'.repeat(frame / 6 % 4), 34, 47, 0); x.restore(); }
-  function drawResultsOverlay() { const e = race?.ended?.me; if (!e) return; x.save(); x.scale(2, 2); x.fillStyle = G[3]; x.fillRect(20, 20, 80, 42); x.fillStyle = G[0]; x.fillRect(21, 21, 78, 40); text(x, 'RESULT', 48, 24, 3); text(x, `POS ${e.rank}`, 26, 33, 3, 2); text(x, `$${e.prize}`, 26, 47, 2); text(x, `DMG ${Math.round(e.damage)}`, 64, 47, 2); x.restore(); }
+  /** 賽前資訊卡（等待玩家時）：國家、賽道、長度、圈數、天氣、出發倒數、參賽者 */
+  function drawWait() {
+    const t = trackById(race?.track ?? sel)!; drawRace(x, { track: t, me: null, cars: [], tick: 0, countdown: 0, laps: t.laps, len: 1, rank: 0, frame, hud: false, camZ: frame * 4, camX: 0 });
+    panel(x, 12, 14, W - 24, H - 28, 3, 1);
+    text(x, 'RACE INFO', 22, 22, 0, 2);
+    zh(x, `${t.country}　${t.name}`, 22, 44, 0, 12);
+    const km = (trackSegs(t.id).length * SEG_LEN / 1000).toFixed(1);
+    zh(x, `賽道長 ${km} km × ${t.laps} 圈`, 22, 62, 1); zh(x, `天氣：${WEATHER[t.weather]}　冠軍獎金 ${money(t.prize)}`, 22, 78, 1);
+    zh(x, `玩家 ${lobbyPlayers.length} 人，其餘由電腦補上`, 22, 94, 1);
+    lobbyPlayers.slice(0, 4).forEach((n, i) => zh(x, `・${n}`, 22 + (i % 2) * 90, 112 + Math.floor(i / 2) * 15, 0));
+    drawMinimap(x, { track: t, me: null, cars: [], tick: 0, countdown: 0, laps: t.laps, len: 1, rank: 0, frame, hud: false }, W - 86, 22, 64, 56);
+    const left = Math.max(0, Math.ceil((lobbyStarts - (live?.serverNow() ?? Date.now())) / 1000));
+    panel(x, W / 2 - 60, H - 40, 120, 20, 2, 0); text(x, `START ${left}S`, W / 2 - textW(`START ${left}S`, 2) / 2, H - 37, 0, 2);
+  }
+  /** 結果畫面（原生解析度）：名次大字、獎金、時間、前六名 */
+  function drawResultsOverlay() {
+    const e = race?.ended?.me; if (!e) return;
+    panel(x, 16, 12, W - 32, H - 24, 3, 1);
+    text(x, 'RESULT', W / 2 - textW('RESULT', 2) / 2, 18, 0, 2);
+    text(x, `P${e.rank}`, 28, 40, 0, 5);
+    zh(x, `獎金 ${money(e.prize)}`, 100, 44, 0); zh(x, `時間 ${fmtMs(e.time_ms)}`, 100, 60, 1);
+    (race!.ended.ranking as any[]).slice(0, 6).forEach((c, i) => { const y = 86 + i * 15, mine = c.id === me.user.id; if (mine) { x.fillStyle = G[2]; x.fillRect(24, y - 2, W - 48, 15); } text(x, String(c.rank), 30, y + 2, mine ? 0 : 1); zh(x, c.name, 44, y, mine ? 0 : 1); text(x, c.time_ms === null ? '--' : fmtMs(c.time_ms).replace(/[’'"]/g, (m: string) => m === '"' ? '.' : ':'), W - 30 - textW('0:00.00'), y + 2, mine ? 0 : 1); });
+  }
   setAttract(); loop(); void load();
   return () => { dead = true; cancelAnimationFrame(raf); clearInterval(sendTimer); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); off?.(); if (mode === 'lobby' || mode === 'race') live?.send({ type: 'race.leave' }); setMatch(false); };
 }

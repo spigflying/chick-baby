@@ -62,18 +62,69 @@ function epx(src: HTMLCanvasElement) {
 }
 const hash = (n: number) => { let x = (n * 2654435761) >>> 0; x ^= x >>> 13; x = Math.imul(x, 1274126177) >>> 0; return x / 4294967296; };
 
-// ---------- 3×5 像素字 ----------
+// ---------- 5×7 像素字（v4：HUD 用原生 240×200，不再放大） ----------
 const FONT: Record<string, string> = {
-  '0': '111101101101111', '1': '010110010010111', '2': '111001111100111', '3': '111001111001111', '4': '101101111001001', '5': '111100111001111', '6': '111100111101111', '7': '111001010010010', '8': '111101111101111', '9': '111101111001111',
-  P: '111101111100100', O: '111101101101111', S: '111100111001111', L: '100100100100111', A: '111101111101101', K: '101101110101101', M: '101111111101101', H: '101101111101101', N: '110101101101101', G: '111100101101111', D: '110101101101110', R: '110101110101101', E: '111100110100111', T: '111010010010010', I: '111010010010111', F: '111100110100100', C: '111100100100111', U: '101101101101111', W: '101101111111101', Y: '101101010010010', B: '110101110101110', V: '101101101101010', X: '101101010101101',
-  '/': '001001010100100', ':': '000010000010000', '.': '000000000000010', '-': '000000111000000', '!': '010010010000010', ' ': '000000000000000', "'": '010010000000000', '"': '101101000000000',
+  '0': '01110100011001110101110011000101110',
+  '1': '00100011000010000100001000010001110',
+  '2': '01110100010000100010001000100011111',
+  '3': '11111000100010000010000011000101110',
+  '4': '00010001100101010010111110001000010',
+  '5': '11111100001111000001000011000101110',
+  '6': '00110010001000011110100011000101110',
+  '7': '11111000010001000100010000100001000',
+  '8': '01110100011000101110100011000101110',
+  '9': '01110100011000101111000010001001100',
+  'A': '01110100011000111111100011000110001',
+  'B': '11110100011000111110100011000111110',
+  'C': '01110100011000010000100001000101110',
+  'D': '11100100101000110001100011001011100',
+  'E': '11111100001000011110100001000011111',
+  'F': '11111100001000011110100001000010000',
+  'G': '01110100011000010111100011000101111',
+  'H': '10001100011000111111100011000110001',
+  'I': '01110001000010000100001000010001110',
+  'J': '00111000100001000010000101001001100',
+  'K': '10001100101010011000101001001010001',
+  'L': '10000100001000010000100001000011111',
+  'M': '10001110111010110101100011000110001',
+  'N': '10001100011100110101100111000110001',
+  'O': '01110100011000110001100011000101110',
+  'P': '11110100011000111110100001000010000',
+  'Q': '01110100011000110001101011001001101',
+  'R': '11110100011000111110101001001010001',
+  'S': '01111100001000001110000010000111110',
+  'T': '11111001000010000100001000010000100',
+  'U': '10001100011000110001100011000101110',
+  'V': '10001100011000110001100010101000100',
+  'W': '10001100011000110101101011010101010',
+  'X': '10001100010101000100010101000110001',
+  'Y': '10001100010101000100001000010000100',
+  'Z': '11111000010001000100010001000011111',
+  '/': '00001000100001000100010000100010000',
+  ':': '00000011000110000000011000110000000',
+  '.': '00000000000000000000000000110001100',
+  '-': '00000000000000011111000000000000000',
+  '!': '00100001000010000100001000000000100',
+  '$': '00100011111010001110001011111000100',
+  '%': '11000110010001000100010001001100011',
+  "'": '00100001000000000000000000000000000',
+  ' ': '00000000000000000000000000000000000',
 };
 export function text(x: CanvasRenderingContext2D, s: string, px: number, py: number, col = 3, scale = 1, shadow: number | null = null) {
   if (shadow !== null) text(x, s, px + scale, py + scale, shadow, scale);
   x.fillStyle = G[col];
-  [...s.toUpperCase()].forEach((ch, k) => { const f = FONT[ch] ?? FONT[' ']; for (let i = 0; i < 15; i++) if (f[i] === '1') x.fillRect(px + (k * 4 + (i % 3)) * scale, py + Math.floor(i / 3) * scale, scale, scale); });
+  [...s.toUpperCase()].forEach((ch, k) => { const f = FONT[ch] ?? FONT[' ']; for (let i = 0; i < 35; i++) if (f[i] === '1') x.fillRect(px + (k * 6 + (i % 5)) * scale, py + Math.floor(i / 5) * scale, scale, scale); });
 }
-export const textW = (s: string, scale = 1) => s.length * 4 * scale - scale;
+export const textW = (s: string, scale = 1) => s.length * 6 * scale - scale;
+/** 中文字（像素字型 Cubic 11 / Zpix，原生 12px），關掉平滑：用來畫賽前資訊卡等中文。 */
+export function zh(x: CanvasRenderingContext2D, s: string, px: number, py: number, col = 3, size = 12) {
+  x.font = `${size}px 'Cubic 11','Zpix',monospace`; x.textBaseline = 'top'; x.fillStyle = G[col]; x.fillText(s, Math.round(px), Math.round(py));
+}
+export const zhW = (x: CanvasRenderingContext2D, s: string, size = 12) => { x.font = `${size}px 'Cubic 11','Zpix',monospace`; return Math.ceil(x.measureText(s).width); };
+/** 框：最暗底＋1px 中間色邊（HUD 面板） */
+export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: number, h: number, bg = 3, edge = 2) {
+  x.fillStyle = G[edge]; x.fillRect(px, py, w, h); x.fillStyle = G[bg]; x.fillRect(px + 1, py + 1, w - 2, h - 2);
+}
 
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean }
 export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number }
@@ -190,32 +241,62 @@ function drawSkyline(x: CanvasRenderingContext2D, scene: string, bend: number, P
   }
   if (scene === 'coast') { x.fillStyle = P[1]; x.fillRect(0, HORIZON - 2, 80, 3); }
 }
+// ---------- 迷你地圖：把路段彎度積分成平面軌跡，線性修正讓它閉合 ----------
+const mapCache = new Map<string, { pts: [number, number][]; box: [number, number] }>();
+export function trackMap(id: string, bw: number, bh: number) {
+  const key = `${id}:${bw}:${bh}`; let m = mapCache.get(key); if (m) return m;
+  const segs = trackSegs(id), n = segs.length; let th = 0, px = 0, py = 0; const raw: [number, number][] = [];
+  // 彎度換算成轉角，再平均補上一點固定轉角，讓總轉角剛好一圈（環狀賽道看起來像真的賽道）
+  const k = 0.045, total = segs.reduce((a, s) => a + s.curve, 0) * k, base = (Math.PI * 2 - total) / n;
+  for (const s of segs) { raw.push([px, py]); th += s.curve * k + base; px += Math.sin(th); py -= Math.cos(th); }
+  const ex = px / n, ey = py / n; const fixed = raw.map(([x0, y0], i) => [x0 - ex * i, y0 - ey * i] as [number, number]);
+  const xs = fixed.map((p) => p[0]), ys = fixed.map((p) => p[1]);
+  const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
+  const sc = Math.min((bw - 6) / (maxx - minx || 1), (bh - 6) / (maxy - miny || 1));
+  const ox = (bw - (maxx - minx) * sc) / 2, oy = (bh - (maxy - miny) * sc) / 2;
+  m = { pts: fixed.map(([x0, y0]) => [Math.round(ox + (x0 - minx) * sc), Math.round(oy + (y0 - miny) * sc)]), box: [bw, bh] };
+  mapCache.set(key, m); return m;
+}
+function line(x: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number) {
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1; let e = dx + dy;
+  for (let i = 0; i < 400; i++) { x.fillRect(x0, y0, 1, 1); if (x0 === x1 && y0 === y1) break; const e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
+}
+export function drawMinimap(x: CanvasRenderingContext2D, v: View, mx: number, my: number, bw = 64, bh = 52) {
+  const m = trackMap(v.track.id, bw, bh), n = m.pts.length;
+  panel(x, mx, my, bw, bh);
+  x.fillStyle = G[2]; for (let i = 0; i < n; i++) { const a = m.pts[i], b = m.pts[(i + 1) % n]; line(x, mx + a[0], my + a[1], mx + b[0], my + b[1]); }
+  const s0 = m.pts[0]; x.fillStyle = G[0]; x.fillRect(mx + s0[0] - 1, my + s0[1] - 2, 3, 1); x.fillRect(mx + s0[0] - 1, my + s0[1] + 1, 3, 1); // 起終點線
+  const at = (z: number) => m.pts[((Math.floor(((z % v.len) + v.len) % v.len / SEG_LEN)) % n + n) % n];
+  for (const c of v.cars) { if (v.me && c.id === v.me.id) continue; const p = at(c.z); x.fillStyle = G[1]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 2, 2); }
+  if (v.me) { // 自己：4×4 亮色方塊＋閃爍外框
+    const p = at(v.me.z); const X0 = mx + p[0] - 2, Y0 = my + p[1] - 2;
+    if (v.frame % 10 < 6) { x.fillStyle = G[0]; x.fillRect(X0 - 2, Y0 - 2, 8, 1); x.fillRect(X0 - 2, Y0 + 5, 8, 1); x.fillRect(X0 - 2, Y0 - 2, 1, 8); x.fillRect(X0 + 5, Y0 - 2, 1, 8); }
+    x.fillStyle = G[3]; x.fillRect(X0 - 1, Y0 - 1, 6, 6); x.fillStyle = G[0]; x.fillRect(X0, Y0, 4, 4);
+  }
+}
 function drawHud(x: CanvasRenderingContext2D, v: View) {
   const me = v.me; if (!me) return;
-  x.save(); x.scale(R, R);
   const total = v.cars.length;
-  // 左上：名次（大字）
-  const rk = String(v.rank), bw = 16 + rk.length * 8 + String(total).length * 4 + 4;
-  x.fillStyle = G[3]; x.fillRect(0, 0, bw, 15);
-  text(x, 'POS', 2, 2, 1); text(x, rk, 15, 2, 0, 2); text(x, '/' + total, 15 + rk.length * 8, 8, 1);
-  // 右上：圈數
-  const lap = Math.min(v.laps, Math.floor(Math.max(0, me.z) / v.len) + 1);
-  x.fillStyle = G[3]; x.fillRect(HW - 30, 0, 30, 9); text(x, `LAP${lap}/${v.laps}`, HW - 29, 2, 0);
-  // 下方：速度、氮氣、損傷
-  x.fillStyle = G[3]; x.fillRect(0, HH - 9, 34, 9); x.fillRect(HW - 34, HH - 9, 34, 9);
-  const kmh = String(Math.round(me.speed * 3.6)).padStart(3, ' ');
-  text(x, kmh, 2, HH - 7, me.nitroT > 0 && v.frame % 4 < 2 ? 1 : 0); text(x, 'KM', 16, HH - 7, 1);
-  for (let i = 0; i < NITRO_PER_RACE; i++) { const on = i < me.nitro; x.fillStyle = on ? G[0] : G[2]; x.fillRect(HW - 33 + i * 5, HH - 8, 4, 7); if (on) { x.fillStyle = G[3]; x.fillRect(HW - 32 + i * 5, HH - 7, 2, 1); } }
-  x.fillStyle = G[2]; x.fillRect(HW - 17, HH - 6, 16, 3); x.fillStyle = me.damage > 70 && v.frame % 6 < 3 ? G[1] : G[0]; x.fillRect(HW - 17, HH - 6, Math.round(16 * me.damage / 100), 3);
-  text(x, 'D', HW - 17, HH - 7 - 5, 0);
-  // 右側進度條（每台車一個點，自己是方塊）
-  x.fillStyle = G[3]; x.fillRect(HW - 4, 12, 3, 70);
-  const tot = v.len * v.laps;
-  for (const c of v.cars) { const f = Math.max(0, Math.min(1, c.z / tot)); const yy = 81 - Math.round(f * 68); x.fillStyle = c.id === me.id ? G[0] : G[1]; x.fillRect(HW - (c.id === me.id ? 5 : 4), yy, c.id === me.id ? 5 : 3, c.id === me.id ? 3 : 1); }
+  // 左上：名次
+  const rk = String(v.rank), tw = 34 + textW(rk, 3) + textW('/' + total);
+  panel(x, 2, 2, tw, 27); text(x, 'POS', 6, 6, 1); text(x, rk, 28, 5, 0, 3); text(x, '/' + total, 30 + textW(rk, 3), 19, 1);
+  // 右上：圈數＋時間
+  const lap = Math.min(v.laps, Math.floor(Math.max(0, me.z) / v.len) + 1), ls = `LAP ${lap}/${v.laps}`;
+  panel(x, W - 70, 2, 68, 13); text(x, ls, W - 66, 5, 0);
+  const secs = Math.max(0, v.tick - 60) / 20, ts = `${Math.floor(secs / 60)}:${String(Math.floor(secs % 60)).padStart(2, '0')}.${Math.floor((secs * 10) % 10)}`;
+  panel(x, W - 70, 16, 68, 13); text(x, ts, W - 66, 19, 1);
+  // 迷你地圖（右側）
+  drawMinimap(x, v, W - 70, 31, 68, 56);
+  // 左下：速度
+  panel(x, 2, H - 22, 74, 20); text(x, String(Math.round(me.speed * 3.6)).padStart(3, ' '), 6, H - 18, me.nitroT > 0 && v.frame % 4 < 2 ? 1 : 0, 2); text(x, 'KM/H', 46, H - 11, 1);
+  // 右下：氮氣＋損傷
+  panel(x, W - 92, H - 22, 90, 20);
+  for (let i = 0; i < NITRO_PER_RACE; i++) { const on = i < me.nitro, bx = W - 88 + i * 9; x.fillStyle = on ? G[0] : G[2]; x.fillRect(bx + 1, H - 19, 5, 1); x.fillRect(bx, H - 18, 7, 13); if (on) { x.fillStyle = G[1]; x.fillRect(bx + 2, H - 16, 1, 9); x.fillStyle = G[3]; x.fillRect(bx, H - 12, 7, 1); } }
+  text(x, 'DMG', W - 58, H - 19, 1);
+  x.fillStyle = G[2]; x.fillRect(W - 58, H - 10, 52, 5); x.fillStyle = me.damage > 70 && v.frame % 6 < 3 ? G[1] : G[0]; x.fillRect(W - 58, H - 10, Math.round(52 * me.damage / 100), 5);
   // 倒數／訊息
-  if (v.countdown > 0) { const s = String(Math.ceil(v.countdown / 20)); x.fillStyle = G[3]; x.fillRect(HW / 2 - 9, 22, 18, 16); text(x, s, HW / 2 - 5, 24, 0, 4); }
-  else if (v.tick - 60 < 20 && v.tick >= 60) { x.fillStyle = G[3]; x.fillRect(HW / 2 - 15, 26, 30, 11); text(x, 'GO!', HW / 2 - 11, 28, 0, 2); }
-  if (v.flash && v.frame % 8 < 6) { const w = textW(v.flash) + 4; x.fillStyle = G[3]; x.fillRect(Math.round(HW / 2 - w / 2), 3, w, 9); text(x, v.flash, Math.round(HW / 2 - w / 2) + 2, 5, 0); }
-  x.restore();
+  if (v.countdown > 0) { const s = String(Math.ceil(v.countdown / 20)); panel(x, W / 2 - 20, 40, 40, 50); text(x, s, W / 2 - 14, 45, 0, 6); }
+  else if (v.tick - 60 < 20 && v.tick >= 60) { panel(x, W / 2 - 40, 50, 80, 30); text(x, 'GO!', W / 2 - 34, 55, 0, 4); }
+  if (v.flash && v.frame % 8 < 6) { const w = textW(v.flash, 2) + 10; panel(x, Math.round(W / 2 - w / 2) - 10, 34, w, 20); text(x, v.flash, Math.round(W / 2 - w / 2) - 5, 37, 0, 2); }
 }
 export { trackById };
