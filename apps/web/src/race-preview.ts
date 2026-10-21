@@ -15,7 +15,7 @@ function sheet() {
   const c = document.createElement('canvas'); c.width = cw; c.height = ch; c.style.width = cw * S + 'px'; c.style.height = ch * S + 'px';
   const x = c.getContext('2d')!; x.imageSmoothingEnabled = false;
   x.fillStyle = G[0]; x.fillRect(0, 0, cw, ch);
-  text(x, 'CAR DESIGN SHEET V4', 2, 2, 3, 2);
+  text(x, 'CAR DESIGN SHEET V5', 2, 2, 3, 2);
   const heads = [...LODS.map((w) => `${w}PX`), ...LIVERIES.map((_, i) => `C${i + 1}`), 'BRAKE', 'NITRO', 'HIT'];
   heads.forEach((hd, i) => text(x, hd.slice(0, 8), 96 + i * cellW + 2, 22, 2));
   CAR_MODELS.forEach((m, r) => {
@@ -34,14 +34,14 @@ function sheet() {
   d.append(c); root.append(d);
 }
 function scene(kind: string) {
-  const track = trackById(kind === 'rain' ? 'gbr' : kind === 'night' ? 'hkg' : kind === 'pack' ? 'bra' : 'tpe')!;
+  const track = trackById(kind === 'rain' ? 'tw4' : kind === 'night' ? 'tw3' : kind === 'fog' ? 'tw2' : kind === 'pack' ? 'us1' : 'tw1')!;
   const len = trackSegs(track.id).length * SEG_LEN;
-  const mk = (i: number, z: number, xx: number, extra: Partial<ViewCar> = {}): ViewCar => ({ id: 'c' + i, name: 'c' + i, ai: true, car: CARS[i % 4].id, color: i % 6, z, x: xx, speed: 50, damage: 0, nitro: 3, nitroT: 0, fin: null, hit: 0, ...extra });
+  const mk = (i: number, z: number, xx: number, extra: Partial<ViewCar> = {}): ViewCar => ({ id: 'c' + i, name: 'c' + i, ai: true, car: 'ai', color: 0, z, x: xx, speed: 50, damage: 0, nitro: 3, nitroT: 0, fin: null, hit: 0, ...extra });
   const cars: ViewCar[] = []; let me: ViewCar;
-  if (kind === 'grid') { for (let i = 0; i < 19; i++) cars.push(mk(i + 1, 300 - Math.floor(i / 2) * 8, i % 2 ? 0.5 : -0.5, { speed: 0 })); me = mk(0, 300 - 10 * 8, 0.5, { id: 'me', speed: 0, car: 'falcon', color: 0 }); }
-  else { const base = 1400; me = mk(0, base, 0.1, { id: 'me', car: 'falcon', color: 0, speed: kind === 'nitro' ? 78 : 60, nitroT: kind === 'nitro' ? 30 : 0, nitro: kind === 'nitro' ? 2 : 3 });
+  if (kind === 'grid') { for (let i = 0; i < 19; i++) cars.push(mk(i + 1, 300 - Math.floor(i / 2) * 10, i % 2 ? 0.5 : -0.5, { speed: 0, ...(i === 18 ? { ai: false, car: 'muscle', color: 1 } : {}) })); me = mk(0, 300 - 9 * 10, 0.5, { id: 'me', speed: 0, car: 'falcon', color: 0 }); }
+  else { const base = 1400; me = mk(0, base, 0.1, { id: 'me', car: 'falcon', color: 0, damage: kind === 'pack' ? 23 : 0, speed: kind === 'nitro' ? 78 : 60, nitroT: kind === 'nitro' ? 30 : 0, nitro: kind === 'nitro' ? 2 : 3 });
     const ahead = [[7, -0.4], [9, 0.45], [16, -0.1], [26, 0.5], [40, -0.5], [60, 0.2], [85, -0.3], [120, 0.4], [170, -0.2], [240, 0.3], [330, 0]];
-    ahead.forEach(([dz, xx], i) => cars.push(mk(i + 1, base + dz, xx, { brake: i === 1, hit: kind === 'pack' && i === 0 ? 5 : 0 }))); }
+    ahead.forEach(([dz, xx], i) => cars.push(mk(i + 1, base + dz, xx, { brake: i === 1, hit: kind === 'pack' && i === 0 ? 5 : 0, ...(i === 2 ? { ai: false, car: 'rally', color: 2 } : i === 5 ? { ai: false, car: 'f1', color: 4 } : {}) }))); }
   cars.push(me);
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.style.width = W * 3 + 'px'; cv.style.height = H * 3 + 'px';
   const x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
@@ -54,8 +54,8 @@ function scene(kind: string) {
 async function page() {
   await import('./style.css');
   const { racePage } = await import('./race');
-  const { createRace, stepRace, setRaceInput, raceRanking, raceTimeMs, TRACKS, PARTS, NITRO_PER_RACE, RACE_SLOTS } = await import('@chick/engine');
-  const prof = { cash: 64000, points: 26, wins: 2, races: 5, parts: { engine: 1, gearbox: 1, dry: 2, wet: 1, nitro: 1, armor: 0 }, car: 'falcon', cars: ['falcon', 'arrow'], damage: 0, unlocked: 3, repair_cost: 0 };
+  const { createRace, stepRace, setRaceInput, raceRanking, raceTimeMs, TRACKS, PARTS, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, prizeFor, pointsFor, condition, ME, newCup } = await import('@chick/engine');
+  const prof: any = { cash: 64000, points: 16, wins: 1, races: 3, season: '2026-10', paint: 0, parts: { engine: 1, gearbox: 2, dry: 2, wet: 1, nitro: 1, armorF: 1, armorS: 0, armorR: 0 }, car: 'falcon', cars: ['falcon', 'arrow'], unlocked: 1, cup: { ...newCup(0), race: 2, points: { [ME]: 16, '阿飛': 14, '雷霆': 10, '閃電': 7 } } };
   const realFetch = window.fetch.bind(window);
   window.fetch = (async (u: any, o?: any) => {
     const url = String(u);
@@ -68,21 +68,21 @@ async function page() {
   const emit = (m: any) => handlers.forEach((h) => h(m));
   let sim: any = null, timer = 0;
   const live: any = { inMatch: false, inFight: false, inLobby: false, serverNow: () => Date.now(), on: (h: any) => { handlers.add(h); return () => handlers.delete(h); },
-    send: (m: any) => { if (m.type === 'race.input' && sim) setRaceInput(sim, 'me', m); if (m.type === 'race.join') emit({ type: 'race.lobby', race_id: 'r1', track: m.track, starts_at: Date.now() + 6000, players: [{ user_id: 'me', name: 'racer' }, { user_id: 'b', name: 'benson' }] }); return true; } };
+    send: (m: any) => { if (m.type === 'race.input' && sim) setRaceInput(sim, 'me', m); if (m.type === 'race.join' || m.type === 'race.create') emit({ type: 'race.lobby', race_id: 'r1', track: m.track, starts_at: Date.now() + 6000, code: m.type === 'race.create' ? 'K7Q2PX' : null, host: 'me', players: [{ user_id: 'me', name: 'racer' }, { user_id: 'b', name: 'benson' }] }); return true; } };
   const w = window as any;
   w.__start = (track: string) => {
-    const ai = Array.from({ length: RACE_SLOTS - 1 }, (_, i) => ({ id: 'ai' + i, name: ['阿飛', '雷霆', '閃電', '老鷹', '疾風', '白鯨'][i], ai: true, car: CARS[(i + 1) % CARS.length].id }));
-    sim = createRace(5, track, [...ai, { id: 'me', name: 'racer', car: 'falcon', parts: prof.parts as any }]);
+    sim = createRace(5, track, fillField([{ id: 'b', name: 'benson', car: 'muscle', color: 1, parts: prof.parts }, { id: 'me', name: 'racer', car: 'falcon', color: 0, parts: prof.parts as any }]));
     emit({ type: 'race.started', race_id: 'r1', track, seed: 5, cars: sim.cars.map((c: any) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color })), laps: sim.laps, len: sim.len, tick_rate: 20 });
     const snap = () => emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: sim.countdown, cars: sim.cars.map((c: any) => [c.id, c.z, c.x, c.speed, c.damage, c.nitro, c.nitroT, c.finishedTick, c.hit]) });
     timer = window.setInterval(() => { stepRace(sim); stepRace(sim); snap(); }, 100);
   };
+  w.__sim = () => sim;
   w.__skip = (secs: number) => { for (let i = 0; i < secs * 20; i++) { const me = sim.cars.find((c: any) => c.id === 'me'); setRaceInput(sim, 'me', { gas: true, left: me.x > 0.2, right: me.x < -0.2 }); stepRace(sim); } };
   w.__finish = () => {
     clearInterval(timer); while (!sim.over) { const me = sim.cars.find((c: any) => c.id === 'me'); setRaceInput(sim, 'me', { gas: true, left: me.x > 0.2, right: me.x < -0.2 }); stepRace(sim); }
     const rk = raceRanking(sim); const meC = sim.cars.find((c: any) => c.id === 'me'); const pos = rk.indexOf(meC) + 1;
     emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: 0, cars: sim.cars.map((c: any) => [c.id, c.z, c.x, c.speed, c.damage, c.nitro, c.nitroT, c.finishedTick, c.hit]) });
-    emit({ type: 'race.ended', race_id: 'r1', track: sim.track, ranking: rk.map((c: any, i: number) => ({ id: c.id, name: c.name, ai: c.ai, rank: i + 1, time_ms: raceTimeMs(sim, c) })), me: { user_id: 'me', rank: pos, prize: 2400, time_ms: raceTimeMs(sim, meC), damage: meC.damage, unlocked: 3, cash: prof.cash + 2400, new_unlock: null } });
+    emit({ type: 'race.ended', race_id: 'r1', track: sim.track, ranking: rk.map((c: any, i: number) => ({ id: c.id, name: c.name, ai: c.ai, rank: i + 1, time_ms: raceTimeMs(sim, c), condition: condition(c) })), me: (() => { const r = settleCup(prof.cup, 1, 'tw3', rk.map((c: any, i: number) => ({ key: c.id === 'me' ? ME : c.ai ? c.name : 'user:' + c.id, rank: i + 1 }))); return { user_id: 'me', rank: pos, prize: prizeFor(pos), points: pointsFor(pos), time_ms: raceTimeMs(sim, meC), condition: condition(meC), hits: meC.hits, unlocked: r.unlocked, cash: prof.cash + prizeFor(pos), qualified: r.qualified, cup_counted: r.counted, country_done: r.countryDone, champion: r.champion, cup: r.cup, standings: r.standings.slice(0, 10) }; })() });
   };
   document.body.style.background = '#1a1030';
   racePage(root, live, { user: { id: 'me', display_name: 'racer' } }, (t) => console.log('toast', t));

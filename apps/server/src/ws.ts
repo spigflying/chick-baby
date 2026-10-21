@@ -1,4 +1,4 @@
-import { joinRace, leaveRace, raceInput } from './racing';
+import { createPrivate, joinPrivate, joinRace, leaveRace, privateRoomOf, raceInput, startPrivate } from './racing';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { Db } from './db';
@@ -205,9 +205,21 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             break;
           }
           // ---- 賽車模式 ----
-          case 'race.join': {
+          case 'race.join': case 'race.create': {
             if ((c.match && !c.match.ended) || c.mm) throw new AppError('ALREADY_IN_MATCH');
-            await joinRace(db, { userId: c.user.id, name: String((c.user as any).display_name ?? '玩家').slice(0, 12), send: (m) => send(c, m) }, msg.track);
+            const rc = { userId: c.user.id, name: String((c.user as any).display_name ?? '玩家').slice(0, 12), send: (m: unknown) => send(c, m) };
+            if (msg.type === 'race.create') { const code = await createPrivate(db, rc, msg.track); send(c, { type: 'race.room', code }); }
+            else if (msg.code) await joinPrivate(db, rc, msg.code);
+            else await joinRace(db, rc, msg.track);
+            break;
+          }
+          case 'race.start': startPrivate(c.user.id); break;
+          case 'race.invite': { // 用分享碼邀請朋友進自己的私人房（對方要在線上、同一個執行個體）
+            const room = privateRoomOf(c.user.id); if (!room) throw new AppError('ROOM_NOT_FOUND');
+            const to = await (db as any).selectFrom('users').select('id').where('share_code', '=', String(msg.share_code ?? '').toUpperCase().slice(0, 16)).executeTakeFirst();
+            if (!to) throw new AppError('NOT_FOUND');
+            let n = 0; for (const o of conns) if (o.user.id === to.id) { send(o, { type: 'race.invited', from: (c.user as any).display_name, code: room.code, track: room.track }); n++; }
+            send(c, { type: 'race.invite_sent', online: n > 0 });
             break;
           }
           case 'race.input': raceInput(c.user.id, msg); break;

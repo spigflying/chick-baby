@@ -216,15 +216,17 @@ const migrations: Record<string, Migration> = {
   },
   '0008_racing': {
     async up(db: Kysely<unknown>) {
-      // 賽車模式：獨立的賽車獎金（不和金幣互通）、零件、損傷、解鎖、成績
+      // 賽車模式：獨立的賽車獎金（可和金幣換匯）、零件、塗裝、錦標賽進度、每月賽季
       await sql`CREATE TABLE race_profiles (
           user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-          cash integer NOT NULL DEFAULT 3000 CHECK (cash >= 0),
-          parts jsonb NOT NULL DEFAULT '{"engine":0,"gearbox":0,"dry":0,"wet":0,"nitro":0,"armor":0}',
+          cash integer NOT NULL DEFAULT 15000 CHECK (cash >= 0),
+          parts jsonb NOT NULL DEFAULT '{}',
           car text NOT NULL DEFAULT 'falcon',
           cars text[] NOT NULL DEFAULT ARRAY['falcon'],
-          damage real NOT NULL DEFAULT 0 CHECK (damage >= 0 AND damage <= 100),
+          paint integer NOT NULL DEFAULT 0,
+          season text NOT NULL,
           unlocked integer NOT NULL DEFAULT 1,
+          cup jsonb NOT NULL DEFAULT '{"country":0,"race":0,"points":{}}',
           points integer NOT NULL DEFAULT 0,
           races integer NOT NULL DEFAULT 0,
           wins integer NOT NULL DEFAULT 0,
@@ -232,19 +234,31 @@ const migrations: Record<string, Migration> = {
         CREATE TABLE race_results (
           id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           race_id uuid NOT NULL,
+          season text NOT NULL,
           track text NOT NULL,
           user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
           rank integer NOT NULL,
           time_ms integer,
           prize integer NOT NULL DEFAULT 0,
-          damage real NOT NULL DEFAULT 0,
+          points integer NOT NULL DEFAULT 0,
+          condition integer NOT NULL DEFAULT 100,
           humans integer NOT NULL DEFAULT 1,
+          private boolean NOT NULL DEFAULT false,
           created_at timestamptz NOT NULL DEFAULT now());
-        CREATE INDEX race_results_track_time ON race_results (track, time_ms) WHERE time_ms IS NOT NULL;
-        CREATE INDEX race_results_user ON race_results (user_id, created_at);`.execute(db);
+        CREATE INDEX race_results_track_time ON race_results (season, track, time_ms) WHERE time_ms IS NOT NULL;
+        CREATE INDEX race_results_user ON race_results (user_id, created_at);
+        CREATE TABLE race_seasons (
+          season text NOT NULL, user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          points integer NOT NULL, wins integer NOT NULL, races integer NOT NULL, unlocked integer NOT NULL,
+          PRIMARY KEY (season, user_id));
+        ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+        ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus','outfit','race_exchange_in','race_exchange_out'));`.execute(db);
     },
     async down(db: Kysely<unknown>) {
-      await sql`DROP TABLE race_results; DROP TABLE race_profiles;`.execute(db);
+      await sql`DROP TABLE race_seasons; DROP TABLE race_results; DROP TABLE race_profiles;
+        DELETE FROM coin_ledger WHERE reason IN ('race_exchange_in','race_exchange_out');
+        ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+        ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus','outfit'));`.execute(db);
     },
   },
 };

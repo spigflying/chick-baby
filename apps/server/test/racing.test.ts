@@ -5,7 +5,8 @@ import { migrateToLatest } from '../src/migrations';
 import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
 import { fastForwardRace, inRace, startRaceLoop } from '../src/racing';
-import { setRaceInput, PARTS, TRACKS } from '@chick/engine';
+import { partPrice, prizeFor, RACE_SLOTS, seasonOf, setRaceInput, TRACKS } from '@chick/engine';
+import { CLOSING_GUARD_MS } from '../src/racing';
 
 process.env.RACE_LOBBY_MS = '300';
 const { db } = createDb();
@@ -35,42 +36,78 @@ async function openWs(cookie: string) {
   return { ws, msgs, wait };
 }
 
-describe('racing (server)', () => {
-  it('profile starts with race cash; buy parts tier by tier; cannot overspend; coins untouched', async () => {
+
+const drive = (id: string) => (s: any) => { const c = s.cars.find((x: any) => x.id === id); setRaceInput(s, id, { gas: true, left: c.x > 0.2, right: c.x < -0.2, nitro: s.tick % 200 === 50 }); };
+describe('racing (server) v5', () => {
+  it('profile/cash, tier-by-tier parts, car + paint', async () => {
     const a = await login('racer1');
     const p = await a.call('GET', '/race/profile');
-    expect(p.status).toBe(200); expect(p.json.profile.cash).toBe(3000); expect(p.json.catalog.tracks.length).toBe(TRACKS.length);
+    expect(p.status).toBe(200); expect(p.json.profile.cash).toBe(15000); expect(p.json.profile.season).toBe(seasonOf(Date.now()));
+    expect(p.json.catalog.tracks.length).toBe(TRACKS.length); expect(p.json.catalog.slots).toBe(20);
     expect((await a.call('POST', '/race/buy', { kind: 'engine', tier: 2 })).json.error).toBe('TIER_LOCKED');
     expect((await a.call('POST', '/race/buy', { kind: 'engine', tier: 1 })).json.error).toBe('INSUFFICIENT_RACE_CASH');
-    await db.updateTable('race_profiles').set({ cash: 100000 }).where('user_id', '=', a.id).execute();
     const b = await a.call('POST', '/race/buy', { kind: 'nitro', tier: 1 });
-    expect(b.status).toBe(200); expect(b.json.parts.nitro).toBe(1); expect(b.json.cash).toBe(100000 - PARTS.nitro.tiers[1].price);
-    const c = await a.call('POST', '/race/buy', { car: 'arrow' }); expect(c.json.car).toBe('arrow'); expect(c.json.cars).toContain('arrow');
+    expect(b.json.parts.nitro).toBe(1); expect(b.json.cash).toBe(15000 - partPrice('nitro', 1)!);
+    await db.updateTable('race_profiles').set({ cash: 100000 }).where('user_id', '=', a.id).execute();
+    const c = await a.call('POST', '/race/buy', { car: 'arrow', paint: 3 }); expect(c.json.car).toBe('arrow'); expect(c.json.paint).toBe(3);
+    expect((await a.call('POST', '/race/repair')).status).toBe(404);
   });
-  it('full race over ws: lobby → AI fill → in-match → settle prize, damage, unlock, results; then repair', async () => {
+  it('exchange coins <-> cash with daily 50 cap each way', async () => {
+    const a = await login('racer3');
+    await sql`UPDATE wallets SET balance = 1000 WHERE user_id = ${a.id}`.execute(db);
+    const bal0 = Number((await sql<any>`SELECT balance FROM wallets WHERE user_id=${a.id}`.execute(db)).rows[0].balance);
+    const r = await a.call('POST', '/race/exchange', { dir: 'in', coins: 30 });
+    expect(r.status).toBe(200); expect(r.json.profile.cash).toBe(15000 + 30 * 500); expect(r.json.balance).toBe(bal0 - 30);
+    expect((await a.call('POST', '/race/exchange', { dir: 'in', coins: 21 })).json.error).toBe('EXCHANGE_CAP');
+    expect((await a.call('POST', '/race/exchange', { dir: 'in', coins: 20 })).status).toBe(200);
+    const o = await a.call('POST', '/race/exchange', { dir: 'out', coins: 10 });
+    expect(o.json.profile.cash).toBe(15000 + 50 * 500 - 10000); expect(o.json.balance).toBe(bal0 - 50 + 10);
+    expect((await a.call('POST', '/race/exchange', { dir: 'out', coins: 0 })).status).toBe(400);
+  });
+  it('season rollover archives and resets points/unlocks, keeps cash+parts', async () => {
+    const a = await login('racer4'); await a.call('GET', '/race/profile');
+    await db.updateTable('race_profiles').set({ season: '2000-01', points: 99, unlocked: 3, cash: 77777, parts: JSON.stringify({ engine: 2 }) } as any).where('user_id', '=', a.id).execute();
+    const p = (await a.call('GET', '/race/profile')).json.profile;
+    expect(p.points).toBe(0); expect(p.unlocked).toBe(1); expect(p.cash).toBe(77777); expect(p.parts.engine).toBe(2);
+    const arch = await (db as any).selectFrom('race_seasons').selectAll().where('user_id', '=', a.id).execute();
+    expect(arch[0].season).toBe('2000-01'); expect(arch[0].points).toBe(99);
+  });
+  it('public race: 20 cars, humans start last, settles flat prize + points + cup', async () => {
     const a = await login('racer2');
     const w = await openWs(a.cookie);
-    w.ws.send(JSON.stringify({ type: 'race.join', track: 'jpn' }));
+    w.ws.send(JSON.stringify({ type: 'race.join', track: 'jp1' }));
     expect((await w.wait((m) => m.type === 'error')).code).toBe('TRACK_LOCKED');
-    w.ws.send(JSON.stringify({ type: 'race.join', track: 'tpe' }));
+    w.ws.send(JSON.stringify({ type: 'race.join', track: 'tw1' }));
     await w.wait((m) => m.type === 'race.lobby');
     const st = await w.wait((m) => m.type === 'race.started');
-    expect(st.cars.length).toBe(6); expect(st.cars.filter((c: any) => c.ai).length).toBe(5);
+    expect(st.cars.length).toBe(RACE_SLOTS); expect(st.cars.filter((c: any) => c.ai).length).toBe(19);
+    expect(st.cars[st.cars.length - 1].id).toBe(a.id);
     expect(inRace(a.id)).toBe(true);
-    w.ws.send(JSON.stringify({ type: 'race.join', track: 'tpe' }));
-    expect((await w.wait((m) => m.type === 'error' && m.for === 'race.join' && m.code === 'ALREADY_IN_MATCH')).code).toBe('ALREADY_IN_MATCH');
-    await w.wait((m) => m.type === 'race.snap');
-    // 玩家：全油門，故意擦撞路邊一下，用掉氮氣
-    await fastForwardRace(st.race_id, (s) => setRaceInput(s, a.id, { gas: true, right: s.tick > 100 && s.tick < 130, left: s.tick >= 130 && s.tick < 150, nitro: s.tick % 200 === 199 }));
+    await fastForwardRace(st.race_id, drive(a.id));
     const end = await w.wait((m) => m.type === 'race.ended');
-    expect(end.ranking.length).toBe(6); expect(end.me.rank).toBeGreaterThan(0);
+    expect(end.ranking.length).toBe(20); expect(end.me.prize).toBe(prizeFor(end.me.rank)); expect(end.me.qualified).toBe(end.me.rank <= 10);
+    expect(end.me.condition).toBeGreaterThan(0);
     const prof = (await a.call('GET', '/race/profile')).json.profile;
-    expect(prof.races).toBe(1); expect(prof.cash).toBe(3000 + end.me.prize); expect(prof.damage).toBeGreaterThan(0);
-    if (end.me.rank <= 3) expect(prof.unlocked).toBe(2);
-    expect(inRace(a.id)).toBe(false);
-    const lb = await a.call('GET', '/race/leaderboard/tpe'); expect(lb.json.best[0].name).toBeTruthy();
-    const r = await a.call('POST', '/race/repair'); expect(r.status).toBe(200); expect(r.json.damage).toBeLessThan(prof.damage);
-    const coins = await db.selectFrom('coin_ledger').selectAll().execute(); expect(coins.filter((x: any) => /race/.test(x.reason)).length).toBe(0);
-    w.ws.terminate();
-  }, 30000);
+    expect(prof.races).toBe(1); expect(prof.cash).toBe(15000 + end.me.prize);
+    const lb = (await a.call('GET', '/race/leaderboard/tw1')).json; expect(lb.best.length).toBe(end.me.time_ms === null ? 0 : 1); expect(lb.championship.length).toBe(1);
+    expect(inRace(a.id)).toBe(false); w.ws.close();
+  });
+  it('private room: create code, friend joins + invite, host starts', async () => {
+    const a = await login('host'), b = await login('friend');
+    const wa = await openWs(a.cookie), wb = await openWs(b.cookie);
+    wa.ws.send(JSON.stringify({ type: 'race.create', track: 'tw1' }));
+    const { code } = await wa.wait((m) => m.type === 'race.room'); expect(code).toMatch(/^[A-Z0-9]{6}$/);
+    const sc = (await (db as any).selectFrom('users').select('share_code').where('id', '=', b.id).executeTakeFirst()).share_code;
+    wa.ws.send(JSON.stringify({ type: 'race.invite', share_code: sc }));
+    const inv = await wb.wait((m) => m.type === 'race.invited'); expect(inv.code).toBe(code);
+    wb.ws.send(JSON.stringify({ type: 'race.join', code }));
+    await wa.wait((m) => m.type === 'race.lobby' && m.players.length === 2);
+    wb.ws.send(JSON.stringify({ type: 'race.start' })); expect((await wb.wait((m) => m.type === 'error')).code).toBe('FORBIDDEN');
+    wa.ws.send(JSON.stringify({ type: 'race.start' }));
+    const st = await wa.wait((m) => m.type === 'race.started'); expect(st.cars.filter((c: any) => !c.ai).length).toBe(2);
+    await fastForwardRace(st.race_id, (s) => { drive(a.id)(s); drive(b.id)(s); });
+    await wb.wait((m) => m.type === 'race.ended');
+    wa.ws.close(); wb.ws.close();
+  });
+  it('closing guard constant is 8 minutes', () => { expect(CLOSING_GUARD_MS).toBe(480000); });
 });

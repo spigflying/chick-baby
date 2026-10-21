@@ -164,15 +164,15 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     if (b.y >= a.y) continue; // 被坡擋住
     const alt = Math.floor(b.i / 3) % 2 === 0;
     const y1 = Math.max(0, Math.round(b.y)), y2 = Math.min(H, Math.round(a.y));
-    const fog = night && k > 18;
+    const fog = (night && k > 18) || (t.weather === 'fog' && k > 11), fogC = night ? G[3] : G[1];
     for (let yy = y1; yy < y2; yy++) {
       const f = (yy - b.y) / (a.y - b.y || 1);
       const rx = b.x + (a.x - b.x) * f, rw = b.w + (a.w - b.w) * f;
-      x.fillStyle = fog ? G[3] : night ? (alt ? G[2] : G[3]) : (alt ? G[1] : G[0]); if (t.scenery === 'snow' && !night) x.fillStyle = alt ? G[0] : G[1]; if (t.scenery === 'desert' && !fog) x.fillStyle = alt ? G[1] : G[0];
+      x.fillStyle = fog ? fogC : night ? (alt ? G[2] : G[3]) : (alt ? G[1] : G[0]); if (t.scenery === 'snow' && !night) x.fillStyle = alt ? G[0] : G[1]; if (t.scenery === 'desert' && !fog) x.fillStyle = alt ? G[1] : G[0];
       x.fillRect(0, yy, W, 1);
-      x.fillStyle = fog ? G[3] : (alt ? G[3] : G[0]); const rum = Math.max(1, rw * 0.14);
+      x.fillStyle = fog ? fogC : (alt ? G[3] : G[0]); const rum = Math.max(1, rw * 0.14);
       x.fillRect(Math.round(rx - rw - rum), yy, Math.ceil(rum), 1); x.fillRect(Math.round(rx + rw), yy, Math.ceil(rum), 1);
-      x.fillStyle = fog ? G[3] : night ? G[3] : (t.weather === 'rain' ? G[2] : alt ? G[2] : G[2]); if (night && !fog) x.fillStyle = G[2];
+      x.fillStyle = fog ? fogC : night ? G[3] : (t.weather === 'rain' ? G[2] : alt ? G[2] : G[2]); if (night && !fog) x.fillStyle = G[2];
       x.fillRect(Math.round(rx - rw), yy, Math.round(rw * 2), 1);
       if (alt && !fog) { x.fillStyle = night ? G[1] : G[0]; x.fillRect(Math.round(rx - Math.max(0.5, rw * 0.03)), yy, Math.max(1, Math.round(rw * 0.035)), 1); }
     }
@@ -205,8 +205,9 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   for (const c of v.cars) {
     const isMe = !!v.me && c.id === v.me.id, p = place(c); if (!p) continue;
     if (!isMe && p.py > p.clip + 2) continue; // 被坡頂擋住
+    if (!isMe && t.weather === 'fog' && p.k > 13) continue; // 霧裡看不到遠方的車
     const target = 48 * p.pw / playerPw(), lod = isMe ? 0 : pickLod(target);
-    const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 70 && v.frame % 20 < 2), frame: v.frame }, lod);
+    const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 60 && v.frame % 20 < 2), frame: v.frame }, lod);
     const bh = (img as any).bodyH as number;
     const bob = isMe && c.speed > 5 && v.frame % 4 < 2 ? 1 : 0, shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
     // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
@@ -223,6 +224,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   // 天氣
   if (t.weather === 'rain') { x.fillStyle = G[1]; for (let i = 0; i < 90; i++) { const rx = Math.floor((hash(i) * W + v.frame * 6 + i * 7) % W), ry = Math.floor((hash(i + 99) * H + v.frame * 18) % H); x.fillRect(rx, ry, 1, 5); x.fillRect(rx - 1, ry + 5, 1, 2); } }
   if (t.weather === 'snow') { x.fillStyle = G[0]; for (let i = 0; i < 90; i++) { const sx = Math.floor((hash(i) * W + Math.sin((v.frame + i * 13) / 9) * 3 - (v.me?.x ?? 0) * 10 + W) % W), sy = Math.floor((hash(i + 7) * H + v.frame * (1 + (i % 3))) % H); x.fillRect(sx, sy, i % 4 ? 1 : 2, 1); } }
+  if (t.weather === 'fog') { x.fillStyle = G[1]; for (let yy = 0; yy < HORIZON + 30; yy++) for (let xx = (yy + v.frame) & 1; xx < W; xx += yy < HORIZON ? 2 : 4 + ((yy - HORIZON) >> 3)) if (yy < HORIZON || hash(xx * 7 + yy) < 0.5) x.fillRect(xx, yy, 1, 1); }
   if (v.hud) drawHud(x, v);
 }
 function drawSkyline(x: CanvasRenderingContext2D, scene: string, bend: number, P: string[]) {
@@ -292,8 +294,10 @@ function drawHud(x: CanvasRenderingContext2D, v: View) {
   // 右下：氮氣＋損傷
   panel(x, W - 92, H - 22, 90, 20);
   for (let i = 0; i < NITRO_PER_RACE; i++) { const on = i < me.nitro, bx = W - 88 + i * 9; x.fillStyle = on ? G[0] : G[2]; x.fillRect(bx + 1, H - 19, 5, 1); x.fillRect(bx, H - 18, 7, 13); if (on) { x.fillStyle = G[1]; x.fillRect(bx + 2, H - 16, 1, 9); x.fillStyle = G[3]; x.fillRect(bx, H - 12, 7, 1); } }
-  text(x, 'DMG', W - 58, H - 19, 1);
-  x.fillStyle = G[2]; x.fillRect(W - 58, H - 10, 52, 5); x.fillStyle = me.damage > 70 && v.frame % 6 < 3 ? G[1] : G[0]; x.fillRect(W - 58, H - 10, Math.round(52 * me.damage / 100), 5);
+  // 完美度（100% = 全新；每次碰撞都會掉，掉越多極速越慢）
+  const cond = Math.max(0, Math.round(100 - me.damage)), low = cond < 40 && v.frame % 6 < 3;
+  text(x, 'COND', W - 58, H - 19, 1); text(x, `${cond}%`, W - 6 - textW(`${cond}%`), H - 19, low ? 1 : 0);
+  x.fillStyle = G[2]; x.fillRect(W - 58, H - 10, 52, 5); x.fillStyle = low ? G[1] : G[0]; x.fillRect(W - 58, H - 10, Math.round(52 * cond / 100), 5);
   // 倒數／訊息
   if (v.countdown > 0) { const s = String(Math.ceil(v.countdown / 20)); panel(x, W / 2 - 20, 40, 40, 50); text(x, s, W / 2 - 14, 45, 0, 6); }
   else if (v.tick - 60 < 20 && v.tick >= 60) { panel(x, W / 2 - 40, 50, 80, 30); text(x, 'GO!', W / 2 - 34, 55, 0, 4); }

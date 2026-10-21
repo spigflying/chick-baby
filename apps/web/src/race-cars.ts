@@ -164,8 +164,19 @@ export const CAR_SPECS: Record<string, { name: string; ops: Op[] }> = {
     ['rect', 4, 1, 44, 4, 'a'], ['rect', 4, 4, 44, 5, 's', 20],
     ...sym(['rect', 12, 5, 14, 9, 'd'], ['rect', 3, 0, 5, 7, 'd']),
   ] },
+  // 電腦車：單一灰色通用小轎車（所有 LOD 都一樣、沒有塗裝），一眼就能和真人玩家分開
+  ai: { name: '電腦車', ops: [
+    ...tyres(2, 10, 19),
+    ['trap', 6, 15, 14, 34, 10, 38, 'b'],
+    ['trap', 7, 14, 16, 32, 12, 36, 'g'],
+    ['rect', 4, 15, 44, 25, 'b'],
+    ['rect', 4, 24, 44, 25, 's'],
+    ['rect', 6, 18, 12, 21, 'l'], ['rect', 36, 18, 42, 21, 'l'],
+    ['rect', 19, 19, 29, 22, 's'],
+    ['rect', 6, 25, 42, 28, 'd'],
+  ] },
 };
-export const CAR_MODELS = Object.keys(CAR_SPECS);
+export const CAR_MODELS = Object.keys(CAR_SPECS).filter((m) => m !== 'ai');
 /** 塗裝（四階綠）：[車身, 配色] */
 export const LIVERIES: [number, number][] = [[0, 2], [1, 3], [2, 0], [0, 3], [1, 0], [2, 1]];
 export const LIVERY_NAMES = ['白／墨', '淺綠／黑', '墨綠／白', '白／黑', '淺綠／白', '墨綠／淺'];
@@ -174,15 +185,16 @@ export interface CarLook { brake?: boolean; nitro?: boolean; hit?: boolean; fram
 const cache = new Map<string, (number | null)[][]>();
 /** 點陣化：回傳 [列][行] 的色碼（null = 透明）。高度 = 寬 × 30/48。 */
 export function carPixels(model: string, livery: number, lod: number, look: CarLook = {}): (number | null)[][] {
+  if (model === 'ai') livery = 0;
   const key = `${model}:${livery}:${lod}:${+!!look.brake}:${+!!look.nitro}:${+!!look.hit}:${(look.frame ?? 0) & 1}`;
   const hit = cache.get(key); if (hit) return hit.map((r) => r.slice());
   const W = LODS[lod], k = (W - 2) / DESIGN_W, H = Math.round(DESIGN_H * k) + 2;
-  const [body, accent] = LIVERIES[livery % LIVERIES.length];
+  const [body, accent] = model === 'ai' ? [2, 2] : LIVERIES[livery % LIVERIES.length];
   const flash = look.hit && (look.frame ?? 0) % 2 === 1;
   const b = flash ? (body === 0 ? 2 : 0) : body;
   const col: Record<C, number | null> = {
     b, s: Math.min(3, b + 1) === 3 && b === 2 ? 3 : Math.min(3, b + 1), h: Math.max(0, b - 1) === b ? (b === 0 ? 0 : b - 1) : b - 1,
-    g: 3, r: 1, l: look.brake ? 0 : (b === 0 ? 2 : b === 1 ? 2 : 1), L: look.brake ? 0 : 1, d: 3, m: 2, a: accent, k: null,
+    g: 3, r: model === 'ai' ? null : 1, l: look.brake ? 0 : model === 'ai' ? 3 : (b === 0 ? 2 : b === 1 ? 2 : 1), L: look.brake ? 0 : 1, d: 3, m: 2, a: accent, k: null,
   };
   const g: (number | null)[][] = Array.from({ length: H }, () => Array(W).fill(null));
   const X = (x: number) => 1 + Math.round(x * k), Y = (y: number) => 1 + Math.round(y * k);
