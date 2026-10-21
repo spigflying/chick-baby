@@ -9,7 +9,7 @@ interface Input { seq: number; tick: number; left: boolean; right: boolean }
  * - 時鐘同步（Live.offset）推算伺服器 tick；輸入標記 tick = 預測 tick + 1（本地跑在伺服器前 N tick）
  * - 本地用共用引擎預測；收到快照 → 重設為伺服器狀態，丟掉已確認輸入，重播其餘輸入
  * - 誤差 ≤ 8px 平滑修正，否則直接瞬移；伺服器回報 late 增加 → N 加大（2–6）
- * - M2 多人（mode = 'multi'）：本地只預測自己、不預測推擠（collide: false）；其他寵物用最近兩個快照插值顯示（requirements §5.4）
+ * - M2 多人（mode = 'multi'）：寵物之間沒有碰撞，本地只預測自己（和伺服器一致）；其他寵物用最近兩個快照插值顯示（requirements §5.4）
  */
 /** 快關門時的剩餘秒數；離時間到超過 5 分鐘（或不是因關門而結束）就不顯示。 */
 export function stairsTimeLeft(endsAt: number | null, now: number): number | null {
@@ -31,7 +31,7 @@ export class StairsClient {
     this.me = Math.max(0, meId ? m.players.findIndex((p: any) => p.user_id === meId) : 0);
     this.petId = m.players[this.me].pet_id;
     this.N = this.P.inputBufferTicks;
-    this.state = createStairs(m.seed, m.players.map((p: any) => ({ petId: p.pet_id, speed: p.speed, stamina: p.stamina, strength: p.strength, weight: p.weight })), this.P);
+    this.state = createStairs(m.seed, m.players.map((p: any) => ({ petId: p.pet_id, speed: p.speed, stamina: p.stamina })), this.P);
     live.inMatch = true;
     (window as any).__stairs = this; // 方便 E2E 測試觀察
   }
@@ -41,7 +41,7 @@ export class StairsClient {
     for (const i of this.inputs) if (i.tick <= next) last = i;
     if (last) setInput(this.state, this.petId, last.left, last.right);
   }
-  private step() { this.applyInputsFor(this.state.tick + 1); stepStairs(this.state, { collide: false }); }
+  private step() { this.applyInputsFor(this.state.tick + 1); stepStairs(this.state); }
   tick() {
     this.frame++;
     if (this.ended || this.state.over) return;
@@ -93,7 +93,7 @@ export class StairsClient {
     if (err <= 8) { this.corr.x += dx; this.corr.y += dy; } else { this.corr.x = this.corr.y = 0; this.stats.snaps++; }
   }
   draw(g: CanvasRenderingContext2D) {
-    const s = this.state, P = this.P, W = P.width, GH = P.height, frame = this.frame;
+    const s = this.state, P = this.P, W = P.width, GH = P.height, PW = P.platW, frame = this.frame;
     const pl = s.players[this.me];
     g.fillStyle = PAL[0]; g.fillRect(0, 0, W, GH);
     g.fillStyle = PAL[3]; g.fillRect(0, 0, W, 7);
@@ -103,7 +103,7 @@ export class StairsClient {
     if (left !== null) { const x0 = W / 2 - 9, ss = String(left % 60).padStart(2, '0'); num(g, Math.floor(left / 60), x0, 1, 0); g.fillStyle = PAL[0]; g.fillRect(x0 + 4, 2, 1, 1); g.fillRect(x0 + 4, 4, 1, 1); num(g, +ss[0], x0 + 6, 1, 0); num(g, +ss[1], x0 + 10, 1, 0); }
     g.fillStyle = PAL[2]; for (let x = 0; x < W; x += 4) { g.fillRect(x, 7, 4, 1); g.fillRect(x + 1, 8, 2, 1); g.fillRect(x + 1, 9, 1, 1); }
     for (const p of s.plats) {
-      const x = Math.round(p.x), y = Math.round(p.y), PW = p.w ?? this.P.platW; // 多人局的起始平台是全寬
+      const x = Math.round(p.x), y = Math.round(p.y);
       if (p.type === 'normal') { g.fillStyle = PAL[3]; g.fillRect(x, y, PW, 3); g.fillStyle = PAL[1]; g.fillRect(x + 1, y + 1, PW - 2, 1); }
       else if (p.type === 'spiky') { g.fillStyle = PAL[3]; g.fillRect(x, y + 1, PW, 2); for (let i = 0; i < PW; i += 3) g.fillRect(x + i + 1, y - 1, 1, 2); }
       else if (p.type === 'conveyor') { g.fillStyle = PAL[3]; g.fillRect(x, y, PW, 3); g.fillStyle = PAL[0]; for (let i = 0; i < PW; i += 4) g.fillRect(x + ((i + Math.floor(s.tick / 3) * p.dir) % PW + PW) % PW, y + 1, 2, 1); }

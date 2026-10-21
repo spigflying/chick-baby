@@ -33,8 +33,8 @@ export function inviteHtml(v: StairsInvite, now: number): string {
 export const rankText = (r: number) => `第 ${r} 名`;
 /** 名字是「寵物名（暱稱）」，結算畫面很窄，只留寵物名。 */
 const petOnly = (n: string) => n.split('（')[0];
-const causeText = (p: MultiResultRow) => p.killed_by_name ? `被${petOnly(p.killed_by_name)}推` : p.cause === 'left' ? '離開' : p.cause === 'hp' ? '沒血了' : p.cause === 'fell' ? '掉下去' : '';
-export interface MultiResultRow { user_id: string; name: string; num: number; rank: number; floor: number; coins: number; cause: string | null; killed_by_name: string | null }
+const causeText = (p: MultiResultRow) => p.cause === 'left' ? '離開' : p.cause === 'hp' ? '沒血了' : p.cause === 'fell' ? '掉下去' : '';
+export interface MultiResultRow { user_id: string; name: string; num: number; rank: number; floor: number; coins: number; cause: string | null }
 /** 多人局結算畫面：所有人的名次、樓層、怎麼出局，加上自己拿到的金幣（餘額由上方列的 wallet.updated 更新，這裡不顯示，避免先顯示舊值）。 */
 export function multiResultHtml(r: { aborted?: boolean; error?: string; time_up?: boolean; closing?: boolean; players: MultiResultRow[]; me: MultiResultRow | null }): string {
   if (r.aborted || r.error) return `<div class="mt">— 遊戲中止 —</div><p>${r.error ? '結算失敗，這場不計分。' : '伺服器維護中，這場不計分。'}</p><div class="mi back on">✕ 離開</div>`;
@@ -56,5 +56,5 @@ export function lerpPos(prev: Pos | undefined, cur: Pos, t: number): Pos {
 }
 /** 下樓梯中的提示（畫面下方訊息列）。 */
 export function multiStatus(alive: number, meAlive: boolean): string {
-  return meAlive ? `←→ 移動，把別人擠下去！剩 ${alive} 隻` : `出局了…看大家玩（剩 ${alive} 隻）`;
+  return meAlive ? `←→ 移動，撐到最後！剩 ${alive} 隻` : `出局了…看大家玩（剩 ${alive} 隻）`;
 }

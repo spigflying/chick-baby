@@ -130,7 +130,7 @@ async function start(home: string, inv: Invite, users: string[], deadlines: Map<
       const rows = await tx.selectFrom('pets').select(['id', 'owner_id']).where('owner_id', 'in', users).where('status', 'in', ['egg', 'alive']).orderBy('id').execute();
       const busy = new Set((await tx.selectFrom('stair_match_players').innerJoin('stair_matches', 'stair_matches.id', 'stair_match_players.match_id').select('stair_match_players.user_id')
         .where('stair_match_players.user_id', 'in', users).where('stair_matches.status', '=', 'playing').where('stair_matches.started_at', '>', new Date(Date.now() - ACTIVE_WINDOW_MS)).execute()).map((r: any) => r.user_id));
-      const ok: { user: string; pet: string; speed: number; stamina: number; strength: number; weight: number }[] = [];
+      const ok: { user: string; pet: string; speed: number; stamina: number }[] = [];
       const dropped: { user: string; code: string }[] = [];
       for (const r of rows) {
         if (busy.has(r.owner_id)) { dropped.push({ user: r.owner_id, code: 'ALREADY_IN_MATCH' }); continue; }
@@ -139,7 +139,7 @@ async function start(home: string, inv: Invite, users: string[], deadlines: Map<
         await savePet(tx, row.id, state);
         const err = checkStairsStart(state);
         if (err) dropped.push({ user: r.owner_id, code: err });
-        else ok.push({ user: r.owner_id, pet: row.id, speed: state.speed, stamina: state.stamina, strength: state.strength, weight: state.weight });
+        else ok.push({ user: r.owner_id, pet: row.id, speed: state.speed, stamina: state.stamina });
       }
       for (const u of users) if (!rows.some((r: any) => r.owner_id === u)) dropped.push({ user: u, code: 'NO_PET' });
       if (ok.length < STAIRS_MULTI.minPlayers || !ok.some((o) => o.user === inv.from)) return { ok: null, dropped };
@@ -158,18 +158,18 @@ async function start(home: string, inv: Invite, users: string[], deadlines: Map<
     const mp = { ...P, matchMaxTicks: ticks };
     await db.updateTable('stair_matches').set({ config: JSON.stringify(mp) }).where('id', '=', res.id!).execute();
     const pu = new Map(presence.users(home).map((u) => [u.id, u]));
-    // 依 pet id 排序（引擎的玩家順序、推擠處理順序）；畫面編號 1–n
+    // 依 pet id 排序（引擎的玩家順序）；畫面編號 1–n
     const seats: Seat[] = res.ok.map((o, i) => {
       const u = pu.get(o.user);
       return { userId: o.user, petId: o.pet, name: u ? label(u) : '?', sp: u?.pet ? spriteKey(u.pet) : 'chicken', num: i + 1, pending: [], lastSeq: 0, lastProcessedSeq: 0, late: 0 };
     });
-    const m: MMatch = { id: res.id!, home, host: inv.from, state: createStairs(seed, res.ok.map((o) => ({ petId: o.pet, speed: o.speed, stamina: o.stamina, strength: o.strength, weight: o.weight })), mp),
+    const m: MMatch = { id: res.id!, home, host: inv.from, state: createStairs(seed, res.ok.map((o) => ({ petId: o.pet, speed: o.speed, stamina: o.stamina })), mp),
       startAt, closingEnd: ticks < P.matchMaxTicks && endAt === cutoff, seats, ended: false };
     mmatches.set(home, m);
     deps!.bench?.(home, seats.map((s) => s.userId));
     out({ t: 'mstairs.started', home, match_id: m.id, seed, engine_version: ENGINE_VERSION, config_hash: stableHash(mp), start_tick: 0, server_time_at_start: startAt, params: mp,
       ends_at: startAt + ticks * TICK_MS, closing_end: m.closingEnd,
-      players: res.ok.map((o, i) => ({ user_id: o.user, pet_id: o.pet, name: seats[i].name, sp: seats[i].sp, num: seats[i].num, speed: o.speed, stamina: o.stamina, strength: o.strength, weight: o.weight })) });
+      players: res.ok.map((o, i) => ({ user_id: o.user, pet_id: o.pet, name: seats[i].name, sp: seats[i].sp, num: seats[i].num, speed: o.speed, stamina: o.stamina })) });
     out({ t: 'mstairs.event', home, kind: 'start', invite: inv.id, match_id: m.id, users: seats.map((s) => s.userId), names: seats.map((s) => s.name) });
   } catch (err) {
     console.error('multi stairs start failed', err);
@@ -243,14 +243,14 @@ export async function finish(m: MMatch, reason: 'over' | 'quit') {
   if (m.ended || !deps) return null; m.ended = true;
   const { db } = deps;
   const rank = new Map(stairsRanking(m.state).map((r) => [r.petId, r]));
-  const n = m.seats.length, nameOf = new Map(m.seats.map((s) => [s.petId, s.name]));
+  const n = m.seats.length;
   try {
     const results = await db.transaction().execute(async (tx) => {
       const row0 = await tx.updateTable('stair_matches').set({ status: 'done', ended_at: new Date() }).where('id', '=', m.id).where('status', '=', 'playing').returning('id').executeTakeFirst();
       if (!row0) return null; // 已結算或已中止
       await lockWallets(tx, m.seats.map((s) => s.userId));
       const homes = new Map((await tx.selectFrom('homes').select(['id', 'owner_id']).where('owner_id', 'in', m.seats.map((s) => s.userId)).execute()).map((h: any) => [h.owner_id, h.id]));
-      const list: { user_id: string; pet_id: string; name: string; num: number; rank: number; floor: number; coins: number; cause: string | null; killed_by: string | null; killed_by_name: string | null }[] = [];
+      const list: { user_id: string; pet_id: string; name: string; num: number; rank: number; floor: number; coins: number; cause: string | null }[] = [];
       for (const s of [...m.seats].sort((a, b) => (a.petId < b.petId ? -1 : 1))) {
         const r = rank.get(s.petId)!;
         const row = await lockPet(tx, s.petId);
@@ -259,14 +259,14 @@ export async function finish(m: MMatch, reason: 'over' | 'quit') {
         if (state.status === 'alive') { applyStairsResult(state, r.floor, undefined, m.state.tick); coins = multiStairsCoins(n, r.rank); }
         await savePet(tx, s.petId, state);
         if (coins > 0) await changeBalance(tx, s.userId, coins, 'stairs_match', { type: 'stair_match', id: m.id });
-        await insertEvents(tx, s.petId, [{ type: 'stairs_match', actor: s.userId, payload: { match_id: m.id, floors: r.floor, rank: r.rank, players: n, coins, reason, cause: r.cause, killed_by: r.killedBy } }]);
-        await tx.updateTable('stair_match_players').set({ rank: r.rank, floors: r.floor, eliminated_at_tick: r.diedAtTick ?? m.state.tick, eliminated_by_pet_id: r.killedBy, coins_awarded: coins })
+        await insertEvents(tx, s.petId, [{ type: 'stairs_match', actor: s.userId, payload: { match_id: m.id, floors: r.floor, rank: r.rank, players: n, coins, reason, cause: r.cause } }]);
+        await tx.updateTable('stair_match_players').set({ rank: r.rank, floors: r.floor, eliminated_at_tick: r.diedAtTick ?? m.state.tick, coins_awarded: coins })
           .where('match_id', '=', m.id).where('user_id', '=', s.userId).execute();
         const h = homes.get(s.userId); if (h) await notify(tx, { t: 'pet', home: h, pet: s.petId, ev: { type: 'stairs_match', floors: r.floor, rank: r.rank } });
-        list.push({ user_id: s.userId, pet_id: s.petId, name: s.name, num: s.num, rank: r.rank, floor: r.floor, coins, cause: r.cause, killed_by: r.killedBy, killed_by_name: r.killedBy ? nameOf.get(r.killedBy) ?? null : null });
+        list.push({ user_id: s.userId, pet_id: s.petId, name: s.name, num: s.num, rank: r.rank, floor: r.floor, coins, cause: r.cause });
       }
       await tx.insertInto('audit_log').values({ user_id: m.host, action: 'stairs.finish_multi', result: 'ok', target_type: 'stair_match', target_id: m.id,
-        detail: JSON.stringify({ home: m.home, reason, players: list.map((o) => ({ user: o.user_id, rank: o.rank, floors: o.floor, coins: o.coins, killed_by: o.killed_by })), late: Object.fromEntries(m.seats.map((s) => [s.userId, s.late])) }) }).execute();
+        detail: JSON.stringify({ home: m.home, reason, players: list.map((o) => ({ user: o.user_id, rank: o.rank, floors: o.floor, coins: o.coins })), late: Object.fromEntries(m.seats.map((s) => [s.userId, s.late])) }) }).execute();
       return list.sort((a, b) => a.rank - b.rank || a.num - b.num);
     });
     if (results) out({ t: 'mstairs.ended', home: m.home, match_id: m.id, final_tick: m.state.tick, time_up: stairsTimeUp(m.state), closing: m.closingEnd && stairsTimeUp(m.state), players: results });

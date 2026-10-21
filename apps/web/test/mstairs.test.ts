@@ -9,12 +9,12 @@ describe('M2 一起下樓梯 (web helpers)', () => {
   });
   it('result lists every pet with rank, floors, coins, how it went out; highlights me', () => {
     const players = [
-      { user_id: 'a', name: 'A寶（阿）', num: 2, rank: 1, floor: 30, coins: 11, cause: null, killed_by_name: null },
-      { user_id: 'b', name: 'B寶（逼）', num: 1, rank: 2, floor: 12, coins: 8, cause: 'fell', killed_by_name: 'A寶（阿）' },
-      { user_id: 'c', name: 'C寶', num: 3, rank: 3, floor: 3, coins: 5, cause: 'left', killed_by_name: null },
+      { user_id: 'a', name: 'A寶（阿）', num: 2, rank: 1, floor: 30, coins: 11, cause: null },
+      { user_id: 'b', name: 'B寶（逼）', num: 1, rank: 2, floor: 12, coins: 8, cause: 'fell' },
+      { user_id: 'c', name: 'C寶', num: 3, rank: 3, floor: 3, coins: 5, cause: 'left' },
     ];
     const h = multiResultHtml({ players, me: players[1] });
-    expect(h).toContain('1. A寶（阿）'); expect(h).toContain('<div class="bwhy">被A寶推</div>'); expect(h).not.toContain('<small'); expect(h).not.toContain('目前'); expect(h).toContain('離開'); expect(h).toContain('12 樓 +8');
+    expect(h).toContain('1. A寶（阿）'); expect(h).toContain('<div class="bwhy">掉下去</div>'); expect(h).not.toContain('推'); expect(h).not.toContain('<small'); expect(h).not.toContain('目前'); expect(h).toContain('離開'); expect(h).toContain('12 樓 +8');
     expect(h).toContain('brow mine'); expect(h).toContain(rankText(2));
     expect(multiResultHtml({ aborted: true, players: [], me: null })).toContain('遊戲中止');
   });

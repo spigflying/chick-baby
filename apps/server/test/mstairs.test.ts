@@ -1,4 +1,4 @@
-// M2 多人下樓梯（requirements §4.4、§5.0）：以家為單位的邀請 → 開始 → 推擠出局 → 結算；離開、互斥、關門中止。
+// M2 多人下樓梯（requirements §4.4、§5.0）：以家為單位的邀請 → 開始 → 出局 → 結算；離開、互斥、關門中止。
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
@@ -92,7 +92,8 @@ describe('multi-player stairs (M2)', () => {
     const stb = await wb.wait((m) => m.type === 'match.started', 'started b');
     expect(st).toMatchObject({ mode: 'multi', home_id: home, match_id: stb.match_id });
     expect(st.players.map((p: any) => p.user_id).sort()).toEqual([a.id, b.id].sort());
-    expect(st.players.find((p: any) => p.user_id === a.id)).toMatchObject({ pet_id: pa, name: 'Pchicken（Amy）', strength: 30, weight: 25 });
+    expect(st.players.find((p: any) => p.user_id === a.id)).toMatchObject({ pet_id: pa, name: 'Pchicken（Amy）' });
+    expect(st.players[0]).not.toHaveProperty('strength');
     const ev = await wc.wait((m) => m.type === 'stairs.event' && m.kind === 'start', 'c sees start');
     expect(ev.users.sort()).toEqual([a.id, b.id].sort());
     expect(wc.msgs.some((m) => m.type === 'match.started')).toBe(false);
@@ -107,20 +108,21 @@ describe('multi-player stairs (M2)', () => {
     expect(wc.msgs.some((m) => m.type === 'match.snapshot')).toBe(false);
     wa.send({ type: 'match.input', match_id: st.match_id, seq: 1, tick: 5, left: false, right: false });
     await wa.wait((m) => m.type === 'stairs.notice' && m.code === 'BAD_INPUT', 'seq must increase');
-    // b 被 a 推下去：最後推的人在 60 tick 內 → 擊殺算 a
+    // b 掉下去（寵物之間不會碰撞，沒有「被誰推」）
     const mm = mmatches.get(home)!;
     const sb = mm.state.players.find((p) => p.petId === pb)!;
-    Object.assign(sb, { lastPushBy: pa, lastPushTick: mm.state.tick, y: STAIRS_PARAMS.height + 5, on: null });
+    Object.assign(sb, { y: STAIRS_PARAMS.height + 5, on: null });
     const endA = await wa.wait((m) => m.type === 'match.ended', 'ended a');
     const endB = await wb.wait((m) => m.type === 'match.ended', 'ended b');
     expect(endA.me).toMatchObject({ user_id: a.id, rank: 1, coins: 8 });
-    expect(endB.me).toMatchObject({ user_id: b.id, rank: 2, coins: 5, cause: 'fell', killed_by: pa, killed_by_name: 'Pchicken（Amy）' });
+    expect(endB.me).toMatchObject({ user_id: b.id, rank: 2, coins: 5, cause: 'fell' });
+    expect(endB.me).not.toHaveProperty('killed_by');
     expect(endA.players.map((p: any) => p.rank)).toEqual([1, 2]);
     const led = await db.selectFrom('coin_ledger').select(['user_id', 'delta', 'ref_id']).where('reason', '=', 'stairs_match').execute();
     expect(led.map((l: any) => [l.user_id, l.delta]).sort()).toEqual([[a.id, 8], [b.id, 5]].sort());
     expect(new Set(led.map((l: any) => l.ref_id))).toEqual(new Set([st.match_id]));
     const players = await db.selectFrom('stair_match_players').selectAll().where('match_id', '=', st.match_id).execute();
-    expect(players.find((p: any) => p.user_id === b.id)).toMatchObject({ rank: 2, eliminated_by_pet_id: pa, coins_awarded: 5 });
+    expect(players.find((p: any) => p.user_id === b.id)).toMatchObject({ rank: 2, eliminated_by_pet_id: null, coins_awarded: 5 });
     expect(players.find((p: any) => p.user_id === a.id)).toMatchObject({ rank: 1, eliminated_by_pet_id: null, coins_awarded: 8 });
     expect((await db.selectFrom('stair_matches').select('status').where('id', '=', st.match_id).executeTakeFirstOrThrow()).status).toBe('done');
     expect(await db.selectFrom('audit_log').select('action').where('action', '=', 'stairs.finish_multi').execute()).toHaveLength(1);
@@ -144,7 +146,7 @@ describe('multi-player stairs (M2)', () => {
     wc.ws.terminate(); // 斷線＝出局
     for (let i = 0; i < 100 && mmatches.get(home)?.state.players.filter((p) => p.alive).length !== 2; i++) await sleep(20);
     const left = mmatches.get(home)!.state.players.find((p) => p.cause === 'left')!;
-    expect(left.alive).toBe(false); expect(left.killedBy).toBeNull();
+    expect(left.alive).toBe(false);
     expect(mmatches.get(home)!.state.over).toBe(false);
     await sleep(200); // 晚幾個 tick 再走（同一 tick 出局會比樓層）
     wa.send({ type: 'match.leave', match_id: st.match_id }); // a 按 Esc
