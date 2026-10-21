@@ -4,6 +4,7 @@ import type { Live } from './ws';
 import { createRace, stepRace, trackSegs, SEG_LEN, raceRanking, trackById, CARS, PARTS, PART_KINDS, TRACKS, COUNTRIES, carStats, fillField, cupTrack, prizeFor, PRIZES, POINTS, ME, PAINT_NAMES, MAX_OUT_COST, PRICE_DIVISOR, QUALIFY_RANK, RACES_PER_COUNTRY, RACE_SLOTS, NITRO_PER_RACE, type RaceState, type PartKind } from '@chick/engine';
 import { drawShop, newShop, shopHit, shopMove, isPaint, SHOP_SCREENS } from './race-shop';
 import { drawRace, carCanvas, text, textW, zh, zhW, panel, drawMinimap, W, H, G, type ViewCar } from './race-gfx';
+import { SnapClock, bracket } from './race-interp';
 
 const segAt = (id: string, z: number) => { const s = trackSegs(id); return s[((Math.floor(z / SEG_LEN) % s.length) + s.length) % s.length].curve; };
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -117,14 +118,14 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     mode = 'lobby'; setMatch(true); lobbyPlayers = [me.user.display_name]; lobbyStarts = Date.now() + 1000; msg.textContent = '準備發車…'; renderPanel();
   }
   function leave() { live?.send({ type: 'race.leave' }); race = null; mode = 'menu'; setMatch(false); msg.textContent = '已離開比賽'; renderPanel(); }
-  function onStarted(m: any) { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null }; mode = 'race'; setMatch(true); const hum = m.cars.filter((c: any) => !c.ai).length; msg.textContent = `${trackById(m.track)!.name}・${hum > 1 ? `${hum} 位玩家＋` : ''}電腦 ${m.cars.length - hum} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
+  function onStarted(m: any) { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null }; clock.reset(); mode = 'race'; setMatch(true); const hum = m.cars.filter((c: any) => !c.ai).length; msg.textContent = `${trackById(m.track)!.name}・${hum > 1 ? `${hum} 位玩家＋` : ''}電腦 ${m.cars.length - hum} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
   const off = live?.on((m) => {
     if (m.type === 'wallet.updated') { coins = m.balance; if (tab === 'garage' && mode === 'menu') renderPanel(); }
     if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('race.')) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; toast(ERR[m.code] ?? m.code); renderPanel(); }
     else if (m.type === 'race.notice' && !m.home_id) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; renderPanel(); }
     else if (m.type === 'race.started') onStarted(m);
     else if (m.type === 'race.snap' && race && m.race_id === race.id) {
-      race.snaps.push({ at: performance.now(), tick: m.tick, countdown: m.countdown, cars: new Map(m.cars.map((c: any[]) => [c[0], c])) }); if (race.snaps.length > 6) race.snaps.shift();
+      clock.onSnap(m.tick, performance.now()); race.snaps.push({ at: performance.now(), tick: m.tick, countdown: m.countdown, cars: new Map(m.cars.map((c: any[]) => [c[0], c])) }); if (race.snaps.length > 8) race.snaps.shift();
     }
     else if (m.type === 'race.ended' && race && m.race_id === race.id) {
       race.ended = m; mode = 'results'; setMatch(false);
@@ -171,18 +172,19 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   }
   sendTimer = window.setInterval(() => pushInput(true), 250);
   // ---------- 繪圖迴圈 ----------
-  let lastStep = performance.now();
+  const clock = new SnapClock(), T0 = performance.now();
+  let acc = 0, lastNow = T0, prevAttract: Map<string, [number, number]> | null = null;
   function view(): ViewCar[] | null {
     if (!race || race.snaps.length === 0) return null;
-    const now = performance.now() - 100; const sn = race.snaps; let a = sn[0], b = sn[sn.length - 1];
-    for (let i = 0; i < sn.length - 1; i++) if (sn[i].at <= now && sn[i + 1].at >= now) { a = sn[i]; b = sn[i + 1]; }
-    const f = b.at === a.at ? 1 : Math.max(0, Math.min(1, (now - a.at) / (b.at - a.at)));
+    const [a, b, f] = bracket(race.snaps, clock.renderTick(performance.now()));
     return race.cars.map((c) => { const p = a.cars.get(c.id), q = b.cars.get(c.id) ?? p; if (!p || !q) return null;
-      return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[1] + (q[1] - p[1]) * f, x: p[2] + (q[2] - p[2]) * f, speed: q[3], damage: q[4], nitro: q[5], nitroT: q[6], fin: q[7], hit: q[8], brake: c.id === me.user.id ? keys.brake : q[3] < p[3] - 0.5 } as ViewCar; }).filter(Boolean) as ViewCar[];
+      return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[1] + (q[1] - p[1]) * f, x: p[2] + (q[2] - p[2]) * f, speed: p[3] + (q[3] - p[3]) * f, damage: q[4], nitro: q[5], nitroT: q[6], fin: q[7], hit: q[8], brake: c.id === me.user.id ? keys.brake : q[3] < p[3] - 0.5 } as ViewCar; }).filter(Boolean) as ViewCar[];
   }
+  // 每個 rAF 都重畫（60fps）；位置依時間內插。動畫用的 frame 仍是 20Hz 計數（閃爍等節奏不變）。
   function loop() {
     if (dead) return; raf = requestAnimationFrame(loop);
-    const now = performance.now(); if (now - lastStep < 1000 / 20) return; lastStep = now; frame++;
+    const now = performance.now(); acc = Math.min(acc + (now - lastNow), 250); lastNow = now;
+    frame = Math.floor((now - T0) / 50);
     const t = trackById(race?.track ?? sel)!;
     if (race && (mode === 'race' || mode === 'results')) {
       const cars = view(); if (!cars) return drawWait();
@@ -199,9 +201,10 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     if (shopOn()) { drawShop(x, shop, prof, coins, frame); return; }
     // 選單：電腦自己跑的展示畫面
     if (!attract || attract.track !== sel) setAttract();
-    stepRace(attract!); if (attract!.over) setAttract();
+    while (acc >= 50) { acc -= 50; prevAttract = new Map(attract!.cars.map((c) => [c.id, [c.z, c.x]])); stepRace(attract!); if (attract!.over) { setAttract(); prevAttract = null; } }
+    const af = acc / 50, ip = (c: { id: string; z: number; x: number }, i: 0 | 1) => { const p = prevAttract?.get(c.id); const v = i ? c.x : c.z; return p ? p[i] + (v - p[i]) * af : v; };
     const lead = raceRanking(attract!)[2];
-    const cars = attract!.cars.map((c) => ({ id: c.id, name: c.name, ai: true, car: c.car, color: c.color, z: c.z, x: c.x, speed: c.speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT, fin: c.finishedTick, hit: c.hit }));
+    const cars = attract!.cars.map((c) => ({ id: c.id, name: c.name, ai: true, car: c.car, color: c.color, z: ip(c, 0), x: ip(c, 1), speed: c.speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT, fin: c.finishedTick, hit: c.hit }));
     drawRace(x, { track: t, me: cars.find((c) => c.id === lead.id)!, cars, tick: attract!.tick, countdown: 0, laps: attract!.laps, len: attract!.len, rank: 0, frame, hud: false });
     // 選單標題（原生 240×200）
     panel(x, 0, 0, W, 24); text(x, 'GRAND PRIX', 6, 5, 0, 2); zh(x, `${t.country}・${t.name}`, W - 6 - zhW(x, `${t.country}・${t.name}`), 6, 1);
@@ -211,7 +214,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   }
   /** 賽前資訊卡（等待玩家時）：國家、賽道、長度、圈數、天氣、出發倒數、參賽者 */
   function drawWait() {
-    const t = trackById(race?.track ?? sel)!; drawRace(x, { track: t, me: null, cars: [], tick: 0, countdown: 0, laps: t.laps, len: 1, rank: 0, frame, hud: false, camZ: frame * 4, camX: 0 });
+    const t = trackById(race?.track ?? sel)!; drawRace(x, { track: t, me: null, cars: [], tick: 0, countdown: 0, laps: t.laps, len: 1, rank: 0, frame, hud: false, camZ: (performance.now() - T0) / 12.5, camX: 0 });
     panel(x, 12, 14, W - 24, H - 28, 3, 1);
     text(x, 'RACE INFO', 22, 22, 0, 2);
     zh(x, `${t.country}　${t.name}`, 22, 44, 0, 12);
