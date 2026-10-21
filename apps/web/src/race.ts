@@ -2,7 +2,7 @@
 import { api, errText } from './api';
 import type { Live } from './ws';
 import { createRace, stepRace, trackSegs, SEG_LEN, raceRanking, trackById, CARS, PARTS, PART_KINDS, TRACKS, COUNTRIES, carStats, fillField, cupTrack, prizeFor, PRIZES, POINTS, ME, PAINT_NAMES, MAX_OUT_COST, PRICE_DIVISOR, QUALIFY_RANK, RACES_PER_COUNTRY, RACE_SLOTS, NITRO_PER_RACE, type RaceState, type PartKind } from '@chick/engine';
-import { partIcon, paintIcon } from './race-icons';
+import { drawShop, newShop, shopHit, shopMove, isPaint, SHOP_SCREENS } from './race-shop';
 import { drawRace, carCanvas, text, textW, zh, zhW, panel, drawMinimap, W, H, G, type ViewCar } from './race-gfx';
 
 const segAt = (id: string, z: number) => { const s = trackSegs(id); return s[((Math.floor(z / SEG_LEN) % s.length) + s.length) % s.length].curve; };
@@ -23,14 +23,20 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
         <span class="sp"></span>
         <button data-k="nitro" class="n2o">N2O</button><button data-k="brake">煞車</button><button data-k="gas" class="gas">油門</button>
       </div>
-      <p class="muted race-keys">鍵盤：←→ 轉向、↑/Z 油門、↓/X 煞車、空白鍵 氮氣</p>
+      <div class="race-pad shop-pad" id="spad" hidden>
+        <button data-s="prev" aria-label="上一類">◀類</button><button data-s="left" aria-label="左">←</button><button data-s="up" aria-label="上">↑</button><button data-s="down" aria-label="下">↓</button><button data-s="right" aria-label="右">→</button><button data-s="next" aria-label="下一類">類▶</button>
+        <span class="sp"></span><button data-s="back">B</button><button data-s="ok" class="gas">A 確定</button>
+      </div>
+      <p class="muted race-keys" id="skeys" hidden>改裝店：←→↑↓ 選格子（撞到邊換類別）、Q/E 或 PageUp/PageDown 換類別、Enter/Z 確定、Esc/X 取消；也可以直接點畫面</p>
+      <p class="muted race-keys" id="rkeys">鍵盤：←→ 轉向、↑/Z 油門、↓/X 煞車、空白鍵 氮氣</p>
     </div>
     <div class="panel race-panel"><h2>賽車錦標賽</h2>
       <div class="tabs" id="rtabs"><button data-t="cup" class="on">錦標賽</button><button data-t="garage">車庫</button><button data-t="board">排行榜</button></div>
       <div id="rbody"></div></div></main>`;
   const cv = root.querySelector('#rc') as HTMLCanvasElement, x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
   const body = root.querySelector('#rbody') as HTMLElement, msg = root.querySelector('#rmsg') as HTMLElement;
-  let prof: any = null, cat: any = null, tab = 'cup', sel = 'tw1', coins = 0, pick: { k: PartKind; i: number } | null = null;
+  let prof: any = null, cat: any = null, tab = 'cup', sel = 'tw1', coins = 0;
+  const shop = newShop();
   let mode: 'menu' | 'lobby' | 'race' | 'results' = 'menu';
   let attract: RaceState | null = null, frame = 0, raf = 0, dead = false;
   let race: { id: string; track: string; laps: number; len: number; cars: any[]; snaps: Snap[]; ended: any | null } | null = null;
@@ -46,6 +52,9 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   // ---------- 面板 ----------
   function renderPanel() {
     root.querySelectorAll('#rtabs button').forEach((b) => b.classList.toggle('on', (b as HTMLElement).dataset.t === tab));
+    const inShop = shopOn(); (root.querySelector('#rpad') as HTMLElement).hidden = inShop; (root.querySelector('#rkeys') as HTMLElement).hidden = inShop;
+    (root.querySelector('#spad') as HTMLElement).hidden = !inShop; (root.querySelector('#skeys') as HTMLElement).hidden = !inShop;
+    if (inShop && shop.cur < 0) setCat(shop.cat);
     if (!prof) { body.innerHTML = '<p class="muted">載入中…</p>'; return; }
     if (mode === 'results' && race?.ended && !race.ended.aborted) return showResults(race.ended);
     const head = `<p class="race-cash">金幣 <b>${money(coins)}</b>　積分 <b>${prof.points}</b>　勝場 ${prof.wins}/${prof.races}<br><span class="muted">賽季 ${esc(prof.season)}（每月重置積分與解鎖，獎金和零件保留）</span></p>`;
@@ -66,24 +75,11 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       (body.querySelector('#rgo') as HTMLElement).onclick = () => join();
     } else if (tab === 'garage') {
       const st = carStats(prof.parts, prof.car);
-      const tile = (k: PartKind, i: number) => { const t = PARTS[k].tiers[i], on = prof.parts[k] === i, pend = pick?.k === k && pick.i === i;
-        return `<button class="shop-it${on ? ' on' : ''}${pend ? ' pend' : ''}${!on && t.price > coins ? ' poor' : ''}" data-k="${k}" data-i="${i}"><canvas data-ic="${k}:${i}" width="48" height="48"></canvas><b>${esc(t.name)}</b><span>${on ? '裝備中' : t.price ? money(t.price) : '免費'}</span></button>`; };
-      const cat = (k: PartKind) => { const pend = pick?.k === k ? PARTS[k].tiers[pick.i] : null;
-        return `<div class="shop-cat"><h4>${esc(PARTS[k].label)} <span class="muted">${esc(PARTS[k].desc)}</span></h4><div class="shop-grid">${PARTS[k].tiers.map((_, i) => tile(k, i)).join('')}</div>
-        ${pend ? `<p class="shop-confirm">換成「${esc(pend.name)}」${pend.price ? `要付 <b>${money(pend.price)}</b>` : '（免費）'}，目前的「${esc(PARTS[k].tiers[prof.parts[k]].name)}」會直接丟掉、不退錢。 <button id="rbuy">確定換裝</button> <button id="rno">取消</button></p>` : ''}</div>`; };
-      body.innerHTML = head + `<div class="garage-car"><canvas id="gcar" width="52" height="34"></canvas><div><b>${esc(CARS.find((c) => c.id === prof.car)?.name)}</b>・${esc(PAINT_NAMES[prof.paint] ?? '')}<br><span class="muted">極速 ${Math.round(st.topSpeed * 3.6)} km/h・加速 ${st.accel.toFixed(0)}・抓地 ${st.grip.toFixed(2)}／雨 ${st.wetGrip.toFixed(2)}・裝甲 前${Math.round(st.armor.F * 100)}／後${Math.round(st.armor.R * 100)}／側${Math.round(st.armor.S * 100)}%</span></div></div>
-        <h3>改裝店</h3><p class="muted">每類任選一階直接買（不用照順序）；換別的階（包括降級）舊零件丟掉、全額付款、不退錢。全部 3 階共 ${money(MAX_OUT_COST)}（TG2 原價 ÷ ${PRICE_DIVISOR}）。氮氣升級只加強力道和時間，每場一律 ${NITRO_PER_RACE} 次；雨胎下雨／下雪時自動換上。</p>
-        ${PART_KINDS.map(cat).join('')}
-        <div class="shop-cat"><h4>塗裝 <span class="muted">8 色免費</span></h4><div class="shop-grid">${PAINT_NAMES.map((n, i) => `<button class="shop-it${prof.paint === i ? ' on' : ''}" data-paint="${i}"><canvas data-ic="paint:${i}" width="48" height="48"></canvas><b>${esc(n)}</b><span>${prof.paint === i ? '使用中' : '免費'}</span></button>`).join('')}</div></div>
+      body.innerHTML = head + `<h3>改裝店（在左邊畫面裡）</h3><p class="muted">8 類零件＋塗裝，共 9 個畫面，用 ◀類／類▶ 換類別。每類任選一階直接買（不用照順序）；換別的階（包括降級）舊零件丟掉、全額付款、不退錢。全部 3 階共 ${money(MAX_OUT_COST)}（TG2 原價 ÷ ${PRICE_DIVISOR}）。氮氣升級只加強力道和時間，每場一律 ${NITRO_PER_RACE} 次；雨胎下雨／下雪時自動換上。</p>
+        <p class="muted">目前：極速 ${Math.round(st.topSpeed * 3.6)} km/h・加速 ${st.accel.toFixed(0)}・抓地 ${st.grip.toFixed(2)}／雨 ${st.wetGrip.toFixed(2)}・裝甲 前${Math.round(st.armor.F * 100)}／後${Math.round(st.armor.R * 100)}／側${Math.round(st.armor.S * 100)}%・塗裝 ${esc(PAINT_NAMES[prof.paint] ?? '')}</p>
         <h3>車款 <span class="muted">外觀，免費隨意換</span></h3><ul>${CARS.map((c) => `<li><span><canvas class="mini" data-car="${c.id}" width="34" height="22"></canvas> <b>${esc(c.name)}</b> <span class="muted">${esc(c.desc ?? '')}</span></span>${prof.car === c.id ? '<span>使用中</span>' : `<button data-car-buy="${c.id}">換這台</button>`}</li>`).join('')}</ul>`;
-      const g = (body.querySelector('#gcar') as HTMLCanvasElement).getContext('2d')!; g.imageSmoothingEnabled = false; g.fillStyle = G[0]; g.fillRect(0, 0, 52, 34); g.drawImage(carCanvas(prof.car, prof.paint), 2, 2);
-      body.querySelectorAll('canvas[data-ic]').forEach((c) => { const [k, i] = (c as HTMLElement).dataset.ic!.split(':'); const cx = (c as HTMLCanvasElement).getContext('2d')!; cx.imageSmoothingEnabled = false; cx.fillStyle = G[1]; cx.fillRect(0, 0, 48, 48); cx.drawImage(k === 'paint' ? paintIcon(+i) : partIcon(k as PartKind, +i), 0, 0); });
       body.querySelectorAll('canvas.mini').forEach((c) => { const cx = (c as HTMLCanvasElement).getContext('2d')!; cx.fillStyle = G[0]; cx.fillRect(0, 0, 34, 22); cx.drawImage(carCanvas((c as HTMLElement).dataset.car!, prof.paint, {}, 1), 1, 1); });
-      body.querySelectorAll('.shop-it[data-k]').forEach((b) => (b as HTMLElement).onclick = () => { const k = (b as HTMLElement).dataset.k as PartKind, i = +(b as HTMLElement).dataset.i!; if (prof.parts[k] === i) return; pick = { k, i }; renderPanel(); });
-      const ok = body.querySelector('#rbuy') as HTMLElement | null; if (ok) ok.onclick = () => { const q = pick!; pick = null; void buy({ kind: q.k, tier: q.i }); };
-      const no = body.querySelector('#rno') as HTMLElement | null; if (no) no.onclick = () => { pick = null; renderPanel(); };
       body.querySelectorAll('[data-car-buy]').forEach((b) => (b as HTMLElement).onclick = () => buy({ car: (b as HTMLElement).dataset.carBuy }));
-      body.querySelectorAll('[data-paint]').forEach((b) => (b as HTMLElement).onclick = () => buy({ paint: +(b as HTMLElement).dataset.paint! }));
     } else {
       body.innerHTML = head + `<select id="rlbt">${TRACKS.map((t) => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.country)}・${esc(t.name)}</option>`).join('')}</select><div id="rlb" class="muted">載入中…</div>`;
       const sl = body.querySelector('#rlbt') as HTMLSelectElement; sl.onchange = () => loadBoard(sl.value); void loadBoard(sel);
@@ -94,7 +90,25 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       el.innerHTML = `<h3>最快完賽</h3><ol>${r.best.map((b: any) => `<li><span>${esc(b.name)}</span><span>${fmtMs(b.time_ms)}</span></li>`).join('') || '<li class="muted">還沒有人跑完</li>'}</ol><h3>錦標賽積分</h3><ol>${r.championship.map((b: any) => `<li><span>${esc(b.name)}</span><span>${b.points} 分</span></li>`).join('')}</ol>`;
     } catch (e) { toast(errText(e)); }
   }
-  async function buy(b: any) { try { const r = await api('POST', '/race/buy', b); if (typeof r.balance === 'number') coins = r.balance; prof = { ...prof, ...r }; toast(b.kind ? '換裝好了！' : '換好了！'); renderPanel(); } catch (e) { toast(ERR[(e as any).code] ?? errText(e)); } }
+  async function buy(b: any) { try { const r = await api('POST', '/race/buy', b); if (typeof r.balance === 'number') coins = r.balance; prof = { ...prof, ...r }; shop.confirm = false; note(b.kind ? '換裝好了！' : b.paint !== undefined ? `換成${PAINT_NAMES[b.paint]}色了！` : '換好了！'); renderPanel(); } catch (e) { shop.confirm = false; const m = ERR[(e as any).code] ?? errText(e); note(m); toast(m); } }
+  // ---------- 改裝店（畫布內） ----------
+  function shopOn() { return !!prof && tab === 'garage' && mode === 'menu'; }
+  function note(s: string) { shop.note = s; shop.noteT = frame + 50; }
+  function setCat(c: number) { shop.cat = (c + SHOP_SCREENS) % SHOP_SCREENS; shop.confirm = false; shop.note = ''; shop.cur = isPaint(shop.cat) ? prof.paint : prof.parts[PART_KINDS[shop.cat]]; }
+  function shopAct(a: string) {
+    if (!shopOn()) return;
+    if (a === 'prev' || a === 'next') return setCat(shop.cat + (a === 'next' ? 1 : -1));
+    if (a === 'back') { shop.confirm = false; shop.note = ''; return; }
+    if (a === 'ok') {
+      if (isPaint(shop.cat)) { if (shop.cur !== prof.paint) void buy({ paint: shop.cur }); return; }
+      const k = PART_KINDS[shop.cat] as PartKind, t = PARTS[k].tiers[shop.cur];
+      if (prof.parts[k] === shop.cur) return note(ERR.ALREADY_OWNED);
+      if (t.price > coins) return note(ERR.INSUFFICIENT_COINS);
+      if (!shop.confirm) { shop.confirm = true; shop.note = ''; return; }
+      return void buy({ kind: k, tier: shop.cur });
+    }
+    const edge = shopMove(shop, a as any); if (edge) { setCat(shop.cat + (edge === 'next' ? 1 : -1)); if (edge === 'prev') shop.cur = isPaint(shop.cat) ? 3 : 1; else shop.cur = 0; }
+  }
   root.querySelectorAll('#rtabs button').forEach((b) => (b as HTMLElement).onclick = () => { tab = (b as HTMLElement).dataset.t!; renderPanel(); });
 
   // ---------- 連線 ----------
@@ -140,7 +154,16 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   });
   const KEYMAP: Record<string, keyof typeof keys> = { ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right', ArrowUp: 'gas', z: 'gas', Z: 'gas', w: 'gas', W: 'gas', ArrowDown: 'brake', x: 'brake', X: 'brake', s: 'brake', S: 'brake', ' ': 'nitro', n: 'nitro', N: 'nitro' };
   const onKey = (v: boolean) => (e: KeyboardEvent) => { const k = KEYMAP[e.key]; if (!k || (e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'SELECT') return; if (mode === 'race') e.preventDefault(); if (keys[k] !== v) { keys[k] = v; pushInput(); } };
-  const kd = onKey(true), ku = onKey(false);
+  const SKEY: Record<string, string> = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', a: 'left', d: 'right', w: 'up', s: 'down', q: 'prev', e: 'next', PageUp: 'prev', PageDown: 'next', Enter: 'ok', z: 'ok', ' ': 'ok', Escape: 'back', x: 'back', Backspace: 'back' };
+  const kdRace = onKey(true), ku = onKey(false);
+  const kd = (e: KeyboardEvent) => {
+    const tg = (e.target as HTMLElement)?.tagName; if (tg === 'INPUT' || tg === 'SELECT' || tg === 'TEXTAREA') return;
+    if (shopOn()) { const a = SKEY[e.key.length === 1 ? e.key.toLowerCase() : e.key]; if (a) { e.preventDefault(); shopAct(a); } return; }
+    kdRace(e);
+  };
+  root.querySelectorAll('#spad button').forEach((b) => { b.addEventListener('pointerdown', (e) => { if (e.cancelable) e.preventDefault(); shopAct((b as HTMLElement).dataset.s!); }); b.addEventListener('contextmenu', (e) => e.preventDefault()); });
+  cv.addEventListener('pointerdown', (e) => { if (!shopOn()) return; const r = cv.getBoundingClientRect(); const h = shopHit(shop.cat, (e.clientX - r.left) * W / r.width, (e.clientY - r.top) * H / r.height);
+    if (h === 'prev' || h === 'next') shopAct(h); else if (typeof h === 'number') { if (h === shop.cur) shopAct('ok'); else { shop.cur = h; shop.confirm = false; shop.note = ''; } } });
   window.addEventListener('keydown', kd); window.addEventListener('keyup', ku);
   function pushInput(force = false) {
     if (mode !== 'race') return; const s = JSON.stringify(keys); if (!force && s === lastSent) return; lastSent = s;
@@ -172,6 +195,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       if (mode === 'results') drawResultsOverlay(); return;
     }
     if (mode === 'lobby') return drawWait();
+    if (shopOn()) { drawShop(x, shop, prof, coins, frame); return; }
     // 選單：電腦自己跑的展示畫面
     if (!attract || attract.track !== sel) setAttract();
     stepRace(attract!); if (attract!.over) setAttract();

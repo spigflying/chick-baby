@@ -223,3 +223,5 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .shop-it.pend{outline:3px dashed #e05}
 .shop-it.poor{opacity:.55}
 .shop-confirm{background:#ffe3ec;border:2px solid #000;padding:4px 6px}
+.shop-pad button{min-width:44px;padding:0 6px}
+.race-pad[hidden],.race-keys[hidden]{display:none}
