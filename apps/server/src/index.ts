@@ -6,6 +6,7 @@ import { clock } from './hours';
 import { handleClosed, startClosingLoop } from './closing';
 import { abortAll, startStairsLoop } from './stairs';
 import { abortArenas, startArenaLoop } from './arena';
+import { abortMStairs, startMStairsLoop } from './mstairs';
 
 const { db } = createDb();
 const bus = new Bus();
@@ -13,6 +14,7 @@ const bus = new Bus();
 const { app, hub, gate } = await buildApp(db, bus);
 const loop = startStairsLoop(db);
 const arenaLoop = startArenaLoop();
+const mstairsLoop = startMStairsLoop();
 const closing = startClosingLoop({
   onClosing: (closes_at) => hub.broadcast({ type: 'game.closing', closes_at }),
   onClosed: (opens_at) => handleClosed({ db, hub, gate }, opens_at),
@@ -26,8 +28,9 @@ let shuttingDown = false;
 async function shutdown(sig: string) {
   if (shuttingDown) return; shuttingDown = true;
   app.log.info(`${sig}: draining`);
-  clearInterval(loop); clearInterval(arenaLoop); clearInterval(closing.timer);
+  clearInterval(loop); clearInterval(arenaLoop); clearInterval(mstairsLoop); clearInterval(closing.timer);
   await abortAll(db);
+  await abortMStairs();
   await abortArenas();
   hub.drain();
   await app.close().catch(() => {});

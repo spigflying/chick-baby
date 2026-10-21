@@ -10,6 +10,7 @@ import { clock } from './hours';
 import { env } from './env';
 import type { PresenceStore } from './presence';
 import { listItems } from './items';
+import { inStairs, stairsInviting } from './mstairs';
 
 const P = ARENA_PARAMS;
 const TICK_MS = 1000 / P.tickRate;
@@ -31,6 +32,15 @@ export function initArena(d: { db: Db; bus: Bus; presence: PresenceStore; instan
 function petOf(home: string, user: string) { return deps!.presence.users(home).find((u) => u.id === user)?.pet ?? null; }
 /** 這位使用者正在（本執行個體負責的）某場對戰中嗎？買道具時用。 */
 export function inFight(user: string) { for (const a of arenas.values()) if (a.state.fighters.some((f) => f.userId === user && f.fightId)) return true; return false; }
+/** M2 多人下樓梯用：這個家裡這個人正在對戰中？這個家有邀請或對戰進行中？ */
+export function inFightAt(home: string, user: string) { return !!arenas.get(home)?.state.fighters.some((f) => f.userId === user && f.fightId); }
+export function fightBusy(home: string) { const a = arenas.get(home); return !!a && (!!a.invite || a.state.fights.length > 0); }
+/** 多人下樓梯開始：參賽者暫時退出打架場地（不在對戰中，所以不會判輸）；比完客戶端會自動重新加入。 */
+export function benchFighters(home: string, users: string[]) {
+  const a = arenas.get(home); if (!a) return;
+  for (const u of users) { const e = removeFighter(a.state, u); if (e) onEnd(a, e); }
+  snapshot(a);
+}
 
 /** 開打前檢查：開放時間（整場要在關門前結束）、家的冷卻（上一場結束後 30 秒）、所有參賽寵物資格。 */
 export function canStart(home: string, users: string[], now = Date.now()): string | null {
@@ -67,6 +77,7 @@ export function onArenaBus(m: any) {
 async function join(home: string, user: string) {
   const pet = petOf(home, user);
   if (!canFightPet(pet)) return pub({ t: 'arena.notice', home, user, code: 'NOT_ELIGIBLE' });
+  if (inStairs(home, user)) return; // 下樓梯中：比完再回來
   const items = await listItems(deps!.db, user).catch(() => ({}));
   let a = arenas.get(home);
   if (!a) { arenas.set(home, (a = { home, state: createArena(), startAt: Date.now() })); }
@@ -86,6 +97,7 @@ export function invite(home: string, user: string, now = Date.now()) {
   const me = a?.state.fighters.find((f) => f.userId === user);
   if (!a || !me) return pub({ t: 'arena.notice', home, user, code: 'NOT_ELIGIBLE' });
   if (a.state.fights.length || a.invite) return pub({ t: 'arena.notice', home, user, code: 'FIGHT_BUSY' });
+  if (stairsInviting(home)) return pub({ t: 'arena.notice', home, user, code: 'STAIRS_BUSY' });
   const ob = ownerBlock(home); if (ob) return pub({ t: 'arena.notice', home, user, code: ob });
   const others = a.state.fighters.filter((f) => f.userId !== user && canFightPet(petOf(home, f.userId))).map((f) => f.userId);
   const why = canStart(home, [user, ...others], now);

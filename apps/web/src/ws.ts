@@ -8,7 +8,9 @@ export class Live {
   inMatch = false;
   /** v1.6：打架中／邀請中／結算畫面 → 算活躍（不暫停、不主動重連）。 */
   inFight = false;
-  get busy() { return this.inMatch || this.inFight; }
+  /** M2：自己發起或已參加一起下樓梯、等開始中 → 也算活躍。 */
+  inLobby = false;
+  get busy() { return this.inMatch || this.inFight || this.inLobby; }
   homeId: string | null = null;
   offset = 0; // 伺服器時間 − 本地時間
   rtt = 0;

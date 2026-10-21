@@ -204,6 +204,16 @@ const migrations: Record<string, Migration> = {
         ALTER TABLE user_outfits ADD CONSTRAINT user_outfits_outfit_id_check CHECK (outfit_id IN ('shades','crown'));`.execute(db);
     },
   },
+  '0007_stairs_multi': {
+    async up(db: Kysely<unknown>) {
+      // M2 多人下樓梯：以家為單位（不用房間碼）
+      await sql`ALTER TABLE stair_matches ADD COLUMN home_id uuid REFERENCES homes(id);
+        CREATE INDEX stair_match_players_user ON stair_match_players (user_id);`.execute(db);
+    },
+    async down(db: Kysely<unknown>) {
+      await sql`DROP INDEX stair_match_players_user; ALTER TABLE stair_matches DROP COLUMN home_id;`.execute(db);
+    },
+  },
 };
 
 const provider: MigrationProvider = { getMigrations: async () => migrations };

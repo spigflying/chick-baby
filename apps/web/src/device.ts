@@ -11,6 +11,7 @@ import { savePetCache } from './sleep';
 import type { Live } from './ws';
 import { StairsClient } from './stairs';
 import { boardHtml, stairsResultHtml, type Board } from './board';
+import { inviteHtml, multiResultHtml, rankText, stairsNotice, type StairsInvite } from './mstairs';
 import { fightBlocker, inviteSecs, resultInput, lockSecs, coinStr, hintFor, padPress, controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
 
 const W = 120, H = 100, GROUND = 86, HUD = 14;
@@ -47,6 +48,8 @@ export class Device {
   // v1.5：決勝瞬間凍結、結算畫面、打擊特效、道具
   frozen = false; private frozenAt = 0; result: ResultMsg | null = null; private resultTimer = 0; private resultAt = 0; private lockTimer = 0;
   invite: { id: string; from: string; from_name: string; to: string[]; until: number; answered: boolean } | null = null; private inviteTimer = 0;
+  // M2 一起下樓梯：邀請（自己被邀請、或自己發起／已參加時保持連線）
+  sinvite: StairsInvite | null = null; private sinviteTimer = 0;
   equip: string | null = null; myItems: Record<string, number> = {};
   private fxSwings: { u: string; kind: string; t: number }[] = []; private fxHits: { u: string; dmg: number; t: number }[] = [];
   private arenaFighters(): FSnap[] {
@@ -64,6 +67,7 @@ export class Device {
   private setPad(b: keyof Pad, v: boolean) { if (this.padState.set(b, v)) this.sendPad(); }
   /** 進家後：自己的寵物能打（活著、醒著、沒生病）就加入場地；斷線重連或負責的執行個體換人時自動重新加入。 */
   private ensureJoined() {
+    if (this.stairs) return; // 下樓梯中暫時退出打架場地，比完再回來
     const p = this.myPresence?.pet;
     const ok = !!p && p.status === 'alive' && !p.sleeping && !p.sick;
     if (!ok || this.meFighter() || Date.now() - this.lastJoin < 3000) return;
@@ -321,7 +325,7 @@ export class Device {
     this.el.className = 'device';
     this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
       <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">${coinHtml(0)}</span><span data-k="age">—</span></div><div class="toptip" role="tooltip" hidden></div>
-      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="stathelp" role="tooltip" hidden></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div></div>
+      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="stathelp" role="tooltip" hidden></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div><div class="invite sinv" hidden></div></div>
       <p class="fightstat" hidden></p>
       <div class="labels"></div>
       <div class="fightbar" hidden><button data-pad="left" aria-label="左">◀</button><button data-pad="jump" aria-label="跳">▲</button><button data-pad="attack">啄</button><button data-pad="upAtk">上啄</button><button data-pad="item">道具</button><button data-pad="right" aria-label="右">▶</button><button class="navbtn">選單</button><button class="fightgo">發起戰鬥</button></div>
@@ -415,8 +419,8 @@ export class Device {
         { act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'play', icon: 'i_play', label: '樓梯' },
         p.sleeping ? { act: 'wake', icon: 'i_wake', label: '起床' } : { act: 'sleep', icon: 'i_sleep', label: '睡覺' },
         { act: 'clean', icon: 'i_wash', label: '清潔' }, { act: 'doctor', icon: 'i_doc', label: '醫生' }, { act: 'shop', icon: 'i_shop', label: '道具' }, { act: 'status', icon: 'i_stat', label: '狀態' }];
-    } else if (!p || p.status !== 'alive') cells = [{ act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'home', icon: 'i_home', label: '回家' }];
-    else cells = [{ act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'shop', icon: 'i_shop', label: '道具' }, { act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'home', icon: 'i_home', label: '回家' }];
+    } else if (!p || p.status !== 'alive') cells = [{ act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'play', icon: 'i_play', label: '樓梯' }, { act: 'home', icon: 'i_home', label: '回家' }];
+    else cells = [{ act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'play', icon: 'i_play', label: '樓梯' }, { act: 'shop', icon: 'i_shop', label: '道具' }, { act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'home', icon: 'i_home', label: '回家' }];
     const key = cells.map((c) => c.act).join(',');
     const box = this.$('.labels');
     if (box.dataset.key === key) return;
@@ -516,7 +520,14 @@ export class Device {
     if (!this.el.isConnected || (document.getElementById('dlg') as HTMLDialogElement).open) return;
     if ((e.target as HTMLElement)?.closest?.('input,select,textarea')) return;
     const k = e.key;
-    if (this.stairs) { if (this.stairs.key(k, true)) e.preventDefault(); return; }
+    if (this.stairs) {
+      if (k === 'Escape' && this.stairsOut()) { e.preventDefault(); this.endStairsView(); return; } // 多人：出局後可以先離開，結果用 toast
+      if (this.stairs.key(k, true)) e.preventDefault(); return;
+    }
+    if (this.sinvite && !this.sinvite.answered && this.sinvite.to.includes(this.ctx.me.id) && !this.$('.sinv').hidden) {
+      if (k === 'Enter' || k === 'y' || k === 'Y' || k === '1') { e.preventDefault(); this.answerSInvite(true); return; }
+      if (k === 'Escape' || k === 'n' || k === 'N' || k === '2') { e.preventDefault(); this.answerSInvite(false); return; }
+    }
     if (this.result) { e.preventDefault(); if (!e.repeat) this.tryDismissResult(); return; }
     if (this.invite && !this.invite.answered && this.invite.to.includes(this.ctx.me.id) && !this.$('.invite').hidden) {
       if (k === 'Enter' || k === 'y' || k === 'Y' || k === '1') { e.preventDefault(); this.answerInvite(true); return; }
@@ -535,7 +546,7 @@ export class Device {
     if (this.menu) {
       if (k === 'Escape' || k === 'Backspace') this.closeMenu();
       else if ((this.menu === 'feed' || this.menu === 'shop') && (k === 'ArrowUp' || k === 'ArrowDown')) { const n = this.menu === 'feed' ? this.ctx.cfg.foods.length : ITEM_ORDER.length + OUTFIT_IDS.length; this.menuSel = (this.menuSel + (k === 'ArrowUp' ? n - 1 : 1)) % n; this.renderMenu(); }
-      else if (this.menu === 'board' && (k === 'Enter' || k === ' ')) { this.closeMenu(); this.startStairs(); }
+      else if (this.menu === 'board' && (k === 'Enter' || k === ' ')) { this.closeMenu(); if (this.isOwner) this.startStairs(); else this.startMulti(); }
       else if (k === 'Enter' || k === ' ') { if (this.menu === 'feed') this.chooseFood(this.ctx.cfg.foods[this.menuSel]); else if (this.menu === 'shop') void this.shopPick(this.menuSel); else this.closeMenu(); }
       else return;
     } else if (k === 'ArrowLeft') { this.sel = (this.sel + this.cells.length - 1) % this.cells.length; this.drawCells(); }
@@ -567,7 +578,7 @@ export class Device {
         return;
       }
       if (this.menu === 'result') { this.endStairsView(); return; }
-      if (this.menu === 'board') { if (t.closest('[data-go]')) { this.closeMenu(); this.startStairs(); } else if (t.closest('.back')) this.closeMenu(); return; }
+      if (this.menu === 'board') { if (t.closest('[data-go]')) { this.closeMenu(); this.startStairs(); } else if (t.closest('[data-multi]')) { this.closeMenu(); this.startMulti(); } else if (t.closest('.back')) this.closeMenu(); return; }
       if (this.menu === 'shop') { const it = t.closest('.mi') as HTMLElement | null; if (!it) return; const i = +it.dataset.i!; if (i < 0) return this.closeMenu(); this.menuSel = i; return void this.shopPick(i); }
       this.closeMenu();
     });
@@ -576,6 +587,7 @@ export class Device {
     this.off.push(() => document.removeEventListener('pointerdown', this.onStatDocDown));
     this.$('.fightres').addEventListener('click', () => this.tryDismissResult());
     this.$('.invite').addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('[data-acc]') as HTMLElement | null; if (b) this.answerInvite(b.dataset.acc === '1'); });
+    this.$('.sinv').addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('[data-sacc]') as HTMLElement | null; if (b) this.answerSInvite(b.dataset.sacc === '1'); });
     // fightbar 的 touchstart 有 preventDefault（擋長按選字），手機不會產生 click → 用 pointerup
     this.$('.fightgo').addEventListener('pointerup', (e) => { if (e.button > 0) return; this.startInvite(); });
     this.el.querySelectorAll<HTMLElement>('.gamebar [data-dir]').forEach((b) => {
@@ -583,7 +595,7 @@ export class Device {
       const set = (v: boolean) => (e: Event) => { e.preventDefault(); this.stairs?.setDir(d, v); };
       b.addEventListener('pointerdown', set(true)); ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => b.addEventListener(ev, set(false)));
     });
-    this.$('.gamebar .quit').addEventListener('click', () => this.stairs?.quit());
+    this.$('.gamebar .quit').addEventListener('click', () => { if (this.stairsOut()) this.endStairsView(); else this.stairs?.quit(); });
     this.el.querySelectorAll<HTMLElement>('.fightbar [data-pad]').forEach((b) => {
       const d = b.dataset.pad as keyof Pad;
       // 手機：按住移動要靠 pointer capture（手指稍微滑出按鈕也不會放開）；touchstart preventDefault（非 passive）
@@ -624,6 +636,7 @@ export class Device {
     if (a === 'shop') { if (this.meFighter()?.fight) return this.say('對戰中不能買道具'); this.openMenu('shop'); void this.refreshItems(); void this.refreshOutfits(); return; }
     if (a === 'home') return this.ctx.goHome();
     if (a === 'hatch') return this.openMenu('hatch');
+    if (a === 'play' && !this.isOwner) return this.openBoard(); // 訪客：只能一起下樓梯（用自己的寵物）
     if (!p) return;
     if (p.status === 'egg') return this.say('蛋蛋還在孵化中…');
     if (p.status === 'dead') return this.say(`${p.name} 去當小天使了…`);
@@ -678,7 +691,7 @@ export class Device {
     if (!this.menu) { el.hidden = true; return; }
     el.hidden = false;
     const p = this.pet, coins = this.ctx.wallet(), cfg = this.ctx.cfg;
-    if (this.menu === 'board') { el.innerHTML = boardHtml(this.board, this.boardErr); return; }
+    if (this.menu === 'board') { el.innerHTML = boardHtml(this.board, this.boardErr, { solo: this.isOwner, multi: this.othersHere() > 0 }); return; }
     if (this.menu === 'feed') {
       const v = this.visitor, f = cfg.game.feed;
       el.innerHTML = `<div class="mt">— 餵食 —  ${coinHtml(coins)}</div>` + cfg.foods.map((fd: any, i: number) => {
@@ -775,8 +788,11 @@ export class Device {
       else if (ev?.type === 'feed' && !mine) { this.startEat(ev.food); this.pendingPet = m.pet; this.say(`${ev.actor.display_name} 餵了 ${this.ctx.cfg.foods.find((f: any) => f.id === ev.food)?.name ?? ev.food}！`); }
       else if (!mine || !this.anim) this.setPet(m.pet);
     } else if (m.type === 'wallet.updated') { this.ctx.setWallet(m.balance); this.renderTop(); }
+    else if (m.type === 'stairs.event' || m.type === 'stairs.notice') { if (this.home && m.home_id === this.home.id) this.onStairsEvent(m); }
+    else if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('stairs.')) this.say(stairsNotice(m.code));
     else if (this.stairs) this.stairs.onLive(m);
     else if (m.type === 'match.started') this.beginStairs(m);
+    else if (m.type === 'match.ended' && m.mode === 'multi' && m.me) { if (m.balance != null) this.ctx.setWallet(m.balance); this.ctx.toast(`一起下樓梯：${rankText(m.me.rank)}、${m.me.floor} 樓、◎${m.me.coins}`); }
     else if (m.type === 'error' && m.for === 'match.create') this.say(errText({ message: (({ TOO_TIRED: '太累了，想睡覺…', PET_SLEEPING: '噓…牠在睡覺', ALREADY_IN_MATCH: '已經在遊戲中' }) as any)[m.code] ?? m.code }));
   }
 
@@ -791,6 +807,59 @@ export class Device {
     if (!this.ctx.live.send({ type: 'match.create', request_id: crypto.randomUUID() })) return this.say('連線中斷，稍後再試');
     this.say('準備下樓梯…');
   }
+  // ---------- M2 一起下樓梯（以家為單位） ----------
+  /** 這個家裡除了自己以外的在場人數。 */
+  othersHere() { return this.presenceAll.filter((u) => u.id !== this.ctx.me.id).length; }
+  /** 多人局裡自己已經出局（還在看別人玩）。 */
+  stairsOut() { const st = this.stairs; return !!st && st.multi && !st.ended && !st.state.players[st.me]?.alive; }
+  startMulti() {
+    const p = this.myPresence?.pet;
+    if (!p) return this.say('沒有寵物不能下樓梯');
+    if (p.status !== 'alive') return this.say(stairsNotice(p.status === 'egg' ? 'PET_EGG' : 'PET_DEAD'));
+    if (p.sleeping) return this.say(stairsNotice('PET_SLEEPING'));
+    if (!this.othersHere()) return this.say(stairsNotice('NO_OPPONENT'));
+    if (!this.ctx.live.send({ type: 'stairs.invite' })) return this.say('連線中斷，稍後再試');
+  }
+  private setLobby(on: boolean) { this.ctx.live.inLobby = on; }
+  private onStairsEvent(m: any) {
+    const me = this.ctx.me.id;
+    if (m.type === 'stairs.notice') { this.say(stairsNotice(m.code)); return; }
+    if (m.kind === 'invite') {
+      this.sinvite = { id: m.invite, from: m.from, from_name: m.from_name ?? '?', to: m.to ?? [], until: Date.now() + (m.left_ms ?? 15_000), answered: false, count: 1 };
+      if (m.from === me) { this.say(`已邀請大家一起下樓梯！等回覆（${Math.round((m.left_ms ?? 15_000) / 1000)} 秒）`); this.setLobby(true); }
+      this.showSInvite();
+    } else if (m.kind === 'reply') {
+      const v = this.sinvite; if (!v || v.id !== m.invite) return;
+      v.count = m.count ?? v.count;
+      if (v.from === me) this.say(`${v.count} 隻要一起下樓梯…`);
+    } else if (m.kind === 'invite_cancel') {
+      const v = this.sinvite, same = !!v && v.id === m.invite, mine = m.from === me || (same && this.ctx.live.inLobby); // 發起人或已參加的人才提示
+      if (same) { this.sinvite = null; this.showSInvite(); }
+      if (mine) { this.ctx.toast(stairsNotice(m.code)); this.setLobby(false); }
+    } else if (m.kind === 'start') {
+      if (this.sinvite?.id === m.invite) { this.sinvite = null; this.showSInvite(); }
+      this.setLobby(false);
+      if (!(m.users ?? []).includes(me)) this.ctx.toast(`${(m.names ?? []).join('、')} 一起下樓梯中！`);
+    }
+  }
+  private showSInvite() {
+    const el = this.$('.sinv'), v = this.sinvite;
+    clearInterval(this.sinviteTimer);
+    if (!v || v.answered || !v.to.includes(this.ctx.me.id) || this.stairs) { el.hidden = true; return; }
+    el.hidden = false; el.innerHTML = inviteHtml(v, Date.now());
+    this.sinviteTimer = window.setInterval(() => {
+      const c = el.querySelector('.ic'), w = this.sinvite; if (!w) return this.showSInvite();
+      if (c) c.textContent = `${Math.max(0, Math.ceil((w.until - Date.now()) / 1000))} 秒後自動不參加`;
+      if (Date.now() > w.until) this.answerSInvite(false, true);
+    }, 250);
+  }
+  answerSInvite(accept: boolean, silent = false) {
+    const v = this.sinvite; if (!v || v.answered) return;
+    v.answered = true;
+    if (!silent) this.ctx.live.send({ type: 'stairs.reply', invite: v.id, accept });
+    if (accept) { this.say('參加！等其他人回覆…'); this.setLobby(true); } else if (!silent) this.say('這次不參加');
+    this.showSInvite();
+  }
   beginStairs(m: any) {
     this.closeMenu();
     const lab = this.$('.labels'), bar = this.$('.gamebar');
@@ -799,17 +868,26 @@ export class Device {
     const P = m.params;
     const hh = Math.min(h0 - bar.offsetHeight + 22, Math.round(this.cv.offsetWidth * P.height / P.width));
     this.cv.width = P.width; this.cv.height = P.height; this.cv.style.height = hh + 'px'; this.cv.style.width = Math.round(hh * P.width / P.height) + 'px';
-    this.stairs = new StairsClient(this.ctx.live, m, petSpriteKey(this.pet), {
+    const multi = m.mode === 'multi';
+    this.sinvite = null; this.showSInvite(); this.setLobby(false);
+    const mine = multi ? m.players.find((p: any) => p.user_id === this.ctx.me.id) : null;
+    this.stairs = new StairsClient(this.ctx.live, m, mine?.sp ?? petSpriteKey(this.pet), {
       ended: (r) => {
         if (r.balance != null) this.ctx.setWallet(r.balance);
         if (r.pet) this.pendingPet = r.pet;
         this.menu = 'result';
         const el = this.$('.menu'); el.hidden = false;
+        if (multi) {
+          el.innerHTML = multiResultHtml(r);
+          this.say(r.aborted || r.error || !r.me ? '遊戲中止' : `${r.time_up ? '時間到！' : ''}${rankText(r.me.rank)}！下了 ${r.me.floor} 樓，賺到 ◎${r.me.coins}！`);
+          return;
+        }
         el.innerHTML = stairsResultHtml(r, this.ctx.wallet());
         this.say(r.aborted ? '遊戲中止' : `${r.time_up ? (r.closing ? '快關門了，時間到！' : '時間到！') : ''}下了 ${r.floors} 樓，賺到 ◎${r.coins}！`);
       },
-    });
-    this.say('←→ 移動，往下跳！小心尖刺～');
+      status: (t) => this.say(t),
+    }, this.ctx.me.id);
+    this.say(multi ? `${m.players.length} 隻一起下樓梯！←→ 移動，把別人擠下去～` : '←→ 移動，往下跳！小心尖刺～');
   }
   endStairsView() {
     this.stairs?.leave(); this.stairs = null; this.menu = null; this.$('.menu').hidden = true;

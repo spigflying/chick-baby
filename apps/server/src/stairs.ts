@@ -39,6 +39,11 @@ export async function createSolo(db: Db, ctx: ReqCtx, conn: MatchConn, requestId
     const { state } = await settle(tx, row);
     await savePet(tx, row.id, state);
     const err = checkStairsStart(state); if (err) fail(err);
+    // M2：正在別的執行個體負責的多人局裡（只算 61 分鐘內開始的，當掉沒收尾的局不會卡住）
+    const multi = await tx.selectFrom('stair_match_players').innerJoin('stair_matches', 'stair_matches.id', 'stair_match_players.match_id').select('stair_matches.id')
+      .where('stair_match_players.user_id', '=', ctx.userId).where('stair_matches.mode', '=', 'multi').where('stair_matches.status', '=', 'playing')
+      .where('stair_matches.started_at', '>', new Date(Date.now() - 61 * 60_000)).executeTakeFirst();
+    if (multi) fail('ALREADY_IN_MATCH');
     const home = await tx.selectFrom('homes').select('id').where('owner_id', '=', ctx.userId).executeTakeFirstOrThrow();
     const m = await tx.insertInto('stair_matches').values({ mode: 'solo', host_user_id: ctx.userId, status: 'playing', instance_id: env.instanceId, seed, engine_version: ENGINE_VERSION, config: JSON.stringify(P), started_at: new Date() }).returning('id').executeTakeFirstOrThrow();
     await tx.insertInto('stair_match_players').values({ match_id: m.id, user_id: ctx.userId, pet_id: row.id }).execute();

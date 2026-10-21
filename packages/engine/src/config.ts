@@ -1,5 +1,5 @@
 /** 遊戲參數（伺服器可用 game_config 覆寫）。 */
-export const ENGINE_VERSION = '1.2.0';
+export const ENGINE_VERSION = '1.3.0';
 export const GAME = {
   timeScale: 1 / 12,
   eggSeconds: 60,

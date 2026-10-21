@@ -1,9 +1,15 @@
-# 小雞寶寶 多人版 — 需求文件 v1.6
+# 小雞寶寶 多人版 — 需求文件 v1.8
 
-> 版本：v1.6（2026-10-14）　｜　v1.5：2026-10-14　｜　v1.4：2026-10-14　｜　v1.3：2026-10-14　｜　v1.2：2026-10-14　｜　v1.1：2026-10-13　｜　v1：2026-10-13（`de26acf`）
+> 版本：v1.8（2026-10-21）　｜　v1.7：寶（進化）　｜　v1.6（2026-10-14）　｜　v1.5：2026-10-14　｜　v1.4：2026-10-14　｜　v1.3：2026-10-14　｜　v1.2：2026-10-14　｜　v1.1：2026-10-13　｜　v1：2026-10-13（`de26acf`）
 > 原則：**先做出能上線的版本，同時保留擴充性**（對戰、合體、更多物種）。
 > 標記：**【預設】** = 尚未定案，先照此實作，之後可以在 `game_config` 或後續版本調整（見第 13 節）。
 > 現有單人原型（repo 根目錄的 `index.html` / `script.js` / `style.css`，https://spigflying.github.io/chick-baby/）**維持不動**，新版另建於 monorepo 資料夾。
+
+**v1.8 變更摘要**（M2 一起下樓梯，詳見 §4.4、§5）
+- **以家為單位**：在同一個家的人一起下樓梯，不用房間碼。動作列「樓梯」→「▶ 一起玩」發起，家裡其他寵物醒著的人跳出「參加／不要」（15 秒，不回＝不參加）；全部回覆或時間到，發起人＋參加者 2–6 隻就開始。訪客的動作列也有「樓梯」（只能一起玩）。
+- **場地維持 96px**，同一組平台、全寬起始平台平均排開；**寵物會互相推擠**（推力看力量、質量看體重，空中也推得動），可以把人撞下平台或撞到尖刺。被誰推下去會記錄、顯示在結算畫面。
+- **伺服器同打架模式**：由負責這個家的執行個體模擬，跨執行個體經 `LISTEN/NOTIFY`；這個家只有一個執行個體時直接本機處理。
+- 排名依出局順序（同 tick 比樓層，再相同＝同名次）、剩 1 隻就結束；時間上限同單人（19:59、連線 58 分鐘、60 分鐘）。獎勵 `◎5 + (人數 − 名次) × 3`，消耗與成長同單人。中途離開／斷線＝當下出局。
 
 **v1.6.3**：新版本提示改成右上角小型提示（不遮畫面、沒有遮罩、不搶焦點／按鍵）；比賽中完全隱藏。
 
@@ -73,7 +79,7 @@
 | 餵食 | 屋主不限次；訪客付費、每日上限 | | 商店擴充 |
 | 管理員 | 查看所有使用者與寵物（含死亡紀錄）、復活 | | 後台擴充 |
 | 下樓梯 | **單人，伺服器權威模擬**（輸入、時鐘同步、自身預測） | **多人即時同畫面（2–6 人）、互相推擠** | 排行榜、觀戰、對戰 |
-| 部署 | Cloud Run + Cloud SQL；跨執行個體廣播 | 比賽房間固定在單一執行個體 | |
+| 部署 | Cloud Run + Cloud SQL；跨執行個體廣播 | 多人局由負責這個家的執行個體模擬，經 `LISTEN/NOTIFY` 同步（同打架，v1.8） | |
 
 ## 3. 角色
 
@@ -191,14 +197,27 @@
 - **每日可玩回合數（估算，v1.2）**：每天 09:00 開門時精力回到 100（§4.7）；醒著時精力每小時 −2.5，一天 11 小時約 −27.5。每回合 −1.25，所以白天不睡覺時約可玩 **(100 − 15 − 27.5) ÷ 1.25 ≈ 46 回合/天**；白天讓寵物睡覺（v1.4：約 1 分鐘睡飽）可以再多玩。精力 100 時可以連續玩約 68 回合，直到降到 15。
 - 單人獎勵：每下 1 樓 = **◎1**。
 
-#### 多人（M2）
-- 房間 2–6 人；開房 → 其他人輸入房間碼加入 → 房主開始；開始後不能中途加入。
-- 所有人的寵物在**同一個畫面**、同一組平台；寵物之間有碰撞、會互相推擠，可以把別人推死。被誰推出局要記錄下來。
-- 出局只影響該局，不扣寵物健康。
-- 【預設】排名：依出局順序（越晚出局越前面）；剩 1 人時結束；沒有固定長度（單人 v1.5：只在 19:59 或安全上限 60 分鐘時間到），時間到時依樓層排名。
-- 【預設】獎勵：`◎5 + (人數 − 名次) × 3`，所有人都有保底；消耗與成長結算同單人。
-- 【預設】場地邏輯寬 144px（單人 96px）。
-- 細節見 §5。
+#### 多人（M2，v1.8 上線）
+- **以家為單位**：在同一個家裡的人一起玩，不用房間碼。一個家同時只有一個邀請或一場（`STAIRS_BUSY`）。
+- **誰能參加**：在這個家、寵物活著且醒著的在線使用者，主人與訪客都可以；精力 ≥ 15 在開始時檢查。【預設】主人不在也可以在他家發起。
+- **流程**（同打架的「發起戰鬥」）：
+  1. 動作列「樓梯」→ 排行榜 →「▶ 一起玩」（屋主另有「▶ 開始」單人局；訪客只有一起玩）。
+  2. 家裡其他寵物合格的人跳出「X 邀大家一起下樓梯！參加／不要」，**15 秒**倒數，不回＝不參加；Enter／Y 參加、Esc／N 不要。最多 6 隻，第 7 個按參加回 `MATCH_FULL`。
+  3. 全部回覆或時間到：發起人＋參加者（仍在場、寵物仍醒著）≥ 2 隻就開始，否則取消（`NOT_ENOUGH_PLAYERS`）。發起人可以取消（`stairs.cancel`）。
+  4. 開始時伺服器在 transaction 內重新檢查每隻寵物（`checkStairsStart`：精力、醒著；沒有在別場 61 分鐘內開始、還在 playing 的比賽），不合格的人移出並收到原因（例如 `TOO_TIRED`）；剩不到 2 隻就取消。開始後不能中途加入。
+- **互斥**：同一個人同時只能在一場下樓梯裡（`ALREADY_IN_MATCH`，單人／多人都算，含 DB 檢查）。對戰中的人不會被邀請、不能發起（`IN_FIGHT`）；這個家有打架邀請或對戰時不能發起（`FIGHT_BUSY`），有下樓梯邀請時不能發起戰鬥（`STAIRS_BUSY`）。比賽中的寵物暫時退出打架場地，比完自動回來。
+- **畫面**：所有人的寵物在**同一個畫面**、同一組平台。自己頭上有小 ▼，其他人頭上顯示編號；HUD 只顯示自己的 HP 與樓層，下方訊息列顯示「剩 n 隻」。沒參加的人留在家裡畫面，收到「X、Y 一起下樓梯中！」提示。【預設】不能觀戰。
+- **場地**：邏輯寬 **96px**（同單人，v1.8 決定不加寬）。多人局用一條**全寬起始平台**，寵物依 seed 洗牌後平均排開；單人局起始方式不變。
+- **推擠**：寵物之間有碰撞、會互相推擠，空中也推得動，可以把人撞下平台或撞到尖刺上（§5.1）。被誰推出局記錄在 `stair_match_players.eliminated_by_pet_id`，結算畫面顯示「被○○推」。
+- **樓層、補血、尖刺每隻各自算**：同一個平台每隻寵物經過都算 1 樓；尖刺平台每隻踩到都扣血一次。易碎平台是共用的（踩碎了大家都沒得踩）。
+- **出局**：HP 歸零、掉出畫面底部、按離開（Esc／離開鈕）、離開這個家或斷線。斷線不等重連，直接出局。出局只影響該局，不扣寵物健康。自己出局後可以繼續看到結束，也可以再按 Esc 先離開（結果用提示顯示）。
+- **排名**：還活著的（時間到）排最前面、依樓層；出局的越晚越前面，同一 tick 出局比樓層，再相同＝同名次（1、1、3）。剩 1 隻（或全部出局）就結束。時間上限同單人（§4.7：19:59、連線 58 分鐘、60 分鐘取最小）。
+- **獎勵**：`◎5 + (人數 − 名次) × 3`，人數＝開始時的人數，所有人都有保底（中途離開也照名次拿，見 §13）。例：6 隻第 1 名 ◎20、第 6 名 ◎5；2 隻 ◎8／◎5。多人局的金幣不看樓層；寵物在結算時已經死掉就不發。
+  - 消耗與成長照單人的 `applyStairsResult`（用自己的樓層、這局的長度）。
+- **結算**：單一 transaction：`stair_matches` 從 `playing` 改成 `done`（以這個條件做冪等）→ 依 user id 排序鎖所有錢包 → 依 pet id 排序鎖寵物並結算 → 每位 `coin_ledger`（`reason = stairs_match`，`ref = stair_match id`）、`pet_events`（`stairs_match`）、`stair_match_players`（rank／floors／eliminated_at_tick／eliminated_by_pet_id／coins_awarded）→ 一筆 `audit_log`（`stairs.finish_multi`）。結算畫面列出所有人的名次、寵物名（暱稱）、樓層、怎麼出局、拿到的金幣。
+- **中止**：負責模擬的執行個體換人、SIGTERM、20:00 關門時，進行中的多人局標記 `aborted`（不發獎勵、不扣精力，同單人）。
+- **開放時間**：同單人，19:58 起不能發起、也不能開始（`GAME_CLOSING`）。
+- 網路與同步見 §5。
 
 ### 4.5 金幣經濟
 
@@ -300,11 +319,21 @@
 - **測試／開發**：`POST /api/admin/pets/:id/evolve`（管理員，任何寵物）；`DEV_LOGIN=1` 時 `POST /api/dev/pets/:id/evolve`（只能自己的寵物）立即進化。
 - 頂部列金幣改用 9×9 像素金幣圖示（取代 ◎ 字）。
 
-## 5. M2 網路同步規格（草案，M2 開工前定案）
+## 5. M2 網路同步規格（v1.8 上線）
 
 > 單人模式（M1）先實作其中的時鐘同步、輸入緩衝與自身預測；M2 再加上推擠、他人插值與推擠校正。
 
-### 5.1 推擠物理（公式草案）
+### 5.0 模擬位置與跨執行個體（v1.8）
+- **同打架模式（§4.9）**：多人局由「這個家目前有連線的最小執行個體 id」負責模擬（`apps/server/src/mstairs.ts`）。發起、回覆、取消、輸入、離開都交給它（自己就是 → 直接處理，否則 `NOTIFY`）；邀請事件、`match.started`、快照、結果送到這個家的所有執行個體，再轉給自己的連線。
+  - 不管玩家連到哪個執行個體都在同一場，**取消原本的 `WRONG_INSTANCE` 重連**。
+  - 負責的執行個體換人時，邀請取消、進行中的局 `aborted`。
+  - 這個家只有一個執行個體有連線時，直接在本機處理、不走 `NOTIFY`（減少 Cloud SQL 負擔：每場每秒約 15 則快照）。
+  - **payload 大小**：`pg_notify` 上限 8000 bytes；6 隻的完整快照實測 < 6000 bytes（`packages/engine/test/stairs-multi.test.ts`）。
+  - 開局延遲 500ms（同單人；再長的話倒數中按鍵會超過「目前 tick + 緩衝 + 15」被拒絕）。
+  - 開局時間由負責的執行個體決定，客戶端用自己連線的執行個體做時鐘同步（§5.2），所以假設執行個體之間的系統時鐘差在數毫秒內（Cloud Run 有 NTP 校時，未實測）。
+- **單人局**維持 M1 做法：在玩家連線的執行個體上跑，不走 `NOTIFY`。
+
+### 5.1 推擠物理
 - 參數：
   - 推力 `P = clamp(1 + (力量 − 10) / 50, 0.8, 1.6)`
   - 質量 `M = clamp(1 + (體重 − 20) / 50, 0.8, 1.6)`
@@ -319,6 +348,11 @@
   - `pushVx` 疊加在一般移動上，空中也有效，所以可以把人撞下平台。
 - **擊殺歸屬**：出局前 60 tick（2 秒）內最後一個推過該寵物的人，記為 `eliminated_by`。
 - 處理順序固定：依 `pet_id` 排序，兩兩處理，確保結果是決定性的。
+- 實作（v1.8，`ENGINE_VERSION` 1.3.0）：
+  - 推擠在 `stepStairs` 裡、所有寵物移動完之後處理；碰到牆時另一隻吃下剩下的位移。只有「正朝對方移動」才給對方 `pushVx` 並記為最後推的人。
+  - `stepStairs(s, { collide })`：伺服器 `true`；客戶端預測自己時 `false`（§5.4）。
+  - 參數在 `STAIRS_PARAMS`：`pushGain 0.5`、`pushMax 2`、`pushDecay 0.85`、`pushIdle 0.5`、`pushMinOverlapY 3`、`killWindow 60`。推力、質量由伺服器從寵物的力量、體重算好，放在 `match.started` 的玩家清單裡。
+  - 樓層計算改成每隻各自記（`passed`），尖刺每隻各自記（`spiked`）；單人局結果完全不變（20 個 seed 逐 tick 比對）。
 
 ### 5.2 時鐘同步
 - 連線後送 5 次 `time.ping {t0}`，伺服器回 `time.pong {t0, serverTime, serverTick}`。
@@ -332,6 +366,7 @@
   - 遲到（tick ≤ 目前 tick）→ 在下一個 tick 套用，並回報 `late`，讓客戶端加大 N。
   - 超前太多（> 目前 tick + N + 15）→ 拒絕。
   - `seq` 必須遞增。
+- 多人局（v1.8）：`seq`、`late` 每位玩家各自計算；輸入先交給負責的執行個體才判斷遲到（§5.0）。錯誤用 `stairs.notice` 回給本人。
 
 ### 5.4 預測、插值與校正
 - **自己**：用共用引擎立即模擬（預測），保留還沒被確認的輸入。
@@ -339,10 +374,11 @@
   - 誤差 ≤ 8px 時，畫面在 100–150ms 內平滑修正；超過就直接瞬移。
 - **其他人**：用插值顯示，延後約 100ms（兩個快照之間）。
 - **快照**：每 2 tick 一次（15 次/秒），內容是每位玩家的 `x, y, vx, vy, pushVx, hp, floor, alive` 加上平台狀態變化（易碎等）。
+  - v1.8 實作：沿用單人做法送完整 `StairsState`，每位玩家收到自己的 `last_processed_seq` 與 `late`。其他寵物用最近兩個快照插值（差超過 24px 不插值）。
 - **已知問題：推擠校正**。自己顯示在「未來」，其他人顯示在「過去」，所以本地預測的碰撞和伺服器結果會不一致，被推或推人時畫面會被拉回。
   - 【預設】對策：
     - 客戶端**不預測與他人的碰撞**，推擠只由伺服器決定，透過校正平滑呈現。
-    - 伺服器另外送 `match.pushed` 事件，讓客戶端播放撞擊動畫。
+    - 伺服器另外送 `match.pushed` 事件，讓客戶端播放撞擊動畫。（v1.8 尚未做，之後再加。）
   - 代價：被推的反應約延遲一個 RTT。M2 實測後再評估是否預測推擠。
 
 ### 5.5 `match.started` 內容
@@ -355,6 +391,7 @@
   - HP / 速度公式參數、推擠參數
   - `matchMaxTicks`、獎勵參數
 - **玩家清單**：user id、顯示名稱、pet_id、物種、能力值、出生位置。
+  - 多人局（v1.8）：`mode: 'multi'`、`home_id`；每位 `user_id, pet_id, name`（寵物名（暱稱））`, sp`（精靈鍵）`, num`（畫面編號）`, speed, stamina, strength, weight`。出生位置由引擎依 seed 算出（不另外傳）。
 - 客戶端的 `engine_version` 和伺服器不同時要拒絕開始並重新載入。參數全部由伺服器下發，客戶端不寫死。
 
 ## 6. 伺服器權威與防作弊
@@ -409,7 +446,8 @@ Cloud SQL for PostgreSQL ─────────────────┘
     - 設定（v1.2，見 `DEPLOY.md`）：`min-instances=0`、`max-instances=2`（Cloud SQL f1-micro 只有 25 條連線）、instance-based billing（遊戲迴圈不被節流），request timeout 3600 秒，開啟 session affinity，concurrency 1000。
   - **跨執行個體廣播**：寫入 commit 後 `NOTIFY`（channel 例如 `home_<id>`、`user_<id>`，payload 只放 id 與事件類型），每個執行個體 `LISTEN` 後再推送給自己的 WS 連線。需要一條專用的長連線（不放在連線池裡）。
   - **比賽房間**：一場比賽只在一個執行個體上跑，`stair_matches.instance_id` 記錄是哪一個。
-    - 玩家的連線落在其他執行個體時，`match.join` 回 `WRONG_INSTANCE`，客戶端重連再試（session affinity 會盡量導回同一個），最多 5 次。
+    - 單人局：在玩家連線的執行個體上跑。
+    - 多人局（v1.8）：由負責這個家的執行個體模擬，其他執行個體上的玩家透過 `LISTEN/NOTIFY` 參加（§5.0）。原本的 `WRONG_INSTANCE` 重連取消。
   - **主動重連**：
     - WS 連線存在約 **50 分鐘**時，客戶端在**不在比賽中**的時機主動重連。
     - 比賽開始前，伺服器檢查每位玩家的連線時間；超過 45 分鐘的人先重連，才開始比賽（v1.5：比賽在連線滿 58 分鐘前一定時間到，所以不會被 60 分鐘上限切斷）。
@@ -437,7 +475,7 @@ Cloud SQL for PostgreSQL ─────────────────┘
 | `pets` | id (UUID), owner_id, species_id, name, status (`egg`/`alive`/`dead`), born_at, hatched_at, last_simulated_at, hunger, happiness, energy, cleanliness, health, poop, last_poop_at, dirty_since, sick, sleeping, strength, speed, stamina, weight, personality, best_floor, counters (jsonb), died_at, death_cause, revived_at, revived_by, version | 部分唯一索引：每個 owner 只能有一筆 `status IN ('egg','alive')`；永不刪除 |
 | `pet_events` | id, pet_id, actor_user_id, type (`hatch`/`feed`/`clean`/`sleep`/`wake`/`doctor`/`poop`/`sick`/`death`/`revive`/`stairs_solo`/`stairs_match`), payload (jsonb), created_at | 永久保存 |
 | `visitor_feed_counters` | pet_id, visitor_user_id, day (date, Asia/Taipei), count；PK (pet_id, visitor_user_id, day) | 只算訪客 |
-| `stair_matches` | id, mode (`solo`/`multi`), code, host_user_id, status (`waiting`/`playing`/`done`/`aborted`), instance_id, seed, engine_version, config (jsonb), started_at, ended_at | |
+| `stair_matches` | id, mode (`solo`/`multi`), code, home_id（v1.8）, host_user_id, status (`waiting`/`playing`/`done`/`aborted`), instance_id, seed, engine_version, config (jsonb), started_at, ended_at | v1.8（migration `0007_stairs_multi`）：`home_id` = 多人局在哪個家（單人 NULL）；`code` 不使用。邀請只在記憶體，開始時才寫入（直接是 `playing`）。`stair_match_players(user_id)` 加索引 |
 | `stair_match_players` | match_id, user_id, pet_id, rank, floors, eliminated_at_tick, eliminated_by_pet_id, coins_awarded | |
 | `game_config` | key, value (jsonb), updated_by, updated_at | |
 | `audit_log` | id, at, user_id, action, target_type, target_id, result, detail (jsonb), ip（30 天後清成 NULL）, user_agent, request_id | 只新增 |
@@ -474,8 +512,10 @@ Cloud SQL for PostgreSQL ─────────────────┘
 | C→S | `pet.action` | `{pet_id, action: feed/clean/sleep/wake/doctor, food_id?, request_id}`（訪客只能 `feed` 付費食物） |
 | S→C | `home.presence`、`pet.updated`、`wallet.updated`、`home.kicked` | |
 | C↔S | `time.ping` / `time.pong` | 時鐘同步 |
-| C→S | `match.create` / `match.join {code}` / `match.leave` / `match.start` | |
-| S→C | `match.lobby` | 玩家、房主、需要先重連的人 |
+| C→S | `match.create` / `match.leave` | 單人局；`match.leave` 在多人局中＝出局 |
+| C→S | `stairs.invite` / `stairs.reply {invite, accept}` / `stairs.cancel` | 多人局（v1.8）：在目前的家發起／回覆／發起人取消 |
+| S→C | `stairs.event` | 送給家裡所有人：`kind` = `invite`（from、from_name、to、left_ms）／`reply`（user、accept、count）／`invite_cancel`（code）／`start`（match_id、users、names） |
+| S→C | `stairs.notice` | 只給本人：`STAIRS_BUSY`、`FIGHT_BUSY`、`IN_FIGHT`、`NOT_ELIGIBLE`、`NO_OPPONENT`、`MATCH_FULL`、`TOO_TIRED`、`BAD_INPUT`… |
 | S→C | `match.started` | 見 §5.5 |
 | C→S | `match.input` | `{seq, tick, left, right}` |
 | S→C | `match.snapshot` | tick、玩家狀態、平台變化、各玩家的 `lastProcessedSeq`、`late` 統計 |
@@ -483,7 +523,7 @@ Cloud SQL for PostgreSQL ─────────────────┘
 | S→C | `server.draining` | 請重連 |
 | S→C | `game.closing` | `{closes_at}`：19:55 起廣播，不能再開新局（v1.2） |
 | S→C | `game.closed` | `{opens_at}`：20:00 廣播後關閉連線，客戶端**不自動重連**（v1.2） |
-| S→C | `error` | `FORBIDDEN`、`RATE_LIMITED`、`INSUFFICIENT_COINS`、`DAILY_CAP`、`LOW_HEALTH_SNACK`、`TOO_FULL`、`SNACK_ONLY`、`VISITOR_FREE_FOOD`、`PET_DEAD`、`PET_SLEEPING`、`WRONG_INSTANCE`、`RECONNECT_FIRST`、`IDEMPOTENCY_CONFLICT`、`GAME_CLOSED`（v1.2，附 `opens_at`）… |
+| S→C | `error` | `FORBIDDEN`、`RATE_LIMITED`、`INSUFFICIENT_COINS`、`DAILY_CAP`、`LOW_HEALTH_SNACK`、`TOO_FULL`、`SNACK_ONLY`、`VISITOR_FREE_FOOD`、`PET_DEAD`、`PET_SLEEPING`、`ALREADY_IN_MATCH`、`RECONNECT_FIRST`、`IDEMPOTENCY_CONFLICT`、`GAME_CLOSED`（v1.2，附 `opens_at`）… |
 
 ## 11. 從原型搬過來的重點
 
@@ -510,7 +550,7 @@ Cloud SQL for PostgreSQL ─────────────────┘
 6. **分享碼**：【預設】8 碼 Base32，可以重新產生。
 7. **多人獎勵**（M2）：【預設】`◎5 + (人數 − 名次) × 3`。
 8. **多人結束條件**（M2）：【預設】剩 1 人時結束，沒有固定長度（見 §4.7）。
-9. **多人場地寬度**（M2）：【預設】144px。
+9. ~~**多人場地寬度**（M2）~~：**已定案（v1.8）**——維持 96px。
 10. **推擠公式常數**（M2）：【預設】見 §5.1。
 11. **輸入緩衝**（M2）：【預設】N = 3，自動調整 2–6。
 12. **每日賺幣上限**：【預設】不設。
@@ -518,3 +558,8 @@ Cloud SQL for PostgreSQL ─────────────────┘
 14. **技術選型細節**：【預設】Node 22、pnpm、Vite、Fastify + ws、Kysely/Drizzle、Vitest、asia-east1。
 15. **全站停權**：【預設】不做，只有各家黑名單。
 16. **舊存檔**：【預設】不匯入。
+17. ~~**多人怎麼開局**（M2）~~：**已定案（v1.8）**——以家為單位，同打架的邀請流程，取消房間碼（§4.4）。
+18. **多人局中途離開的獎勵**（v1.8）：【預設】照名次拿（含保底）。風險：兩個帳號開局就離開可以各拿 ◎5–8，比單人一局（1 樓 ◎1）好賺；上線後看 `coin_ledger`（`reason = stairs_match`）再決定要不要改成「開局 3 秒內離開不給獎勵」。
+19. **主人不在時能不能在他家一起下樓梯**（v1.8）：【預設】可以（打架則需要主人在家）。
+20. **多人邀請時間**（v1.8）：【預設】15 秒（打架 10 秒）。
+21. **觀戰**（v1.8）：【預設】不做；沒參加的人只收到提示。
