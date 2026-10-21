@@ -6,7 +6,7 @@
 export const LODS = [48, 32, 20, 12, 8] as const;
 export const DESIGN_W = 48, DESIGN_H = 30;
 /** 玩家車專用尺寸（lod = -1）：約畫面 1/4 寬，跟 TG2 比例接近；在這個寬度直接點陣化，不放大。 */
-export const PLAYER_W = 62;
+export const PLAYER_W = 52;
 const lodW = (lod: number) => lod < 0 ? PLAYER_W : LODS[lod];
 type C = 'b' | 's' | 'h' | 'g' | 'r' | 'l' | 'L' | 'd' | 'm' | 'a' | 'k';
 // b 車身 s 車身陰影 h 車身亮面 g 玻璃 r 玻璃反光 l 尾燈 L 尾燈中心 d 最暗 m 中暗 a 配色 k 強制透明

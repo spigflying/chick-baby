@@ -3,7 +3,7 @@ import { MAX_OUT_COST, PAINTS, createRace, stepRace, raceRanking, setRaceInput, 
 
 const run = (s: ReturnType<typeof createRace>, f?: (s: any) => void) => { while (!s.over) { f?.(s); stepRace(s); } return s; };
 const drive = (s: any, id: string, nitro = false) => { const me = s.cars.find((c: any) => c.id === id); let tgt = segAt(s, me.z + 40).curve * 0.12;
-  for (const o of s.cars) { const dz = o.z - me.z; if (o !== me && dz > 0 && dz < 35 && Math.abs(o.x - me.x) < 0.45) tgt = o.x > 0 ? o.x - 0.7 : o.x + 0.7; }
+  for (const o of s.cars) { const dz = o.z - me.z; if (o !== me && dz > 0 && dz < 35 && Math.abs(o.x - me.x) < 0.55) tgt = o.x > 0 ? o.x - 0.75 : o.x + 0.75; }
   setRaceInput(s, id, { gas: true, left: me.x > tgt + 0.1, right: me.x < tgt - 0.1, nitro }); };
 const steer = (id: string) => (s: any) => drive(s, id);
 describe('racing engine v5', () => {

@@ -35,7 +35,7 @@ export function carCanvas(model: string, color: number, opts: CarLook = {}, lod 
 /** 依照畫面上應有的寬度挑 LOD：挑「不超過目標寬度」的最大一張，原尺寸畫，不縮放。 */
 export function pickLod(targetW: number) { for (let i = 0; i < LODS.length; i++) if (LODS[i] <= targetW + 0.5) return i; return LODS.length - 1; }
 /** 車寬（以半個路寬為 1）：玩家在 PLAYER_DZ 時剛好 24px，所以同深度的車都一樣大。 */
-export const CAR_W = 0.66;
+export const CAR_W = 0.44; // v11：車寬／半路寬（= PLAYER_W ÷ 玩家深度半路寬），和引擎 COLLIDE_DX 對齊
 export const PLAYER_DZ = 2.75; // 玩家車在攝影機前方的距離（m）
 
 // ---------- 路邊物 ----------
@@ -144,7 +144,7 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean }
 export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number }
 
-const ROAD_W = 1.05, CAM_H = 6, DEPTH = 0.9, DRAW = 60, HORIZON = 120; // v9：地平線約 52%（TG2 版面），上方是 HUD 與天空
+const ROAD_W = 1.8, CAM_H = 7.5, DEPTH = 0.9, DRAW = 60, HORIZON = 116; // v11：路寬照 TG2（車底那一列路寬 ≈ 0.9 畫面寬、車 ≈ 路寬 0.24）、攝影機較高，地平線 58%
 /** 玩家深度的半路寬（px）。車寬一律 = CAR_W × 半路寬 × 2 再乘同一個常數，所以只跟深度有關。 */
 const playerPw = () => ROAD_W * (DEPTH * 6 / (PLAYER_DZ + 4)) * (W / 2);
 /** 畫一個畫面。 */
@@ -190,7 +190,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
       x.fillRect(Math.round(rx - rw - rum), yy, Math.ceil(rum), 1); x.fillRect(Math.round(rx + rw), yy, Math.ceil(rum), 1);
       role('road'); x.fillStyle = fog ? fogC : night ? Q[3] : (t.weather === 'rain' ? Q[2] : alt ? Q[2] : Q[2]); if (night && !fog) x.fillStyle = Q[2];
       x.fillRect(Math.round(rx - rw), yy, Math.round(rw * 2), 1);
-      role('line'); if (alt && !fog) { x.fillStyle = night ? Q[1] : Q[0]; const lw = Math.max(1, Math.round(rw * 0.035)); for (const lf of [-0.34, 0.34]) x.fillRect(Math.round(rx + rw * lf - lw / 2), yy, lw, 1); } // 虛線車道線（3 線道）
+      role('line'); if (alt && !fog) { x.fillStyle = night ? Q[1] : Q[0]; const lw = Math.max(1, Math.round(rw * 0.035)); for (const lf of [-0.5, 0, 0.5]) x.fillRect(Math.round(rx + rw * lf - lw / 2), yy, lw, 1); } // 虛線車道線（4 線道，像 TG2）
       if (!fog && rw > 6) { x.fillStyle = night ? Q[1] : Q[0]; const ew = Math.max(1, Math.round(rw * 0.02)); x.fillRect(Math.round(rx - rw * 0.94), yy, ew, 1); x.fillRect(Math.round(rx + rw * 0.94) - ew, yy, ew, 1); } // 路肩白線
     }
   }
@@ -203,7 +203,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     if (segIdx % 4 === 0) for (const side of [-1, 1]) {
       const h = hash(segIdx * 2 + (side > 0 ? 1 : 0)); if (h < 0.25) continue;
       const name = names[Math.floor(h * 97) % names.length]; role('prop'); const img = propCanvas(name, night);
-      const wx = p.x + side * p.w * (1.45 + h * 0.6), sc = p.w / 14 * (name === 'tower' ? 2.2 : 1.6);
+      const wx = p.x + side * p.w * (1.25 + h * 0.4), sc = p.w / ROAD_W * 0.75 / 14 * (name === 'tower' ? 2.2 : 1.6);
       const ww = img.width * sc, hh = img.height * sc;
       if (p.y > pts[k].clip + 1) continue;
       sprites.push({ k, draw: () => { x.drawImage(img, Math.round(wx - ww / 2), Math.round(p.y - hh), Math.max(1, Math.round(ww)), Math.max(1, Math.round(hh))); } });

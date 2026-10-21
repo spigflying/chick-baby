@@ -12,6 +12,8 @@ export const RACE_TICK_RATE = 20;
 export const SEG_LEN = 20;
 export const RACE_SLOTS = 20;
 export const NITRO_PER_RACE = 3;
+/** v11：車與車的橫向碰撞寬度（半路寬＝1）。畫面上車寬 ≈ 0.44 半路寬（TG2 比例：車 ≈ 路寬 1/4.5），碰撞取畫面車寬的約 80%（0.38），比較好閃。 */
+export const COLLIDE_DX = 0.38;
 export const QUALIFY_RANK = 10;
 export const RACES_PER_COUNTRY = 4;
 export const RACE_ENGINE_VERSION = 2;
@@ -25,8 +27,8 @@ export const PRICE_DIVISOR = 25;
 export const TIER_NAMES = ['原廠標準', '升級 1 階', '升級 2 階', '升級 3 階'];
 const tiers = (tg2: number[]): PartTier[] => [0, ...tg2].map((v, i) => ({ name: TIER_NAMES[i], price: v / PRICE_DIVISOR, tg2: v }));
 export const PARTS: Record<PartKind, { label: string; desc: string; tiers: PartTier[] }> = {
-  engine: { label: '引擎', desc: '加速、極速；高階引擎要搭配高階變速箱才跑得到極速', tiers: tiers([30000, 50000, 80000]) },
-  gearbox: { label: '變速箱', desc: '檔位越多極速越高（引擎不夠力時高檔位用不到）', tiers: tiers([10000, 30000, 50000]) },
+  engine: { label: '引擎', desc: '加速＋極速（每階 +2.5 加速、+7 km/h）', tiers: tiers([30000, 50000, 80000]) },
+  gearbox: { label: '變速箱', desc: '極速（每階 +11 km/h，跟引擎各自相加）', tiers: tiers([10000, 30000, 50000]) },
   nitro: { label: '氮氣', desc: '氮氣更猛、噴更久（每場一律 3 次）', tiers: tiers([5000, 15000, 30000]) },
   dry: { label: '乾地胎', desc: '晴天、夜晚、霧天的抓地與過彎', tiers: tiers([1000, 2000, 4000]) },
   wet: { label: '雨胎', desc: '下雨、下雪時自動換上', tiers: tiers([1000, 2000, 3000]) },
@@ -58,11 +60,10 @@ export const PAINTS = PAINT_NAMES.length;
 export interface CarStats { topSpeed: number; accel: number; grip: number; wetGrip: number; nitroBoost: number; nitroTicks: number; armor: { F: number; S: number; R: number } }
 export function carStats(partsIn: Partial<Parts>, carId = 'falcon'): CarStats {
   const p = normParts(partsIn), c = carById(carId);
-  const gear = Math.min(p.gearbox, p.engine + 1); // 引擎不夠力，高檔位發揮不出來
   const tough = (c.tough - 1) * 0.4;
   const arm = (lv: number) => Math.max(0, Math.min(0.75, lv * 0.2 + tough));
   return {
-    topSpeed: (64 + gear * 3.5 + p.engine * 1.5) * c.top,   // 平衡：升級幫助有限，約 230 → 285 km/h（再乘車款）
+    topSpeed: (64 + p.engine * 2 + p.gearbox * 3) * c.top,   // 引擎、變速箱各自加極速、直接相加（不互相卡）；全滿 79 m/s ≈ 284 km/h
     accel: (13 + p.engine * 2.5 + (p.gearbox >= 2 ? 1 : 0)) * c.accel,
     grip: (1 + p.dry * 0.18) * c.grip,
     wetGrip: (0.62 + p.wet * 0.17) * c.grip,
@@ -216,7 +217,7 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
   for (const o of s.cars) {
     if (o === c || o.finishedTick !== null) continue;
     const dz = o.z - c.z;
-    if (dz > 0 && dz < 28 && Math.abs(o.x - c.x) < 0.4 && o.speed < c.speed + 2) { // 前面有慢車：往空的那邊超
+    if (dz > 0 && dz < 28 && Math.abs(o.x - c.x) < COLLIDE_DX + 0.08 && o.speed < c.speed + 2) { // 前面有慢車：往空的那邊超
       blocked = true; const left = o.x - 0.65, right = o.x + 0.65;
       target = Math.abs(left) < Math.abs(right) ? (left > -0.95 ? left : right) : (right < 0.95 ? right : left);
       if (dz < 9 && c.speed > o.speed - 1) follow = true; // 太近：先收油跟車，別追撞
@@ -273,7 +274,7 @@ export function stepRace(s: RaceState) {
   const live = s.cars.filter((c) => c.finishedTick === null).sort((a, b) => a.z - b.z);
   for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
     const a = live[i], b = live[j], dz = b.z - a.z; if (dz > 5) break;
-    const dx = Math.abs(a.x - b.x); if (dx >= 0.32) continue;
+    const dx = Math.abs(a.x - b.x); if (dx >= COLLIDE_DX) continue;
     if (dz > 1.5 && a.speed > b.speed) { // a 從後面撞上 b
       const rel = (a.speed - b.speed) / 30;
       if (a.speed - b.speed < 1.5) { a.speed = b.speed; continue; } // 輕輕貼上：不算撞

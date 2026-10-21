@@ -105,6 +105,9 @@ describe('racing (server) v5', () => {
     await wc.wait((m) => m.type === 'race.event' && m.kind === 'invite');
     // 邀請中：同一個家不能再開下樓梯
     wb.ws.send(JSON.stringify({ type: 'stairs.invite' })); const sn = await wb.wait((m) => m.type === 'stairs.notice' || (m.type === 'error' && m.for === 'stairs.invite')); expect(sn.code).toBe('FIGHT_BUSY');
+    // 賽車邀請進行中：不能發起打架
+    wc.ws.send(JSON.stringify({ type: 'arena.join' })); wc.ws.send(JSON.stringify({ type: 'arena.invite' }));
+    const an = await wc.wait((m) => m.type === 'arena.notice'); expect(an.code).toBe('RACE_BUSY');
     wb.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: true }));
     wc.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: false }));
     const st = await wa.wait((m) => m.type === 'race.started'); await wb.wait((m) => m.type === 'race.started');
