@@ -889,7 +889,7 @@ export class Device {
       },
       status: (t) => this.say(t),
     }, this.ctx.me.id);
-    this.say(multi ? `${m.players.length} 隻一起下樓梯！←→ 移動，把別人擠下去～` : '←→ 移動，往下跳！小心尖刺～');
+    this.say(multi ? `${m.players.length} 隻一起下樓梯！←→ 移動，撐到最後～` : '←→ 移動，往下跳！小心尖刺～');
   }
   endStairsView() {
     this.stairs?.leave(); this.stairs = null; this.menu = null; this.$('.menu').hidden = true;
