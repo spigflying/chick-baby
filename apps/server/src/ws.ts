@@ -1,3 +1,4 @@
+import { joinRace, leaveRace, raceInput } from './racing';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { Db } from './db';
@@ -130,7 +131,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
     if (phaseAt(clock(), Date.now()) === 'closing') send(c, { type: 'game.closing', closes_at: clock().status(Date.now()).closes_at });
     socket.on('message', async (raw) => {
       let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
-      const isInput = msg?.type === 'match.input' || msg?.type === 'arena.input';
+      const isInput = msg?.type === 'match.input' || msg?.type === 'arena.input' || msg?.type === 'race.input';
       if (!rateLimit(`ws:${c.id}:${isInput ? 'in' : 'other'}`, isInput ? 35 : 20, 1000)) {
         if (!isInput || Math.random() < 0.1) send(c, { type: 'error', code: 'RATE_LIMITED', request_id: msg?.request_id });
         return;
@@ -203,6 +204,14 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             toAuthority({ t: `mstairs.${msg.type.slice(7)}`, home: c.homeId, user: c.user.id, invite: typeof msg.invite === 'string' ? msg.invite.slice(0, 40) : null, accept: !!msg.accept, deadline: connDeadline(c) });
             break;
           }
+          // ---- 賽車模式 ----
+          case 'race.join': {
+            if ((c.match && !c.match.ended) || c.mm) throw new AppError('ALREADY_IN_MATCH');
+            await joinRace(db, { userId: c.user.id, name: String((c.user as any).display_name ?? '玩家').slice(0, 12), send: (m) => send(c, m) }, msg.track);
+            break;
+          }
+          case 'race.input': raceInput(c.user.id, msg); break;
+          case 'race.leave': leaveRace(c.user.id); break;
           default: send(c, { type: 'error', code: 'BAD_REQUEST', message: 'unknown type' });
         }
       } catch (e) {
@@ -213,6 +222,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
     });
     socket.on('close', () => {
       if (c.mm) toAuthority({ t: 'mstairs.leave', home: c.mm.home, user: c.user.id });
+      leaveRace(c.user.id);
       leaveHome(c); conns.delete(c);
       if (c.match && !c.match.ended) void finish(c.match, 'quit');
     });

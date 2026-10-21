@@ -214,6 +214,39 @@ const migrations: Record<string, Migration> = {
       await sql`DROP INDEX stair_match_players_user; ALTER TABLE stair_matches DROP COLUMN home_id;`.execute(db);
     },
   },
+  '0008_racing': {
+    async up(db: Kysely<unknown>) {
+      // 賽車模式：獨立的賽車獎金（不和金幣互通）、零件、損傷、解鎖、成績
+      await sql`CREATE TABLE race_profiles (
+          user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+          cash integer NOT NULL DEFAULT 3000 CHECK (cash >= 0),
+          parts jsonb NOT NULL DEFAULT '{"engine":0,"gearbox":0,"dry":0,"wet":0,"nitro":0,"armor":0}',
+          car text NOT NULL DEFAULT 'falcon',
+          cars text[] NOT NULL DEFAULT ARRAY['falcon'],
+          damage real NOT NULL DEFAULT 0 CHECK (damage >= 0 AND damage <= 100),
+          unlocked integer NOT NULL DEFAULT 1,
+          points integer NOT NULL DEFAULT 0,
+          races integer NOT NULL DEFAULT 0,
+          wins integer NOT NULL DEFAULT 0,
+          updated_at timestamptz NOT NULL DEFAULT now());
+        CREATE TABLE race_results (
+          id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          race_id uuid NOT NULL,
+          track text NOT NULL,
+          user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          rank integer NOT NULL,
+          time_ms integer,
+          prize integer NOT NULL DEFAULT 0,
+          damage real NOT NULL DEFAULT 0,
+          humans integer NOT NULL DEFAULT 1,
+          created_at timestamptz NOT NULL DEFAULT now());
+        CREATE INDEX race_results_track_time ON race_results (track, time_ms) WHERE time_ms IS NOT NULL;
+        CREATE INDEX race_results_user ON race_results (user_id, created_at);`.execute(db);
+    },
+    async down(db: Kysely<unknown>) {
+      await sql`DROP TABLE race_results; DROP TABLE race_profiles;`.execute(db);
+    },
+  },
 };
 
 const provider: MigrationProvider = { getMigrations: async () => migrations };
