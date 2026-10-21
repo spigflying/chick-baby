@@ -65,6 +65,7 @@ export const NOTICE_TEXT: Record<string, string> = {
   NOT_ELIGIBLE: '寵物要醒著、沒生病才能打架',
   ARENA_FULL: '場上太擠了',
   FIGHT_BUSY: '已經有人發起或正在打架',
+  RACE_BUSY: '有人在賽車，等比賽結束再打架',
   NO_OPPONENT: '場上沒有可以一起打的寵物',
   NOT_ENOUGH: '參戰的不到 2 隻，取消',
   OWNER_OFFLINE: '主人離線，不能打架',

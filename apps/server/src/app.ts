@@ -1,3 +1,4 @@
+import { buyCar, buyPart, getProfile as getRaceProfile, raceCatalog, raceLeaderboard } from './racing';
 import { buyOutfit, outfitCatalog, ownedOutfits, wearOutfit } from './outfits';
 import Fastify, { type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
@@ -124,6 +125,10 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
       }
       a.get('/homes/:id/visitors', async (req) => g.homeVisitors(db, (req.params as any).id, req.user!.id));
       // ---- v1.5 道具 ----
+      // ---- 賽車模式（獨立的賽車獎金，不動金幣）----
+      a.get('/race/profile', async (req) => ({ catalog: raceCatalog(), profile: await getRaceProfile(db, req.user!.id) }));
+      a.post('/race/buy', async (req) => { const b = (req.body ?? {}) as any; return b.car !== undefined || b.paint !== undefined ? buyCar(db, ctx(req), b.car, b.paint) : buyPart(db, ctx(req), b.kind, b.tier); });
+      a.get('/race/leaderboard/:track', async (req) => raceLeaderboard(db, (req.params as any).track));
       a.get('/leaderboard/stairs', async (req) => g.stairsLeaderboard(db, req.user!.id));
       a.get('/items', async (req) => ({ catalog: itemCatalog(), items: await listItems(db, req.user!.id) }));
       a.post('/items/buy', async (req) => { const b = (req.body ?? {}) as any; return buyItem(db, ctx(req), b.item_id, b.request_id, inFight); });

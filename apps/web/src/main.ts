@@ -2,6 +2,8 @@ import { blip, presenceDiff } from './visitors';
 import './style.css';
 import { api, act, errText, ApiError } from './api';
 import { Live } from './ws';
+import { racePage } from './race';
+let pageOff: (() => void) | null = null;
 import { Device } from './device';
 import { drawShell } from './shell';
 import { coinHtml, spriteCanvas, speciesSprite, SPECIES_LABEL, PAL, spr, sw, sh } from './sprites';
@@ -35,7 +37,7 @@ function renderBar() {
   const p = location.pathname;
   const link = (href: string, t: string, on: boolean) => `<a data-nav href="${href}" class="${on ? 'on' : ''}">${t}</a>`;
   bar.innerHTML = `<span class="who">🐣 <b>${esc(me.user.display_name)}</b></span><span class="coin" id="barCoins">${coinHtml(wallet)}</span><span>分享碼 <span class="code">${esc(me.user.share_code)}</span></span>
-    <nav>${link('/', '我的家', p === '/')}${link('/visit', '去拜訪', p === '/visit' || p.startsWith('/home/'))}${link('/settings', '家的設定', p === '/settings')}${me.user.role === 'admin' ? link('/admin', '管理', p === '/admin') : ''}<a href="#" id="logout">登出</a></nav>`;
+    <nav>${link('/', '我的家', p === '/')}${link('/visit', '去拜訪', p === '/visit' || p.startsWith('/home/'))}${link('/race', '賽車', p === '/race')}${link('/settings', '家的設定', p === '/settings')}${me.user.role === 'admin' ? link('/admin', '管理', p === '/admin') : ''}<a href="#" id="logout">登出</a></nav>`;
   $('#logout').onclick = async (e) => { e.preventDefault(); await api('POST', '/auth/logout'); live?.stop(); live = null; idleOff?.(); idleOff = null; me = null; nav('/', true); };
 }
 function setWallet(n: number) { wallet = n; const c = document.getElementById('barCoins'); if (c) c.innerHTML = coinHtml(n); device?.renderTop(); }
@@ -241,7 +243,9 @@ async function route() {
   renderBar();
   const p = location.pathname;
   if (!p.startsWith('/home/') && p !== '/') { device?.destroy(); device = null; }
+  pageOff?.(); pageOff = null;
   let m: RegExpMatchArray | null;
+  if (p === '/race') { pageOff = racePage(app, live, me, toast); return; }
   if (p === '/') return homePage(me.home.id);
   if ((m = p.match(/^\/home\/([0-9a-f-]{36})$/))) return homePage(m[1]);
   if ((m = p.match(/^\/h\/([^/]+)$/))) return shareLink(decodeURIComponent(m[1]));
@@ -281,6 +285,8 @@ function startLive() {
     else if (m.type === 'home.state' && device?.home && m.home.id === device.home.id) device.setHome(m);
     else if (m.type === 'home.kicked' && device?.home?.id === m.home_id) { toast('主人變更了存取設定，你被請出去了'); nav('/'); }
     else if (m.type === 'wallet.updated') setWallet(m.balance);
+    // 一起賽車開跑（在家裡接受邀請的）：帶到賽車頁，頁面接手這場比賽
+    else if (m.type === 'race.started' && location.pathname !== '/race') { (window as any).__pendingRace = m; live!.inLobby = false; nav('/race'); }
     else if (m.type === 'game.closing') toast('小雞 5 分鐘後要睡覺囉～');
   });
   live.start();

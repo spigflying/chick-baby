@@ -11,6 +11,7 @@ import { env } from './env';
 import type { PresenceStore } from './presence';
 import { listItems } from './items';
 import { inStairs, stairsInviting } from './mstairs';
+import { raceBusy } from './racing';
 
 const P = ARENA_PARAMS;
 const TICK_MS = 1000 / P.tickRate;
@@ -93,6 +94,7 @@ async function join(home: string, user: string) {
 }
 /** v1.6 發起戰鬥：邀請場上其他合格寵物的主人；10 秒內回覆，沒回覆＝觀戰。 */
 export function invite(home: string, user: string, now = Date.now()) {
+  if (raceBusy(home)) return pub({ t: 'arena.notice', home, user, code: 'RACE_BUSY' }); // 家裡有賽車邀請或比賽進行中：先不能打架
   const a = arenas.get(home);
   const me = a?.state.fighters.find((f) => f.userId === user);
   if (!a || !me) return pub({ t: 'arena.notice', home, user, code: 'NOT_ELIGIBLE' });

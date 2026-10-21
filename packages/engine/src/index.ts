@@ -7,3 +7,4 @@ export * from './stairs';
 export * from './hours';
 export * from './arena';
 export * from './bao';
+export * from './racing';

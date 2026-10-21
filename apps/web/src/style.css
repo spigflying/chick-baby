@@ -186,3 +186,42 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .stathelp{position:absolute;z-index:15;max-width:calc(100% - 4px);width:max-content;box-sizing:border-box;font-family:var(--ui);font-size:clamp(9px,2.6vw,12px);line-height:1.35;background:var(--g0);color:var(--g3);padding:4px 6px;border:2px solid var(--g3);box-shadow:0 0 0 2px var(--g0)}
 .stathelp b{display:block;margin-bottom:2px}
 .stathelp p{margin:0}
+/* ---- 賽車模式 ---- */
+.race-page{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:center}
+.race-dev{width:min(100%,480px);display:flex;flex-direction:column;gap:8px}
+.race-lcd canvas{display:block;width:100%;aspect-ratio:240/200;image-rendering:pixelated;background:var(--g3)}
+.race-pad{display:flex;gap:6px;align-items:stretch;user-select:none;-webkit-user-select:none;touch-action:none}
+.race-pad .sp{flex:1}
+.race-pad button{font-family:var(--ui);font-size:16px;min-width:56px;min-height:56px;border:4px solid #000;background:var(--g2);color:var(--g0);box-shadow:3px 3px 0 #000;touch-action:none}
+.race-pad button.on{background:var(--g0);color:var(--g3);transform:translate(2px,2px);box-shadow:1px 1px 0 #000}
+.race-pad .gas{min-width:72px}
+.race-pad .n2o{background:var(--g3)}
+.race-keys{font-size:12px;opacity:.7;margin:0}
+.race-panel .tabs{display:flex;gap:4px;margin-bottom:6px}
+.race-panel .tabs button.on{background:#000;color:#fff}
+.race-panel li.sel{background:#ffe08a}
+.race-panel li.lock{opacity:.5}
+.race-panel li[data-tr]{cursor:pointer}
+.race-panel .big{width:100%;margin-top:8px;padding:8px;font-size:15px}
+.race-panel canvas.mini,.garage-car canvas{image-rendering:pixelated;vertical-align:middle}
+.race-panel canvas.mini{width:68px;height:44px}
+.garage-car{display:flex;gap:8px;align-items:center}
+.garage-car canvas{width:156px;height:102px;border:3px solid #000}
+.race-panel ol{margin:0;padding-left:0;list-style:none}
+.race-panel ol li{display:flex;justify-content:space-between;border-bottom:1px dotted #bba}
+.race-panel li.me{font-weight:bold;background:#ffe08a}
+.race-cash{margin:0 0 6px}
+@media (max-width:520px){.race-pad button{min-width:48px;font-size:14px}}
+
+/* 改裝店（TG2）：每類 4 格（原廠＋3 階）、塗裝 8 格 */
+.shop-cat{margin:6px 0 10px}.shop-cat h4{margin:4px 0}
+.shop-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.shop-it{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 2px;background:#fff6d8;border:3px solid #000;font:inherit;font-size:12px;cursor:pointer}
+.shop-it canvas{width:72px;height:72px;image-rendering:pixelated;border:2px solid #000}
+.shop-it.on{background:#9bbc0f;box-shadow:inset 0 0 0 2px #0f380f}
+.shop-it.on span{font-weight:bold}
+.shop-it.pend{outline:3px dashed #e05}
+.shop-it.poor{opacity:.55}
+.shop-confirm{background:#ffe3ec;border:2px solid #000;padding:4px 6px}
+.shop-pad button{min-width:44px;padding:0 6px}
+.race-pad[hidden],.race-keys[hidden]{display:none}

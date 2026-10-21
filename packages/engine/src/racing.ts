@@ -1,0 +1,299 @@
+/**
+ * 賽車模式 v5（機制參考 SNES 時代的偽 3D 錦標賽賽車；畫面、名稱、賽道都是原創）。
+ * 純邏輯、決定性：伺服器權威模擬，客戶端內插畫面。
+ * 單位：距離 m、速度 m/s、tick = 1/RACE_TICK_RATE 秒；賽道由路段組成，每段 SEG_LEN 公尺。
+ * v5 規則（使用者最終決定）：20 台車（空位補電腦）、玩家從最後發車、前 10 名晉級、前 6 名拿獎金與積分、
+ * 每國 4 站、每場 3 次氮氣、沒有油量；完美度（condition）每次碰撞都會降低、每降一點極速就少一點；
+ * 比賽之間只修好撞壞的部分（完美度回到 100%），其他（獎金、零件、進度）都保留。
+ */
+import { createRng, nextFloat, type Rng } from './rng';
+
+export const RACE_TICK_RATE = 20;
+export const SEG_LEN = 20;
+export const RACE_SLOTS = 20;
+export const NITRO_PER_RACE = 3;
+/** v11：車與車的橫向碰撞寬度（半路寬＝1）。畫面上車寬 ≈ 0.44 半路寬（TG2 比例：車 ≈ 路寬 1/4.5），碰撞取畫面車寬的約 80%（0.38），比較好閃。 */
+export const COLLIDE_DX = 0.38;
+export const QUALIFY_RANK = 10;
+export const RACES_PER_COUNTRY = 4;
+export const RACE_ENGINE_VERSION = 2;
+
+// ---------------- 改裝店（TG2）：8 類 × 4 項（原廠標準免費＋升級 1／2／3 階） ----------------
+// 價格＝TG2 原價 ÷ PRICE_DIVISOR（保留 TG2 的價格比例），單位＝寵物金幣 ◎（錢從下樓梯來，見 docs/racing.md 經濟）。
+// 任何一階都可以直接買；換到別的階（包括降級）舊零件直接丟掉、全額付款、不退錢。原廠標準＝免費。
+export type PartKind = 'engine' | 'gearbox' | 'nitro' | 'dry' | 'wet' | 'armorF' | 'armorR' | 'armorS';
+export interface PartTier { name: string; price: number; tg2: number }
+export const PRICE_DIVISOR = 25;
+export const TIER_NAMES = ['原廠標準', '升級 1 階', '升級 2 階', '升級 3 階'];
+const tiers = (tg2: number[]): PartTier[] => [0, ...tg2].map((v, i) => ({ name: TIER_NAMES[i], price: v / PRICE_DIVISOR, tg2: v }));
+export const PARTS: Record<PartKind, { label: string; desc: string; tiers: PartTier[] }> = {
+  engine: { label: '引擎', desc: '加速＋極速（每階 +2.5 加速、+7 km/h）', tiers: tiers([30000, 50000, 80000]) },
+  gearbox: { label: '變速箱', desc: '極速（每階 +11 km/h，跟引擎各自相加）', tiers: tiers([10000, 30000, 50000]) },
+  nitro: { label: '氮氣', desc: '氮氣更猛、噴更久（每場一律 3 次）', tiers: tiers([5000, 15000, 30000]) },
+  dry: { label: '乾地胎', desc: '晴天、夜晚、霧天的抓地與過彎', tiers: tiers([1000, 2000, 4000]) },
+  wet: { label: '雨胎', desc: '下雨、下雪時自動換上', tiers: tiers([1000, 2000, 3000]) },
+  armorF: { label: '前裝甲', desc: '追撞前車時少掉完美度', tiers: tiers([5000, 10000, 20000]) },
+  armorR: { label: '後裝甲', desc: '被後車撞時少掉完美度', tiers: tiers([5000, 10000, 20000]) },
+  armorS: { label: '側裝甲', desc: '擦撞路邊與側面碰撞少掉完美度', tiers: tiers([5000, 10000, 20000]) },
+};
+export const PART_KINDS = Object.keys(PARTS) as PartKind[];
+export type Parts = Record<PartKind, number>;
+export const STOCK_PARTS: Parts = { engine: 0, gearbox: 0, dry: 0, wet: 0, nitro: 0, armorF: 0, armorS: 0, armorR: 0 };
+export const normParts = (p: any): Parts => { const o = { ...STOCK_PARTS }; for (const k of PART_KINDS) o[k] = Math.max(0, Math.min(PARTS[k].tiers.length - 1, Math.floor(Number(p?.[k]) || 0))); if (p?.armor && !p.armorS) o.armorS = Math.min(3, p.armor); return o; };
+export function partPrice(kind: PartKind, tier: number) { return PARTS[kind]?.tiers[tier]?.price ?? null; }
+/** 全部升到 3 階要多少 ◎（直接買 3 階，不用一階一階買） */
+export const MAX_OUT_COST = (Object.keys(PARTS) as PartKind[]).reduce((n, k) => n + PARTS[k].tiers[3].price, 0);
+
+/** 玩家車款：9 款原創外觀，免費隨意換、性能完全一樣（TG2 的改裝店只賣零件和塗裝；性能全部來自零件）。電腦車一律用灰色通用車。 */
+export interface CarModel { id: string; name: string; price: number; top: number; accel: number; grip: number; tough: number; desc: string }
+const car = (id: string, name: string, desc: string): CarModel => ({ id, name, price: 0, top: 1, accel: 1, grip: 1, tough: 1, desc });
+export const CARS: CarModel[] = [
+  car('falcon', '隼 GT', 'GT3 賽車'), car('arrow', '箭 RS', '楔形超跑'), car('muscle', '野馬 V8', '肌肉車'),
+  car('rally', '鷹 拉力', '拉力掀背'), car('rhino', '犀 R', '四驅性能跑車'), car('drift', '鬼 甩尾', '日系寬體'),
+  car('comet', '彗星 Z', '後置引擎經典跑車'), car('lmp', '曙 LMP', '利曼原型車'), car('f1', '燕 F1', '開輪方程式'),
+];
+export const carById = (id: string) => CARS.find((c) => c.id === id) ?? CARS[0];
+/** 8 種免費塗裝（TG2）。四階綠畫面裡用「深淺搭配＋花紋」區分，見 web race-cars.ts LIVERIES。 */
+export const PAINT_NAMES = ['紅', '灰', '綠', '淺藍', '深藍', '黃', '黑', '紫'];
+export const PAINTS = PAINT_NAMES.length;
+
+export interface CarStats { topSpeed: number; accel: number; grip: number; wetGrip: number; nitroBoost: number; nitroTicks: number; armor: { F: number; S: number; R: number } }
+export function carStats(partsIn: Partial<Parts>, carId = 'falcon'): CarStats {
+  const p = normParts(partsIn), c = carById(carId);
+  const tough = (c.tough - 1) * 0.4;
+  const arm = (lv: number) => Math.max(0, Math.min(0.75, lv * 0.2 + tough));
+  return {
+    topSpeed: (64 + p.engine * 2 + p.gearbox * 3) * c.top,   // 引擎、變速箱各自加極速、直接相加（不互相卡）；全滿 79 m/s ≈ 284 km/h
+    accel: (13 + p.engine * 2.5 + (p.gearbox >= 2 ? 1 : 0)) * c.accel,
+    grip: (1 + p.dry * 0.18) * c.grip,
+    wetGrip: (0.62 + p.wet * 0.17) * c.grip,
+    nitroBoost: 1.22 + p.nitro * 0.09,
+    nitroTicks: RACE_TICK_RATE * (3 + p.nitro * 0.4),
+    armor: { F: arm(p.armorF), S: arm(p.armorS), R: arm(p.armorR) },
+  };
+}
+
+// ---------------- 錦標賽：國家 × 4 站 ----------------
+export type Scenery = 'city' | 'coast' | 'desert' | 'forest' | 'snow' | 'farm';
+export type Weather = 'clear' | 'rain' | 'night' | 'snow' | 'fog';
+/** 路段：[段數, 彎度（正＝右彎）, 坡度（正＝上坡）] */
+export type Piece = [number, number, number];
+export interface Track { id: string; name: string; country: string; countryId: string; countryIdx: number; raceIdx: number; scenery: Scenery; weather: Weather; laps: number; ai: number; pieces: Piece[] }
+export interface Country { id: string; name: string; tracks: string[] }
+type TrackDef = [string, string, Scenery, Weather, number, number]; // id 名稱 景色 天氣 圈數 路線種子
+const COUNTRY_DEFS: [string, string, TrackDef[]][] = [
+  ['tw', '台灣', [['tw1', '河濱大道', 'city', 'clear', 4, 11], ['tw2', '陽明山霧道', 'forest', 'fog', 3, 12], ['tw3', '港都夜景', 'city', 'night', 4, 13], ['tw4', '東海岸雨線', 'coast', 'rain', 3, 14]]],
+  ['jp', '日本', [['jp1', '箱根山道', 'forest', 'clear', 3, 21], ['jp2', '首都高夜行', 'city', 'night', 4, 22], ['jp3', '雨中賽道', 'farm', 'rain', 3, 23], ['jp4', '北國雪原', 'snow', 'snow', 3, 24]]],
+  ['us', '美國', [['us1', '沙漠直線', 'desert', 'clear', 4, 31], ['us2', '紅岩峽谷', 'desert', 'clear', 3, 32], ['us3', '霓虹賭城', 'city', 'night', 4, 33], ['us4', '一號公路霧', 'coast', 'fog', 3, 34]]],
+  ['de', '德國', [['de1', '黑森林', 'forest', 'rain', 3, 41], ['de2', '北環霧中', 'forest', 'fog', 3, 42], ['de3', '阿爾卑斯雪', 'snow', 'snow', 3, 43], ['de4', '無限速公路', 'farm', 'clear', 5, 44]]],
+];
+/** 用種子產生路線：直線、左右彎、坡；越後面的國家彎越急。 */
+function makePieces(seed: number, hard: number): Piece[] {
+  const r = createRng(seed); const out: Piece[] = [[18, 0, 0]];
+  let total = 18;
+  while (total < 150 + hard * 15) {
+    const kind = nextFloat(r);
+    const n = 8 + Math.floor(nextFloat(r) * 18);
+    const curve = kind < 0.35 ? 0 : (nextFloat(r) < 0.5 ? -1 : 1) * Math.round((1 + nextFloat(r) * (2.5 + hard)) * 10) / 10;
+    const hill = nextFloat(r) < 0.45 ? Math.round((nextFloat(r) * 4 - 2) * 10) / 10 : 0;
+    out.push([n, curve, hill]); total += n;
+  }
+  out.push([14, 0, 0]);
+  return out;
+}
+export const COUNTRIES: Country[] = COUNTRY_DEFS.map(([id, name, ts]) => ({ id, name, tracks: ts.map((t) => t[0]) }));
+export const TRACKS: Track[] = COUNTRY_DEFS.flatMap(([cid, cname, ts], ci) => ts.map(([id, name, scenery, weather, laps, seed], ri) => ({
+  id, name, country: cname, countryId: cid, countryIdx: ci, raceIdx: ri, scenery, weather, laps, ai: 0.78 + ci * 0.055 + ri * 0.012, pieces: makePieces(seed, ci),
+})));
+export const trackById = (id: string) => TRACKS.find((t) => t.id === id) ?? null;
+export interface Segment { curve: number; y: number }
+export function buildTrack(t: Track): Segment[] {
+  const segs: Segment[] = []; let y = 0;
+  for (const [n, curve, hill] of t.pieces) for (let i = 0; i < n; i++) {
+    const e = Math.min(1, i / 5, (n - 1 - i) / 5 + 0.2);
+    y += hill * 0.9 * Math.sin((i / n) * Math.PI);
+    segs.push({ curve: curve * e, y });
+  }
+  const dy = segs[segs.length - 1].y; segs.forEach((s, i) => { s.y -= (dy * (i + 1)) / segs.length; });
+  return segs;
+}
+export const trackLength = (segs: Segment[]) => segs.length * SEG_LEN;
+
+// ---------------- 獎金、積分、晉級（同一張表，每條賽道一樣） ----------------
+/** 獎金（◎ 寵物金幣）：保留 TG2 10:6:4:3:2:1 比例，但壓低到「每分鐘賺得比下樓梯少」，錢主要還是從下樓梯來。 */
+export const PRIZES = [60, 36, 24, 18, 12, 6];
+export const POINTS = [10, 6, 4, 3, 2, 1];
+export const prizeFor = (rank: number) => PRIZES[rank - 1] ?? 0;
+export const pointsFor = (rank: number) => POINTS[rank - 1] ?? 0;
+/** 19 位電腦車手（名字固定，讓同一國 4 站的積分榜能累積）。skill 是基礎實力。 */
+export const AI_DRIVERS: { name: string; skill: number }[] = [
+  '阿飛', '雷霆', '閃電', '老鷹', '疾風', '白鯨', '火狐', '黑豹', '銀狼', '小黃', '山貓', '海燕', '鐵牛', '飛魚', '青龍', '赤兔', '夜梟', '流星', '野狼',
+].map((name, i) => ({ name, skill: 1.06 - i * 0.012 }));
+
+/** 錦標賽進度（存在玩家檔案裡）。points 以車手名稱為鍵，自己用 ME。 */
+export interface Cup { country: number; race: number; points: Record<string, number> }
+export const ME = '__me';
+export const newCup = (country = 0): Cup => ({ country, race: 0, points: {} });
+export const cupTrack = (cup: Cup) => TRACKS.find((t) => t.countryIdx === cup.country && t.raceIdx === cup.race) ?? null;
+export interface CupResult { cup: Cup; counted: boolean; qualified: boolean; countryDone: boolean; champion: boolean; unlocked: number; standings: [string, number][] }
+/**
+ * 一場比賽結束後更新錦標賽：只有跑的是「目前這站」才算。名次 > 10 沒晉級＝這個國家重來；
+ * 4 站跑完：國家積分第一名（同分算玩家贏）就解鎖下一個國家，否則重跑這個國家。
+ */
+export function settleCup(cupIn: Cup, unlocked: number, trackId: string, ranking: { key: string; rank: number }[]): CupResult {
+  const cup: Cup = { country: cupIn.country, race: cupIn.race, points: { ...cupIn.points } };
+  const t = trackById(trackId), cur = cupTrack(cup);
+  const standings = () => Object.entries(cup.points).sort((a, b) => b[1] - a[1] || (a[0] === ME ? -1 : b[0] === ME ? 1 : 0));
+  const mine = ranking.find((r) => r.key === ME);
+  if (!t || !cur || t.id !== cur.id || !mine) return { cup, counted: false, qualified: !!mine && mine.rank <= QUALIFY_RANK, countryDone: false, champion: false, unlocked, standings: standings() };
+  if (mine.rank > QUALIFY_RANK) { const st = standings(); return { cup: newCup(cup.country), counted: true, qualified: false, countryDone: false, champion: false, unlocked, standings: st }; }
+  for (const r of ranking) { const p = pointsFor(r.rank); if (p) cup.points[r.key] = (cup.points[r.key] ?? 0) + p; }
+  cup.race++;
+  const st = standings();
+  if (cup.race < RACES_PER_COUNTRY) return { cup, counted: true, qualified: true, countryDone: false, champion: false, unlocked, standings: st };
+  const champion = st.length > 0 && st[0][0] === ME;
+  const next = champion ? Math.min(COUNTRIES.length - 1, cup.country + 1) : cup.country;
+  const unl = champion ? Math.max(unlocked, Math.min(COUNTRIES.length, cup.country + 2)) : unlocked;
+  return { cup: newCup(champion && cup.country + 1 < COUNTRIES.length ? next : cup.country), counted: true, qualified: true, countryDone: true, champion, unlocked: unl, standings: st };
+}
+
+
+// ---------------- 模擬 ----------------
+export interface RaceInput { gas: boolean; brake: boolean; left: boolean; right: boolean; nitro: boolean }
+export interface RaceCar {
+  id: string; name: string; ai: boolean; car: string; color: number;
+  z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; lap: number;
+  finishedTick: number | null; stats: CarStats; input: RaceInput; prevNitro: boolean; nitroQ: boolean;
+  aiLane: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; hit: number; hits: number;
+}
+/** 完美度（%）＝ 100 − damage */
+export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
+/** 完美度對極速的影響：每少 1% 就少 0.4% 極速（最低 60%） */
+export const condFactor = (damage: number) => Math.max(0.6, 1 - 0.004 * damage);
+export interface RaceState { seed: number; track: string; tick: number; laps: number; len: number; cars: RaceCar[]; rng: Rng; over: boolean; maxTicks: number; countdown: number; difficulty: number }
+export interface Entrant { id: string; name: string; ai?: boolean; car?: string; parts?: Partial<Parts>; color?: number; skill?: number }
+const NO_INPUT: RaceInput = { gas: false, brake: false, left: false, right: false, nitro: false };
+
+/** 補滿電腦車：用固定的 19 位車手（依實力），回傳完整 20 人出賽名單（電腦在前、玩家在後）。 */
+export function fillField(humans: Entrant[], slots = RACE_SLOTS): Entrant[] {
+  const ai = AI_DRIVERS.slice(0, Math.max(0, slots - humans.length)).map((d, i) => ({ id: `ai${i}`, name: d.name, ai: true, car: 'ai', skill: d.skill }));
+  return [...ai, ...humans].slice(0, slots);
+}
+export function createRace(seed: number, trackId: string, entrants: Entrant[], difficulty = 1): RaceState {
+  const t = trackById(trackId); if (!t) throw new Error('bad track');
+  const segs = buildTrack(t), len = trackLength(segs), rng = createRng(seed);
+  // 發車：電腦依實力排（最強在最前），玩家全部在最後（TG2 規則）
+  const ai = entrants.filter((e) => e.ai).map((e) => ({ e, form: (e.skill ?? 1) * (0.94 + nextFloat(rng) * 0.12) })).sort((a, b) => b.form - a.form);
+  const hum = entrants.filter((e) => !e.ai);
+  const order = [...ai.map((a) => ({ e: a.e, form: a.form })), ...hum.map((e) => ({ e, form: 1 }))].slice(0, RACE_SLOTS);
+  const cars: RaceCar[] = order.map(({ e, form }, i) => {
+    const st = carStats(e.parts ?? STOCK_PARTS, e.ai ? 'falcon' : e.car);
+    const skill = t.ai * difficulty * form;
+    if (e.ai) { st.topSpeed = 78 * skill; st.accel = 17 * skill; st.grip = 1.15 + 0.1 * form; st.wetGrip = 1.0 + 0.1 * form; st.nitroBoost = 1.3; st.armor = { F: 0.3, S: 0.3, R: 0.3 }; }
+    return { id: e.id, name: e.name, ai: !!e.ai, car: e.ai ? 'ai' : (e.car ?? 'falcon'), color: e.color ?? i % PAINTS,
+      z: -(Math.floor(i / 2) * 10) - 6, x: i % 2 ? 0.45 : -0.45, speed: 0, damage: 0, nitro: NITRO_PER_RACE, nitroT: 0, lap: 0,
+      finishedTick: null, stats: st, input: { ...NO_INPUT }, prevNitro: false, nitroQ: false,
+      aiLane: -0.55 + nextFloat(rng) * 1.1, aiSkill: form, aiRecover: 0,
+      aiNitroAt: [0.08 + nextFloat(rng) * 0.2, 0.45 + nextFloat(rng) * 0.2, 0.8 + nextFloat(rng) * 0.12].map((f) => f * len * t.laps), hit: 0, hits: 0 };
+  });
+  return { seed, track: trackId, tick: 0, laps: t.laps, len, cars, rng, over: false, maxTicks: RACE_TICK_RATE * 60 * 9, countdown: RACE_TICK_RATE * 3, difficulty };
+}
+export function trackSegs(id: string) { let s = segCache.get(id); if (!s) { s = buildTrack(trackById(id)!); segCache.set(id, s); } return s; }
+const segCache = new Map<string, Segment[]>();
+export function segAt(state: { track: string }, z: number) { const segs = trackSegs(state.track); const n = segs.length; return segs[((Math.floor(z / SEG_LEN) % n) + n) % n]; }
+
+export function setRaceInput(s: RaceState, id: string, inp: Partial<RaceInput>) {
+  const c = s.cars.find((c) => c.id === id); if (!c || c.ai) return;
+  c.input = { gas: !!inp.gas, brake: !!inp.brake, left: !!inp.left, right: !!inp.right, nitro: !!inp.nitro };
+  if (inp.nitro && !c.prevNitro) c.nitroQ = true; // 按下的瞬間先記住（可能在兩個 tick 之間就放開）
+  c.prevNitro = !!inp.nitro;
+}
+/** 電腦駕駛：走線（彎內側）、超車、入彎前煞車、直線用氮氣、被撞後收油閃避。 */
+function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
+  const near = segAt(s, c.z + 40), far = segAt(s, c.z + 90);
+  const curve = Math.abs(near.curve) > Math.abs(far.curve) ? near.curve : far.curve;
+  let target = c.aiLane * 0.5 + Math.max(-0.6, Math.min(0.6, curve * 0.15)); // 走彎內側
+  let blocked = false, follow = false;
+  for (const o of s.cars) {
+    if (o === c || o.finishedTick !== null) continue;
+    const dz = o.z - c.z;
+    if (dz > 0 && dz < 28 && Math.abs(o.x - c.x) < COLLIDE_DX + 0.08 && o.speed < c.speed + 2) { // 前面有慢車：往空的那邊超
+      blocked = true; const left = o.x - 0.65, right = o.x + 0.65;
+      target = Math.abs(left) < Math.abs(right) ? (left > -0.95 ? left : right) : (right < 0.95 ? right : left);
+      if (dz < 9 && c.speed > o.speed - 1) follow = true; // 太近：先收油跟車，別追撞
+    }
+  }
+  if (c.aiRecover > 0) { c.aiRecover--; target = c.aiLane * -0.6; }
+  const dx = target - c.x;
+  const safe = c.stats.topSpeed * Math.min(1, 1.05 - Math.max(0, Math.abs(curve) - 2) * 0.09 / grip);
+  const tooFast = c.speed > safe;
+  const straight = Math.abs(near.curve) < 1.2 && Math.abs(far.curve) < 1.8;
+  const nitro = c.nitro > 0 && c.nitroT === 0 && straight && c.z >= c.aiNitroAt[NITRO_PER_RACE - c.nitro] && !blocked;
+  return { gas: !tooFast && !follow && c.aiRecover < 14, brake: tooFast && c.speed > safe + 4, left: dx < -0.06, right: dx > 0.06, nitro };
+}
+export function gripOf(c: RaceCar, w: Weather) { return w === 'rain' ? c.stats.wetGrip : w === 'snow' ? c.stats.wetGrip * 0.85 : w === 'fog' ? c.stats.grip * 0.95 : c.stats.grip; }
+/** 碰撞：依部位扣完美度（裝甲減免）。每次撞擊都算。 */
+function hurt(c: RaceCar, amount: number, zone: 'F' | 'S' | 'R') {
+  c.damage = Math.min(100, c.damage + amount * (1 - c.stats.armor[zone])); c.hits++;
+  if (c.ai) c.aiRecover = amount > 2 ? 20 : 8;
+}
+export function stepRace(s: RaceState) {
+  if (s.over) return;
+  s.tick++;
+  if (s.countdown > 0) { s.countdown--; return; }
+  const t = trackById(s.track)!, dt = 1 / RACE_TICK_RATE, total = s.len * s.laps;
+  for (const c of s.cars) {
+    if (c.finishedTick !== null) { c.speed = Math.max(0, c.speed - 20 * dt); c.z += c.speed * dt; continue; }
+    const seg = segAt(s, c.z), grip = gripOf(c, t.weather);
+    const inp = c.ai ? aiInput(s, c, grip) : c.input;
+    if (c.ai && inp.nitro) c.nitroQ = true;
+    if (c.nitroQ) { if (c.nitro > 0 && c.nitroT === 0) { c.nitro--; c.nitroT = Math.round(c.stats.nitroTicks); } c.nitroQ = false; }
+    const off = Math.abs(c.x) > 1;
+    let vmax = c.stats.topSpeed * condFactor(c.damage) * (off ? 0.45 : 1);
+    let acc = c.stats.accel;
+    if (c.nitroT > 0) { c.nitroT--; vmax *= c.stats.nitroBoost; acc *= 2; }
+    if (inp.gas) c.speed += acc * Math.max(0.1, 1 - c.speed / vmax) * dt * (c.speed > vmax ? -2 : 1);
+    else c.speed -= 6 * dt;
+    if (inp.brake) c.speed -= 45 * dt;
+    if (c.speed > vmax) c.speed -= (c.speed - vmax) * 2 * dt;
+    c.speed = Math.max(0, c.speed);
+    const sp = c.speed / 70;
+    const steer = (inp.left ? -1 : 0) + (inp.right ? 1 : 0);
+    c.x += steer * 1.6 * Math.min(1, sp + 0.15) * dt;
+    c.x -= seg.curve * sp * sp * 0.55 * dt / grip;
+    if (Math.abs(c.x) > 1.55) { // 撞上路邊物
+      if (c.hit <= 0) { hurt(c, 6 * (0.3 + sp), 'S'); c.speed *= 0.35; c.hit = 16; }
+      c.x = Math.sign(c.x) * 1.15;
+    }
+    if (c.hit > 0) c.hit--;
+    c.z += c.speed * dt;
+    c.lap = Math.max(0, Math.floor(c.z / s.len));
+    if (c.z >= total) c.finishedTick = s.tick;
+  }
+  // 車與車：追撞（前／後裝甲）與並排擦撞（側裝甲）
+  const live = s.cars.filter((c) => c.finishedTick === null).sort((a, b) => a.z - b.z);
+  for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
+    const a = live[i], b = live[j], dz = b.z - a.z; if (dz > 5) break;
+    const dx = Math.abs(a.x - b.x); if (dx >= COLLIDE_DX) continue;
+    if (dz > 1.5 && a.speed > b.speed) { // a 從後面撞上 b
+      const rel = (a.speed - b.speed) / 30;
+      if (a.speed - b.speed < 1.5) { a.speed = b.speed; continue; } // 輕輕貼上：不算撞
+      a.speed = b.speed * 0.85; b.speed += 2;
+      hurt(a, 3 * (0.3 + rel), 'F'); hurt(b, 2 * (0.3 + rel), 'R');
+      a.hit = Math.max(a.hit, 8); b.hit = Math.max(b.hit, 6);
+      const push = a.x < b.x ? -0.12 : 0.12; a.x += push; b.x -= push;
+    } else if (dz <= 1.5 && a.hit <= 0 && b.hit <= 0) { // 並排擦撞
+      hurt(a, 2.5, 'S'); hurt(b, 2.5, 'S'); a.hit = b.hit = 8; a.speed *= 0.92; b.speed *= 0.92;
+      const push = a.x < b.x ? -0.2 : 0.2; a.x += push; b.x -= push;
+    }
+  }
+  const humans = s.cars.filter((c) => !c.ai);
+  if (s.tick >= s.maxTicks || (humans.length > 0 && humans.every((c) => c.finishedTick !== null)) || s.cars.every((c) => c.finishedTick !== null)) s.over = true;
+}
+export function raceRanking(s: RaceState): RaceCar[] {
+  return [...s.cars].sort((a, b) => (a.finishedTick ?? Infinity) - (b.finishedTick ?? Infinity) || b.z - a.z);
+}
+export const raceTimeMs = (s: RaceState, c: RaceCar) => c.finishedTick === null ? null : Math.round(((c.finishedTick - RACE_TICK_RATE * 3) * 1000) / RACE_TICK_RATE);
+export const kmh = (v: number) => Math.round(v * 3.6);
+/** 賽季：一個日曆月（台北時間），例如 '2026-10'。 */
+export function seasonOf(ms: number) { const d = new Date(ms + 8 * 3600_000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; }

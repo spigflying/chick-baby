@@ -11,7 +11,8 @@ import { savePetCache } from './sleep';
 import type { Live } from './ws';
 import { StairsClient } from './stairs';
 import { boardHtml, stairsResultHtml, type Board } from './board';
-import { inviteHtml, multiResultHtml, rankText, stairsNotice, type StairsInvite } from './mstairs';
+import { inviteHtml, multiResultHtml, raceNotice, rankText, stairsNotice, type StairsInvite } from './mstairs';
+import { trackById } from '@chick/engine';
 import { fightBlocker, inviteSecs, resultInput, lockSecs, coinStr, hintFor, padPress, controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
 
 const W = 120, H = 100, GROUND = 86, HUD = 14;
@@ -579,7 +580,7 @@ export class Device {
         return;
       }
       if (this.menu === 'result') { this.endStairsView(); return; }
-      if (this.menu === 'board') { if (t.closest('[data-go]')) { this.closeMenu(); this.startStairs(); } else if (t.closest('[data-multi]')) { this.closeMenu(); this.startMulti(); } else if (t.closest('.back')) this.closeMenu(); return; }
+      if (this.menu === 'board') { if (t.closest('[data-go]')) { this.closeMenu(); this.startStairs(); } else if (t.closest('[data-multi]')) { this.closeMenu(); this.startMulti(); } else if (t.closest('[data-race]')) { this.closeMenu(); this.startRace(); } else if (t.closest('.back')) this.closeMenu(); return; }
       if (this.menu === 'shop') { const it = t.closest('.mi') as HTMLElement | null; if (!it) return; const i = +it.dataset.i!; if (i < 0) return this.closeMenu(); this.menuSel = i; return void this.shopPick(i); }
       this.closeMenu();
     });
@@ -692,7 +693,7 @@ export class Device {
     if (!this.menu) { el.hidden = true; return; }
     el.hidden = false;
     const p = this.pet, coins = this.ctx.wallet(), cfg = this.ctx.cfg;
-    if (this.menu === 'board') { el.innerHTML = boardHtml(this.board, this.boardErr, { solo: this.isOwner, multi: this.othersHere() > 0 }); return; }
+    if (this.menu === 'board') { el.innerHTML = boardHtml(this.board, this.boardErr, { solo: this.isOwner, multi: this.othersHere() > 0, race: true }); return; }
     if (this.menu === 'feed') {
       const v = this.visitor, f = cfg.game.feed;
       el.innerHTML = `<div class="mt">— 餵食 —  ${coinHtml(coins)}</div>` + cfg.foods.map((fd: any, i: number) => {
@@ -789,8 +790,9 @@ export class Device {
       else if (ev?.type === 'feed' && !mine) { this.startEat(ev.food); this.pendingPet = m.pet; this.say(`${ev.actor.display_name} 餵了 ${this.ctx.cfg.foods.find((f: any) => f.id === ev.food)?.name ?? ev.food}！`); }
       else if (!mine || !this.anim) this.setPet(m.pet);
     } else if (m.type === 'wallet.updated') { this.ctx.setWallet(m.balance); this.renderTop(); }
-    else if (m.type === 'stairs.event' || m.type === 'stairs.notice') { if (this.home && m.home_id === this.home.id) this.onStairsEvent(m); }
+    else if (m.type === 'stairs.event' || m.type === 'stairs.notice' || m.type === 'race.event' || m.type === 'race.notice') { if (this.home && m.home_id === this.home.id) this.onStairsEvent(m); }
     else if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('stairs.')) this.say(stairsNotice(m.code));
+    else if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('race.')) this.say(raceNotice(m.code));
     else if (this.stairs) this.stairs.onLive(m);
     else if (m.type === 'match.started') this.beginStairs(m);
     else if (m.type === 'match.ended' && m.mode === 'multi' && m.me) { if (m.balance != null) this.ctx.setWallet(m.balance); this.ctx.toast(`一起下樓梯：${rankText(m.me.rank)}、${m.me.floor} 樓、◎${m.me.coins}`); }
@@ -821,26 +823,31 @@ export class Device {
     if (!this.othersHere()) return this.say(stairsNotice('NO_OPPONENT'));
     if (!this.ctx.live.send({ type: 'stairs.invite' })) return this.say('連線中斷，稍後再試');
   }
+  /** 一起賽車：流程同一起下樓梯（家裡的人收到邀請 → 參加／不要）；家裡只有自己就直接單人跑（電腦補滿 20 台）。 */
+  startRace() {
+    if (!this.ctx.live.send({ type: 'race.invite' })) return this.say('連線中斷，稍後再試');
+    this.say(this.othersHere() ? '邀請大家一起賽車…' : '準備賽車…');
+  }
   private setLobby(on: boolean) { this.ctx.live.inLobby = on; }
   private onStairsEvent(m: any) {
-    const me = this.ctx.me.id;
-    if (m.type === 'stairs.notice') { this.say(stairsNotice(m.code)); return; }
+    const me = this.ctx.me.id, race = m.type.startsWith('race.'), notice = race ? raceNotice : stairsNotice;
+    if (m.type === 'stairs.notice' || m.type === 'race.notice') { this.say(notice(m.code)); return; }
     if (m.kind === 'invite') {
-      this.sinvite = { id: m.invite, from: m.from, from_name: m.from_name ?? '?', to: m.to ?? [], until: Date.now() + (m.left_ms ?? 15_000), answered: false, count: 1 };
-      if (m.from === me) { this.say(`已邀請大家一起下樓梯！等回覆（${Math.round((m.left_ms ?? 15_000) / 1000)} 秒）`); this.setLobby(true); }
+      this.sinvite = { id: m.invite, from: m.from, from_name: m.from_name ?? '?', to: m.to ?? [], until: Date.now() + (m.left_ms ?? 15_000), answered: false, count: 1, game: race ? 'race' : 'stairs', track_name: race ? trackById(m.track)?.name : undefined };
+      if (m.from === me) { this.say(`已邀請大家一起${race ? '賽車' : '下樓梯'}！等回覆（${Math.round((m.left_ms ?? 15_000) / 1000)} 秒）`); this.setLobby(true); }
       this.showSInvite();
     } else if (m.kind === 'reply') {
       const v = this.sinvite; if (!v || v.id !== m.invite) return;
       v.count = m.count ?? v.count;
-      if (v.from === me) this.say(`${v.count} 隻要一起下樓梯…`);
+      if (v.from === me) this.say(race ? `${v.count} 人要一起賽車…` : `${v.count} 隻要一起下樓梯…`);
     } else if (m.kind === 'invite_cancel') {
       const v = this.sinvite, same = !!v && v.id === m.invite, mine = m.from === me || (same && this.ctx.live.inLobby); // 發起人或已參加的人才提示
       if (same) { this.sinvite = null; this.showSInvite(); }
-      if (mine) { this.ctx.toast(stairsNotice(m.code)); this.setLobby(false); }
+      if (mine) { this.ctx.toast(notice(m.code)); this.setLobby(false); }
     } else if (m.kind === 'start') {
       if (this.sinvite?.id === m.invite) { this.sinvite = null; this.showSInvite(); }
       this.setLobby(false);
-      if (!(m.users ?? []).includes(me)) this.ctx.toast(`${(m.names ?? []).join('、')} 一起下樓梯中！`);
+      if (!(m.users ?? []).includes(me)) this.ctx.toast(`${(m.names ?? []).join('、')} 一起${race ? '賽車' : '下樓梯'}中！`);
     }
   }
   private showSInvite() {
@@ -857,7 +864,7 @@ export class Device {
   answerSInvite(accept: boolean, silent = false) {
     const v = this.sinvite; if (!v || v.answered) return;
     v.answered = true;
-    if (!silent) this.ctx.live.send({ type: 'stairs.reply', invite: v.id, accept });
+    if (!silent) this.ctx.live.send({ type: v.game === 'race' ? 'race.reply' : 'stairs.reply', invite: v.id, accept });
     if (accept) { this.say('參加！等其他人回覆…'); this.setLobby(true); } else if (!silent) this.say('這次不參加');
     this.showSInvite();
   }
