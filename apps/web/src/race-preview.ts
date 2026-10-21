@@ -55,12 +55,15 @@ async function page() {
   await import('./style.css');
   const { racePage } = await import('./race');
   const { createRace, stepRace, setRaceInput, raceRanking, raceTimeMs, TRACKS, PARTS, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, prizeFor, pointsFor, condition, ME, newCup } = await import('@chick/engine');
-  const prof: any = { cash: 64000, points: 16, wins: 1, races: 3, season: '2026-10', paint: 0, parts: { engine: 1, gearbox: 2, dry: 2, wet: 1, nitro: 1, armorF: 1, armorS: 0, armorR: 0 }, car: 'falcon', cars: ['falcon', 'arrow'], unlocked: 1, cup: { ...newCup(0), race: 2, points: { [ME]: 16, '阿飛': 14, '雷霆': 10, '閃電': 7 } } };
+  let coins = 3400;
+  const prof: any = { points: 16, wins: 1, races: 3, season: '2026-10', paint: 0, parts: { engine: 1, gearbox: 2, dry: 3, wet: 1, nitro: 2, armorF: 1, armorS: 0, armorR: 0 }, car: 'falcon', unlocked: 1, cup: { ...newCup(0), race: 2, points: { [ME]: 16, '阿飛': 14, '雷霆': 10, '閃電': 7 } } };
   const realFetch = window.fetch.bind(window);
   window.fetch = (async (u: any, o?: any) => {
     const url = String(u);
     const ok = (j: any) => new Response(JSON.stringify(j), { status: 200, headers: { 'content-type': 'application/json' } });
     if (url.startsWith('/api/race/profile')) return ok({ profile: prof, catalog: { parts: PARTS, cars: CARS, tracks: TRACKS, nitro: NITRO_PER_RACE, slots: RACE_SLOTS } });
+    if (url.startsWith('/api/me')) return ok({ wallet: { balance: coins } });
+    if (url.startsWith('/api/race/buy')) { const b = JSON.parse(o.body); if (b.kind) { const pr = PARTS[b.kind as keyof typeof PARTS].tiers[b.tier].price; coins -= pr; prof.parts[b.kind] = b.tier; } if (b.paint !== undefined) prof.paint = b.paint; if (b.car) prof.car = b.car; return ok({ ...prof, balance: coins }); }
     if (url.startsWith('/api/race/leaderboard')) return ok({ best: [{ name: 'racer', time_ms: 128400 }, { name: 'benson', time_ms: 131020 }], championship: [{ name: 'benson', points: 40 }, { name: 'racer', points: 26 }] });
     return realFetch(u, o);
   }) as any;
@@ -82,10 +85,23 @@ async function page() {
     clearInterval(timer); while (!sim.over) { const me = sim.cars.find((c: any) => c.id === 'me'); setRaceInput(sim, 'me', { gas: true, left: me.x > 0.2, right: me.x < -0.2 }); stepRace(sim); }
     const rk = raceRanking(sim); const meC = sim.cars.find((c: any) => c.id === 'me'); const pos = rk.indexOf(meC) + 1;
     emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: 0, cars: sim.cars.map((c: any) => [c.id, c.z, c.x, c.speed, c.damage, c.nitro, c.nitroT, c.finishedTick, c.hit]) });
-    emit({ type: 'race.ended', race_id: 'r1', track: sim.track, ranking: rk.map((c: any, i: number) => ({ id: c.id, name: c.name, ai: c.ai, rank: i + 1, time_ms: raceTimeMs(sim, c), condition: condition(c) })), me: (() => { const r = settleCup(prof.cup, 1, 'tw3', rk.map((c: any, i: number) => ({ key: c.id === 'me' ? ME : c.ai ? c.name : 'user:' + c.id, rank: i + 1 }))); return { user_id: 'me', rank: pos, prize: prizeFor(pos), points: pointsFor(pos), time_ms: raceTimeMs(sim, meC), condition: condition(meC), hits: meC.hits, unlocked: r.unlocked, cash: prof.cash + prizeFor(pos), qualified: r.qualified, cup_counted: r.counted, country_done: r.countryDone, champion: r.champion, cup: r.cup, standings: r.standings.slice(0, 10) }; })() });
+    emit({ type: 'race.ended', race_id: 'r1', track: sim.track, ranking: rk.map((c: any, i: number) => ({ id: c.id, name: c.name, ai: c.ai, rank: i + 1, time_ms: raceTimeMs(sim, c), condition: condition(c) })), me: (() => { const r = settleCup(prof.cup, 1, 'tw3', rk.map((c: any, i: number) => ({ key: c.id === 'me' ? ME : c.ai ? c.name : 'user:' + c.id, rank: i + 1 }))); return { user_id: 'me', rank: pos, prize: prizeFor(pos), points: pointsFor(pos), time_ms: raceTimeMs(sim, meC), condition: condition(meC), hits: meC.hits, unlocked: r.unlocked, qualified: r.qualified, cup_counted: r.counted, country_done: r.countryDone, champion: r.champion, cup: r.cup, standings: r.standings.slice(0, 10) }; })() });
   };
   document.body.style.background = '#1a1030';
   racePage(root, live, { user: { id: 'me', display_name: 'racer' } }, (t) => console.log('toast', t));
 }
-if (v === 'sheet') sheet(); else if (v === 'page') void page(); else scene(v);
+async function icons() {
+  const { partIcon, paintIcon, ICON } = await import('./race-icons');
+  const { PARTS, PART_KINDS, PAINT_NAMES } = await import('@chick/engine');
+  const S = 3, cw = ICON + 44, rh = ICON + 10, cols = 4;
+  const c = document.createElement('canvas'); c.width = 50 + cols * cw; c.height = 22 + (PART_KINDS.length + 2) * rh; c.style.width = c.width * S + 'px'; c.style.height = c.height * S + 'px';
+  const x = c.getContext('2d')!; x.imageSmoothingEnabled = false; x.fillStyle = G[0]; x.fillRect(0, 0, c.width, c.height);
+  const { zh } = await import('./race-gfx');
+  text(x, 'TG2 SHOP ICONS 48PX', 4, 4, 3, 1);
+  const tile = (img: HTMLCanvasElement, tx: number, ty: number, label: string, price: string) => { x.fillStyle = G[1]; x.fillRect(tx, ty, ICON + 4, ICON + 4); x.fillStyle = G[3]; x.strokeRect(tx + 0.5, ty + 0.5, ICON + 3, ICON + 3); x.drawImage(img, tx + 2, ty + 2); zh(x, label, tx + ICON + 6, ty + 8, 3); text(x, price, tx + ICON + 6, ty + 28, 3); };
+  PART_KINDS.forEach((k, r) => { const y = 20 + r * rh; zh(x, PARTS[k].label, 4, y + 12, 3); PARTS[k].tiers.forEach((t, i) => tile(partIcon(k, i), 50 + i * cw, y, i ? `${i}階` : '原廠', t.price ? String(t.price) : 'FREE')); });
+  PAINT_NAMES.forEach((n, i) => { const y = 20 + (PART_KINDS.length + (i >> 2)) * rh; if (i % 4 === 0) zh(x, '塗裝', 4, y + 12, 3); tile(paintIcon(i), 50 + (i % 4) * cw, y, n, 'FREE'); });
+  const d = document.createElement('div'); d.id = 'sheet'; d.append(c); root.append(d);
+}
+if (v === 'icons') void icons(); else if (v === 'sheet') sheet(); else if (v === 'page') void page(); else scene(v);
 (window as any).__ready = v !== 'page' || true;

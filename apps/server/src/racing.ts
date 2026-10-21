@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import {
-  CARS, COUNTRIES, EXCHANGE, ME, PAINTS, PART_KINDS, PARTS, partPrice, RACE_SLOTS, RACE_TICK_RATE, TRACKS, condition, createRace, cupTrack, fillField,
+  CARS, COUNTRIES, MAX_OUT_COST, ME, PAINTS, PAINT_NAMES, PRIZES, PART_KINDS, PARTS, partPrice, RACE_SLOTS, RACE_TICK_RATE, TRACKS, condition, createRace, cupTrack, fillField,
   createInvite, inviteOutcome, replyInvite, type Invite, newCup, normParts, pointsFor, prizeFor, raceRanking, raceTimeMs, seasonOf, setRaceInput, settleCup, stepRace, trackById, type PartKind, type RaceState,
 } from '@chick/engine';
 import type { Db } from './db';
@@ -38,62 +38,42 @@ async function loadForUpdate(tx: any, userId: string) {
   p.parts = normParts(p.parts); p.cup = p.cup?.points ? p.cup : newCup(0);
   return p;
 }
-const view = (p: any) => ({ cash: p.cash, parts: p.parts, car: p.car, cars: p.cars, paint: p.paint, season: p.season, unlocked: p.unlocked, cup: p.cup, cup_track: cupTrack(p.cup)?.id ?? null, points: p.points, races: p.races, wins: p.wins });
+const view = (p: any) => ({ parts: p.parts, car: p.car, paint: p.paint, season: p.season, unlocked: p.unlocked, cup: p.cup, cup_track: cupTrack(p.cup)?.id ?? null, points: p.points, races: p.races, wins: p.wins });
 const tx = <T>(db: Db, f: (t: any) => Promise<T>) => (db as any).transaction().execute(f) as Promise<T>;
 export async function getProfile(db: Db, userId: string) { await ensure(db, userId); return tx(db, async (t) => view(await loadForUpdate(t, userId))); }
 export function raceCatalog() {
-  return { parts: PARTS, cars: CARS, paints: PAINTS, countries: COUNTRIES, tracks: TRACKS.map(({ pieces, ...t }) => t), slots: RACE_SLOTS, exchange: EXCHANGE, closing_guard_ms: CLOSING_GUARD_MS, invite_ms: RACE_INVITE_MS, max_humans: MAX_HUMANS };
+  return { parts: PARTS, cars: CARS, paints: PAINTS, countries: COUNTRIES, tracks: TRACKS.map(({ pieces, ...t }) => t), slots: RACE_SLOTS, paint_names: PAINT_NAMES, prizes: PRIZES, max_out_cost: MAX_OUT_COST, closing_guard_ms: CLOSING_GUARD_MS, invite_ms: RACE_INVITE_MS, max_humans: MAX_HUMANS };
 }
+/** 改裝（TG2）：任何一階都能直接買；換階（含降級）舊零件丟掉、全額付款（寵物金幣）、不退錢；原廠標準免費。 */
 export async function buyPart(db: Db, ctx: ReqCtx, kind: unknown, tier: unknown) {
   if (!PART_KINDS.includes(kind as PartKind)) fail('BAD_REQUEST');
   const k = kind as PartKind, tr = Number(tier), price = partPrice(k, tr);
   if (price === null || !Number.isInteger(tr)) fail('BAD_REQUEST');
   await ensure(db, ctx.userId);
   return tx(db, async (t) => {
+    const [w] = await lockWallets(t, [ctx.userId]);
     const p = await loadForUpdate(t, ctx.userId);
-    if (p.parts[k] >= tr) fail('ALREADY_OWNED');
-    if (tr !== p.parts[k] + 1) fail('TIER_LOCKED');
-    if (p.cash < price!) fail('INSUFFICIENT_RACE_CASH');
-    p.parts[k] = tr; p.cash -= price!;
-    await t.updateTable('race_profiles').set({ cash: p.cash, parts: JSON.stringify(p.parts), updated_at: new Date() }).where('user_id', '=', ctx.userId).execute();
-    await audit(t, ctx, 'race.buy_part', 'ok', { detail: { kind: k, tier: tr, price } });
-    return view(p);
+    if (p.parts[k] === tr) fail('ALREADY_OWNED');
+    if (!w || w.balance < price!) fail('INSUFFICIENT_COINS');
+    const from = p.parts[k];
+    const balance = price! > 0 ? await changeBalance(t, ctx.userId, -price!, 'race_part', { type: 'race_part', id: randomUUID() })
+      : Number((await t.selectFrom('wallets').select('balance').where('user_id', '=', ctx.userId).executeTakeFirstOrThrow()).balance);
+    p.parts[k] = tr;
+    await t.updateTable('race_profiles').set({ parts: JSON.stringify(p.parts), updated_at: new Date() }).where('user_id', '=', ctx.userId).execute();
+    await audit(t, ctx, 'race.buy_part', 'ok', { detail: { kind: k, from, tier: tr, price } });
+    return { ...view(p), balance };
   });
 }
+/** 車款（外觀）與塗裝：免費。 */
 export async function buyCar(db: Db, ctx: ReqCtx, carId: unknown, paint?: unknown) {
-  const c = CARS.find((x) => x.id === carId); if (!c) fail('BAD_REQUEST');
+  const c = carId === undefined ? null : CARS.find((x) => x.id === carId); if (carId !== undefined && !c) fail('BAD_REQUEST');
   await ensure(db, ctx.userId);
   return tx(db, async (t) => {
     const p = await loadForUpdate(t, ctx.userId);
-    if (!p.cars.includes(c!.id)) {
-      if (p.cash < c!.price) fail('INSUFFICIENT_RACE_CASH');
-      p.cash -= c!.price; p.cars = [...p.cars, c!.id];
-      await audit(t, ctx, 'race.buy_car', 'ok', { detail: { car: c!.id, price: c!.price } });
-    }
-    p.car = c!.id;
+    if (c) p.car = c.id;
     if (paint !== undefined) { const pi = Number(paint); if (!Number.isInteger(pi) || pi < 0 || pi >= PAINTS) fail('BAD_REQUEST'); p.paint = pi; }
-    await t.updateTable('race_profiles').set({ cash: p.cash, cars: p.cars, car: p.car, paint: p.paint, updated_at: new Date() }).where('user_id', '=', ctx.userId).execute();
+    await t.updateTable('race_profiles').set({ car: p.car, paint: p.paint, updated_at: new Date() }).where('user_id', '=', ctx.userId).execute();
     return view(p);
-  });
-}
-/** 換匯：in＝金幣換賽車獎金（1 → $500），out＝獎金換金幣（$1000 → 1）；每個方向每天（台北日）最多 50 枚金幣。 */
-export async function exchange(db: Db, ctx: ReqCtx, dir: unknown, coins: unknown) {
-  const n = Number(coins); if (!Number.isInteger(n) || n < 1 || n > EXCHANGE.dailyCapCoins || (dir !== 'in' && dir !== 'out')) fail('BAD_REQUEST');
-  await ensure(db, ctx.userId);
-  return tx(db, async (t) => {
-    await lockWallets(t, [ctx.userId]);
-    const p = await loadForUpdate(t, ctx.userId);
-    const reason = dir === 'in' ? 'race_exchange_in' : 'race_exchange_out';
-    const used = await sql<{ n: number }>`SELECT COALESCE(SUM(ABS(delta)),0)::int AS n FROM coin_ledger WHERE user_id = ${ctx.userId} AND reason = ${reason}
-      AND created_at >= date_trunc('day', now() AT TIME ZONE 'Asia/Taipei') AT TIME ZONE 'Asia/Taipei'`.execute(t).then((r) => r.rows[0].n);
-    if (used + n > EXCHANGE.dailyCapCoins) fail('EXCHANGE_CAP');
-    const ref = { type: 'race_exchange', id: randomUUID() };
-    let balance: number;
-    if (dir === 'in') { balance = await changeBalance(t, ctx.userId, -n, reason, ref); p.cash += n * EXCHANGE.coinToCash; }
-    else { if (p.cash < n * EXCHANGE.cashPerCoin) fail('INSUFFICIENT_RACE_CASH'); p.cash -= n * EXCHANGE.cashPerCoin; balance = await changeBalance(t, ctx.userId, n, reason, ref); }
-    await t.updateTable('race_profiles').set({ cash: p.cash, updated_at: new Date() }).where('user_id', '=', ctx.userId).execute();
-    await audit(t, ctx, 'race.exchange', 'ok', { detail: { dir, coins: n } });
-    return { profile: view(p), balance, used_today: used + n };
   });
 }
 export async function raceLeaderboard(db: Db, track: string) {
@@ -281,12 +261,14 @@ async function finish(r: Room) {
     const ranking = rank.map((c, i) => ({ key: c.id === s.userId ? ME : c.ai ? c.name : `user:${c.id}`, rank: c.finishedTick === null && c.id === s.userId ? RACE_SLOTS : i + 1 }));
     try {
       await tx(db, async (t) => {
+        await lockWallets(t, [s.userId]);
         const p = await loadForUpdate(t, s.userId);
         const cupR = settleCup(p.cup, p.unlocked, r.track, ranking);
-        await t.updateTable('race_profiles').set({ cash: p.cash + prize, unlocked: cupR.unlocked, cup: JSON.stringify(cupR.cup), points: p.points + pts, races: p.races + 1, wins: p.wins + (pos === 1 ? 1 : 0), updated_at: new Date() }).where('user_id', '=', s.userId).execute();
+        if (prize > 0) await changeBalance(t, s.userId, prize, 'race_prize', { type: 'race', id: r.id });
+        await t.updateTable('race_profiles').set({ unlocked: cupR.unlocked, cup: JSON.stringify(cupR.cup), points: p.points + pts, races: p.races + 1, wins: p.wins + (pos === 1 ? 1 : 0), updated_at: new Date() }).where('user_id', '=', s.userId).execute();
         await t.insertInto('race_results').values({ race_id: r.id, season, track: r.track, user_id: s.userId, rank: pos, time_ms: time, prize, points: pts, condition: condition(car), humans: r.seats.length, private: !!r.home }).execute();
         // 比賽之間只修好撞壞的部分：完美度不存檔，下一場回到 100%
-        results.push({ user_id: s.userId, rank: pos, prize, points: pts, time_ms: time, condition: condition(car), hits: car.hits, cash: p.cash + prize, qualified: cupR.qualified, cup_counted: cupR.counted, country_done: cupR.countryDone, champion: cupR.champion, unlocked: cupR.unlocked, cup: cupR.cup, standings: cupR.standings.slice(0, 10) });
+        results.push({ user_id: s.userId, rank: pos, prize, points: pts, time_ms: time, condition: condition(car), hits: car.hits, qualified: cupR.qualified, cup_counted: cupR.counted, country_done: cupR.countryDone, champion: cupR.champion, unlocked: cupR.unlocked, cup: cupR.cup, standings: cupR.standings.slice(0, 10) });
       });
     } catch (e) { console.error('race settle failed', e); }
   }

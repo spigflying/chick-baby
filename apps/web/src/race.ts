@@ -1,15 +1,18 @@
 /** 賽車模式頁面：錦標賽選單、車庫、比賽（WS 即時多人，伺服器權威）、結果。 */
 import { api, errText } from './api';
 import type { Live } from './ws';
-import { createRace, stepRace, trackSegs, SEG_LEN, raceRanking, trackById, CARS, PARTS, PART_KINDS, TRACKS, COUNTRIES, carStats, fillField, cupTrack, prizeFor, PRIZES, POINTS, ME, EXCHANGE, PAINTS, QUALIFY_RANK, RACES_PER_COUNTRY, RACE_SLOTS, NITRO_PER_RACE, type RaceState, type PartKind } from '@chick/engine';
+import { createRace, stepRace, trackSegs, SEG_LEN, raceRanking, trackById, CARS, PARTS, PART_KINDS, TRACKS, COUNTRIES, carStats, fillField, cupTrack, prizeFor, PRIZES, POINTS, ME, PAINT_NAMES, MAX_OUT_COST, PRICE_DIVISOR, QUALIFY_RANK, RACES_PER_COUNTRY, RACE_SLOTS, NITRO_PER_RACE, type RaceState, type PartKind } from '@chick/engine';
+import { partIcon, paintIcon } from './race-icons';
 import { drawRace, carCanvas, text, textW, zh, zhW, panel, drawMinimap, W, H, G, type ViewCar } from './race-gfx';
 
 const segAt = (id: string, z: number) => { const s = trackSegs(id); return s[((Math.floor(z / SEG_LEN) % s.length) + s.length) % s.length].curve; };
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
-const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
+const money = (n: number) => '◎' + Math.round(n).toLocaleString('en-US');
+/** 畫布字型沒有 ◎，畫面裡用「N 金幣」 */
+const coinTxt = (n: number) => `${Math.round(n)} 金幣`;
 const fmtMs = (ms: number | null) => ms === null ? '—' : `${Math.floor(ms / 60000)}'${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}"${String(Math.floor(ms / 10) % 100).padStart(2, '0')}`;
 const WEATHER: Record<string, string> = { clear: '晴', rain: '雨', night: '夜', snow: '雪', fog: '霧' };
-const ERR: Record<string, string> = { TRACK_LOCKED: '這個國家還沒解鎖（拿下前一國的國家冠軍）', INSUFFICIENT_RACE_CASH: '賽車獎金不夠', INSUFFICIENT_COINS: '金幣不夠', EXCHANGE_CAP: '今天的換匯額度用完了（50 枚）', TIER_LOCKED: '要先買前一級', ALREADY_OWNED: '已經有了', ALREADY_IN_MATCH: '你正在另一場比賽中', RACE_CLOSING: '快關門了，關門前 8 分鐘不開新比賽', GAME_CLOSING: '快關門了', GAME_CLOSED: '現在沒有開放', INTERNAL: '伺服器出錯了，稍後再試' };
+const ERR: Record<string, string> = { TRACK_LOCKED: '這個國家還沒解鎖（拿下前一國的國家冠軍）', INSUFFICIENT_COINS: '金幣不夠（去下樓梯賺吧）', ALREADY_OWNED: '已經裝著這個了', ALREADY_IN_MATCH: '你正在另一場比賽中', RACE_CLOSING: '快關門了，關門前 8 分鐘不開新比賽', GAME_CLOSING: '快關門了', GAME_CLOSED: '現在沒有開放', INTERNAL: '伺服器出錯了，稍後再試' };
 
 interface Snap { at: number; tick: number; countdown: number; cars: Map<string, any[]> }
 export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (s: string) => void): () => void {
@@ -27,7 +30,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       <div id="rbody"></div></div></main>`;
   const cv = root.querySelector('#rc') as HTMLCanvasElement, x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
   const body = root.querySelector('#rbody') as HTMLElement, msg = root.querySelector('#rmsg') as HTMLElement;
-  let prof: any = null, cat: any = null, tab = 'cup', sel = 'tw1';
+  let prof: any = null, cat: any = null, tab = 'cup', sel = 'tw1', coins = 0, pick: { k: PartKind; i: number } | null = null;
   let mode: 'menu' | 'lobby' | 'race' | 'results' = 'menu';
   let attract: RaceState | null = null, frame = 0, raf = 0, dead = false;
   let race: { id: string; track: string; laps: number; len: number; cars: any[]; snaps: Snap[]; ended: any | null } | null = null;
@@ -36,7 +39,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
 
   const setMatch = (on: boolean) => { if (live) live.inMatch = on; };
   async function load() {
-    try { const r = await api('GET', '/race/profile'); prof = r.profile; cat = r.catalog; } catch (e) { toast(errText(e)); }
+    try { const [r, m] = await Promise.all([api('GET', '/race/profile'), api('GET', '/me')]); prof = r.profile; cat = r.catalog; coins = m.wallet?.balance ?? 0; } catch (e) { toast(errText(e)); }
     renderPanel();
   }
   function setAttract() { attract = createRace(7, sel, fillField([])); attract.countdown = 0; }
@@ -45,7 +48,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     root.querySelectorAll('#rtabs button').forEach((b) => b.classList.toggle('on', (b as HTMLElement).dataset.t === tab));
     if (!prof) { body.innerHTML = '<p class="muted">載入中…</p>'; return; }
     if (mode === 'results' && race?.ended && !race.ended.aborted) return showResults(race.ended);
-    const head = `<p class="race-cash">賽車獎金 <b>${money(prof.cash)}</b>　積分 <b>${prof.points}</b>　勝場 ${prof.wins}/${prof.races}<br><span class="muted">賽季 ${esc(prof.season)}（每月重置積分與解鎖，獎金和零件保留）</span></p>`;
+    const head = `<p class="race-cash">金幣 <b>${money(coins)}</b>　積分 <b>${prof.points}</b>　勝場 ${prof.wins}/${prof.races}<br><span class="muted">賽季 ${esc(prof.season)}（每月重置積分與解鎖，獎金和零件保留）</span></p>`;
     if (mode === 'lobby' || mode === 'race') {
       body.innerHTML = head + `<p>${mode === 'lobby' ? '準備發車…' : '比賽進行中…'}</p><button id="rleave">離開比賽</button>`;
       (body.querySelector('#rleave') as HTMLElement).onclick = leave;
@@ -63,22 +66,24 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       (body.querySelector('#rgo') as HTMLElement).onclick = () => join();
     } else if (tab === 'garage') {
       const st = carStats(prof.parts, prof.car);
-      const partRow = (k: PartKind) => { const p = PARTS[k], lv = prof.parts[k], next = p.tiers[lv + 1];
-        return `<li><span><b>${esc(p.label)}</b><br><span class="muted">${esc(p.tiers[lv].name)}　${'■'.repeat(lv)}${'□'.repeat(p.tiers.length - 1 - lv)}</span></span>${next ? `<button data-buy="${k}" data-tier="${lv + 1}" ${prof.cash < next.price ? 'disabled' : ''}>${esc(next.name)}<br>${money(next.price)}</button>` : '<span class="muted">滿級</span>'}</li>`; };
-      body.innerHTML = head + `<div class="garage-car"><canvas id="gcar" width="52" height="34"></canvas><div><b>${esc(CARS.find((c) => c.id === prof.car)?.name)}</b><br><span class="muted">極速 ${Math.round(st.topSpeed * 3.6)} km/h・加速 ${st.accel.toFixed(0)}・抓地 ${st.grip.toFixed(2)}/${st.wetGrip.toFixed(2)}（雨）・裝甲 前${Math.round(st.armor.F * 100)}/側${Math.round(st.armor.S * 100)}/後${Math.round(st.armor.R * 100)}%</span></div></div>
-        <p class="muted">每次碰撞（車、路邊、任何東西）都會降低完美度，完美度越低極速越慢；下一場前自動修好。</p>
-        <h3>塗裝</h3><p>${Array.from({ length: PAINTS }, (_, i) => `<button data-paint="${i}" class="${prof.paint === i ? 'on' : ''}">${i + 1}</button>`).join(' ')}</p>
-        <h3>零件</h3><ul>${PART_KINDS.map(partRow).join('')}</ul>
-        <h3>車款</h3><ul>${CARS.map((c) => `<li><span><canvas class="mini" data-car="${c.id}" width="34" height="22"></canvas> <b>${esc(c.name)}</b> <span class="muted">${esc(c.desc ?? '')}</span></span>${prof.car === c.id ? '<span>使用中</span>' : prof.cars.includes(c.id) ? `<button data-car-buy="${c.id}">換這台</button>` : `<button data-car-buy="${c.id}" ${prof.cash < c.price ? 'disabled' : ''}>${money(c.price)}</button>`}</li>`).join('')}</ul>
-        <h3>換匯</h3><p class="muted">1 金幣 → ${money(EXCHANGE.coinToCash)}；${money(EXCHANGE.cashPerCoin)} → 1 金幣；每天每個方向最多 ${EXCHANGE.dailyCapCoins} 枚。</p>
-        <p><input id="rxn" type="number" min="1" max="${EXCHANGE.dailyCapCoins}" value="10" size="4"> 枚 <button id="rxin">金幣換獎金</button> <button id="rxout">獎金換金幣</button></p>`;
+      const tile = (k: PartKind, i: number) => { const t = PARTS[k].tiers[i], on = prof.parts[k] === i, pend = pick?.k === k && pick.i === i;
+        return `<button class="shop-it${on ? ' on' : ''}${pend ? ' pend' : ''}${!on && t.price > coins ? ' poor' : ''}" data-k="${k}" data-i="${i}"><canvas data-ic="${k}:${i}" width="48" height="48"></canvas><b>${esc(t.name)}</b><span>${on ? '裝備中' : t.price ? money(t.price) : '免費'}</span></button>`; };
+      const cat = (k: PartKind) => { const pend = pick?.k === k ? PARTS[k].tiers[pick.i] : null;
+        return `<div class="shop-cat"><h4>${esc(PARTS[k].label)} <span class="muted">${esc(PARTS[k].desc)}</span></h4><div class="shop-grid">${PARTS[k].tiers.map((_, i) => tile(k, i)).join('')}</div>
+        ${pend ? `<p class="shop-confirm">換成「${esc(pend.name)}」${pend.price ? `要付 <b>${money(pend.price)}</b>` : '（免費）'}，目前的「${esc(PARTS[k].tiers[prof.parts[k]].name)}」會直接丟掉、不退錢。 <button id="rbuy">確定換裝</button> <button id="rno">取消</button></p>` : ''}</div>`; };
+      body.innerHTML = head + `<div class="garage-car"><canvas id="gcar" width="52" height="34"></canvas><div><b>${esc(CARS.find((c) => c.id === prof.car)?.name)}</b>・${esc(PAINT_NAMES[prof.paint] ?? '')}<br><span class="muted">極速 ${Math.round(st.topSpeed * 3.6)} km/h・加速 ${st.accel.toFixed(0)}・抓地 ${st.grip.toFixed(2)}／雨 ${st.wetGrip.toFixed(2)}・裝甲 前${Math.round(st.armor.F * 100)}／後${Math.round(st.armor.R * 100)}／側${Math.round(st.armor.S * 100)}%</span></div></div>
+        <h3>改裝店</h3><p class="muted">每類任選一階直接買（不用照順序）；換別的階（包括降級）舊零件丟掉、全額付款、不退錢。全部 3 階共 ${money(MAX_OUT_COST)}（TG2 原價 ÷ ${PRICE_DIVISOR}）。氮氣升級只加強力道和時間，每場一律 ${NITRO_PER_RACE} 次；雨胎下雨／下雪時自動換上。</p>
+        ${PART_KINDS.map(cat).join('')}
+        <div class="shop-cat"><h4>塗裝 <span class="muted">8 色免費</span></h4><div class="shop-grid">${PAINT_NAMES.map((n, i) => `<button class="shop-it${prof.paint === i ? ' on' : ''}" data-paint="${i}"><canvas data-ic="paint:${i}" width="48" height="48"></canvas><b>${esc(n)}</b><span>${prof.paint === i ? '使用中' : '免費'}</span></button>`).join('')}</div></div>
+        <h3>車款 <span class="muted">外觀，免費隨意換</span></h3><ul>${CARS.map((c) => `<li><span><canvas class="mini" data-car="${c.id}" width="34" height="22"></canvas> <b>${esc(c.name)}</b> <span class="muted">${esc(c.desc ?? '')}</span></span>${prof.car === c.id ? '<span>使用中</span>' : `<button data-car-buy="${c.id}">換這台</button>`}</li>`).join('')}</ul>`;
       const g = (body.querySelector('#gcar') as HTMLCanvasElement).getContext('2d')!; g.imageSmoothingEnabled = false; g.fillStyle = G[0]; g.fillRect(0, 0, 52, 34); g.drawImage(carCanvas(prof.car, prof.paint), 2, 2);
-      body.querySelectorAll('canvas.mini').forEach((c) => { const cx = (c as HTMLCanvasElement).getContext('2d')!; cx.fillStyle = G[0]; cx.fillRect(0, 0, 34, 22); cx.drawImage(carCanvas((c as HTMLElement).dataset.car!, 0, {}, 1), 1, 1); });
-      body.querySelectorAll('[data-buy]').forEach((b) => (b as HTMLElement).onclick = () => buy({ kind: (b as HTMLElement).dataset.buy, tier: +(b as HTMLElement).dataset.tier! }));
+      body.querySelectorAll('canvas[data-ic]').forEach((c) => { const [k, i] = (c as HTMLElement).dataset.ic!.split(':'); const cx = (c as HTMLCanvasElement).getContext('2d')!; cx.imageSmoothingEnabled = false; cx.fillStyle = G[1]; cx.fillRect(0, 0, 48, 48); cx.drawImage(k === 'paint' ? paintIcon(+i) : partIcon(k as PartKind, +i), 0, 0); });
+      body.querySelectorAll('canvas.mini').forEach((c) => { const cx = (c as HTMLCanvasElement).getContext('2d')!; cx.fillStyle = G[0]; cx.fillRect(0, 0, 34, 22); cx.drawImage(carCanvas((c as HTMLElement).dataset.car!, prof.paint, {}, 1), 1, 1); });
+      body.querySelectorAll('.shop-it[data-k]').forEach((b) => (b as HTMLElement).onclick = () => { const k = (b as HTMLElement).dataset.k as PartKind, i = +(b as HTMLElement).dataset.i!; if (prof.parts[k] === i) return; pick = { k, i }; renderPanel(); });
+      const ok = body.querySelector('#rbuy') as HTMLElement | null; if (ok) ok.onclick = () => { const q = pick!; pick = null; void buy({ kind: q.k, tier: q.i }); };
+      const no = body.querySelector('#rno') as HTMLElement | null; if (no) no.onclick = () => { pick = null; renderPanel(); };
       body.querySelectorAll('[data-car-buy]').forEach((b) => (b as HTMLElement).onclick = () => buy({ car: (b as HTMLElement).dataset.carBuy }));
-      body.querySelectorAll('[data-paint]').forEach((b) => (b as HTMLElement).onclick = () => buy({ car: prof.car, paint: +(b as HTMLElement).dataset.paint! }));
-      const ex = (dir: string) => async () => { try { const r = await api('POST', '/race/exchange', { dir, coins: +(body.querySelector('#rxn') as HTMLInputElement).value }); prof = r.profile; toast(`換好了（今天已換 ${r.used_today} 枚）`); renderPanel(); } catch (e) { toast(ERR[(e as any).code] ?? errText(e)); } };
-      (body.querySelector('#rxin') as HTMLElement).onclick = ex('in'); (body.querySelector('#rxout') as HTMLElement).onclick = ex('out');
+      body.querySelectorAll('[data-paint]').forEach((b) => (b as HTMLElement).onclick = () => buy({ paint: +(b as HTMLElement).dataset.paint! }));
     } else {
       body.innerHTML = head + `<select id="rlbt">${TRACKS.map((t) => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.country)}・${esc(t.name)}</option>`).join('')}</select><div id="rlb" class="muted">載入中…</div>`;
       const sl = body.querySelector('#rlbt') as HTMLSelectElement; sl.onchange = () => loadBoard(sl.value); void loadBoard(sel);
@@ -89,7 +94,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       el.innerHTML = `<h3>最快完賽</h3><ol>${r.best.map((b: any) => `<li><span>${esc(b.name)}</span><span>${fmtMs(b.time_ms)}</span></li>`).join('') || '<li class="muted">還沒有人跑完</li>'}</ol><h3>錦標賽積分</h3><ol>${r.championship.map((b: any) => `<li><span>${esc(b.name)}</span><span>${b.points} 分</span></li>`).join('')}</ol>`;
     } catch (e) { toast(errText(e)); }
   }
-  async function buy(b: any) { try { prof = await api('POST', '/race/buy', b); toast('買好了！'); renderPanel(); } catch (e) { toast(ERR[(e as any).code] ?? errText(e)); } }
+  async function buy(b: any) { try { const r = await api('POST', '/race/buy', b); if (typeof r.balance === 'number') coins = r.balance; prof = { ...prof, ...r }; toast(b.kind ? '換裝好了！' : '換好了！'); renderPanel(); } catch (e) { toast(ERR[(e as any).code] ?? errText(e)); } }
   root.querySelectorAll('#rtabs button').forEach((b) => (b as HTMLElement).onclick = () => { tab = (b as HTMLElement).dataset.t!; renderPanel(); });
 
   // ---------- 連線 ----------
@@ -100,6 +105,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   function leave() { live?.send({ type: 'race.leave' }); race = null; mode = 'menu'; setMatch(false); msg.textContent = '已離開比賽'; renderPanel(); }
   function onStarted(m: any) { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null }; mode = 'race'; setMatch(true); const hum = m.cars.filter((c: any) => !c.ai).length; msg.textContent = `${trackById(m.track)!.name}・${hum > 1 ? `${hum} 位玩家＋` : ''}電腦 ${m.cars.length - hum} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
   const off = live?.on((m) => {
+    if (m.type === 'wallet.updated') { coins = m.balance; if (tab === 'garage' && mode === 'menu') renderPanel(); }
     if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('race.')) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; toast(ERR[m.code] ?? m.code); renderPanel(); }
     else if (m.type === 'race.notice' && !m.home_id) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; renderPanel(); }
     else if (m.type === 'race.started') onStarted(m);
@@ -110,7 +116,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       race.ended = m; mode = 'results'; setMatch(false);
       if (m.aborted) { msg.textContent = '比賽中止（伺服器重啟）'; return; }
       const r = m.me; msg.textContent = r ? `第 ${r.rank} 名！獎金 ${money(r.prize)}・${r.qualified ? '晉級' : '未晉級'}${r.champion ? '・國家冠軍！' : ''}` : '比賽結束';
-      if (r) prof = { ...prof, cash: r.cash, unlocked: r.unlocked, cup: r.cup };
+      if (r) prof = { ...prof, unlocked: r.unlocked, cup: r.cup };
       showResults(m); void load();
     }
   });
@@ -174,7 +180,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     drawRace(x, { track: t, me: cars.find((c) => c.id === lead.id)!, cars, tick: attract!.tick, countdown: 0, laps: attract!.laps, len: attract!.len, rank: 0, frame, hud: false });
     // 選單標題（原生 240×200）
     panel(x, 0, 0, W, 24); text(x, 'GRAND PRIX', 6, 5, 0, 2); zh(x, `${t.country}・${t.name}`, W - 6 - zhW(x, `${t.country}・${t.name}`), 6, 1);
-    panel(x, 4, H - 40, 120, 36); zh(x, `${t.country} 第 ${t.raceIdx + 1} 站 / ${RACES_PER_COUNTRY}`, 10, H - 36, 0); zh(x, `${WEATHER[t.weather]}・${t.laps} 圈・冠軍 ${money(prizeFor(1))}`, 10, H - 21, 1);
+    panel(x, 4, H - 40, 120, 36); zh(x, `${t.country} 第 ${t.raceIdx + 1} 站 / ${RACES_PER_COUNTRY}`, 10, H - 36, 0); zh(x, `${WEATHER[t.weather]}・${t.laps} 圈・冠軍 ${coinTxt(prizeFor(1))}`, 10, H - 21, 1);
     drawMinimap(x, { track: t, me: null, cars: [], tick: 0, countdown: 0, laps: t.laps, len: attract!.len, rank: 0, frame, hud: false }, W - 72, H - 64, 68, 60);
     if (frame % 20 < 13) { panel(x, W / 2 - 52, 84, 104, 22); text(x, 'PRESS GO', W / 2 - 46, 88, 0, 2); }
   }
@@ -185,7 +191,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     text(x, 'RACE INFO', 22, 22, 0, 2);
     zh(x, `${t.country}　${t.name}`, 22, 44, 0, 12);
     const km = (trackSegs(t.id).length * SEG_LEN / 1000).toFixed(1);
-    zh(x, `賽道長 ${km} km × ${t.laps} 圈`, 22, 62, 1); zh(x, `天氣：${WEATHER[t.weather]}　冠軍獎金 ${money(prizeFor(1))}`, 22, 78, 1);
+    zh(x, `賽道長 ${km} km × ${t.laps} 圈`, 22, 62, 1); zh(x, `天氣：${WEATHER[t.weather]}　冠軍獎金 ${coinTxt(prizeFor(1))}`, 22, 78, 1);
     zh(x, `玩家 ${lobbyPlayers.length} 人＋電腦 ${RACE_SLOTS - lobbyPlayers.length} 台`, 22, 94, 1);
     lobbyPlayers.slice(0, 4).forEach((n, i) => zh(x, `・${n}`, 22 + (i % 2) * 90, 112 + Math.floor(i / 2) * 15, 0));
     drawMinimap(x, { track: t, me: null, cars: [], tick: 0, countdown: 0, laps: t.laps, len: 1, rank: 0, frame, hud: false }, W - 86, 22, 64, 56);
@@ -198,7 +204,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     panel(x, 16, 8, W - 32, H - 16, 3, 1);
     text(x, 'RESULT', W / 2 - textW('RESULT', 2) / 2, 13, 0, 2);
     text(x, `P${e.rank}`, 26, 32, 0, 5);
-    zh(x, `獎金 ${money(e.prize)}　+${e.points} 分`, 96, 32, 0); zh(x, `時間 ${fmtMs(e.time_ms)}`, 96, 46, 1);
+    zh(x, `獎金 ${coinTxt(e.prize)}　+${e.points} 分`, 96, 32, 0); zh(x, `時間 ${fmtMs(e.time_ms)}`, 96, 46, 1);
     zh(x, `完美度 ${e.condition}%　${e.qualified ? '晉級' : '未晉級（前 10 名）'}`, 96, 60, e.qualified ? 0 : 1);
     (race!.ended.ranking as any[]).slice(0, 6).forEach((c, i) => { const y = 80 + i * 14, mine = c.id === me.user.id; if (mine) { x.fillStyle = G[2]; x.fillRect(24, y - 2, W - 48, 14); } text(x, String(c.rank), 30, y + 2, mine ? 0 : 1); zh(x, c.name, 44, y, mine ? 0 : 1); text(x, c.time_ms === null ? '--' : fmtMs(c.time_ms).replace(/[’'"]/g, (m: string) => m === '"' ? '.' : ':'), W - 30 - textW('0:00.00'), y + 2, mine ? 0 : 1); });
     const st = (e.standings ?? []) as [string, number][]; const myPos = st.findIndex((s) => s[0] === ME) + 1;

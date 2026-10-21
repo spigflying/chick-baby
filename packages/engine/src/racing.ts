@@ -16,40 +16,44 @@ export const QUALIFY_RANK = 10;
 export const RACES_PER_COUNTRY = 4;
 export const RACE_ENGINE_VERSION = 2;
 
-// ---------------- 零件：引擎、變速箱、乾地胎、雨胎、氮氣、前／側／後裝甲（各 3 級＋出廠） ----------------
-export type PartKind = 'engine' | 'gearbox' | 'dry' | 'wet' | 'nitro' | 'armorF' | 'armorS' | 'armorR';
-export interface PartTier { name: string; price: number }
+// ---------------- 改裝店（TG2）：8 類 × 4 項（原廠標準免費＋升級 1／2／3 階） ----------------
+// 價格＝TG2 原價 ÷ PRICE_DIVISOR（保留 TG2 的價格比例），單位＝寵物金幣 ◎（錢從下樓梯來，見 docs/racing.md 經濟）。
+// 任何一階都可以直接買；換到別的階（包括降級）舊零件直接丟掉、全額付款、不退錢。原廠標準＝免費。
+export type PartKind = 'engine' | 'gearbox' | 'nitro' | 'dry' | 'wet' | 'armorF' | 'armorR' | 'armorS';
+export interface PartTier { name: string; price: number; tg2: number }
+export const PRICE_DIVISOR = 25;
+export const TIER_NAMES = ['原廠標準', '升級 1 階', '升級 2 階', '升級 3 階'];
+const tiers = (tg2: number[]): PartTier[] => [0, ...tg2].map((v, i) => ({ name: TIER_NAMES[i], price: v / PRICE_DIVISOR, tg2: v }));
 export const PARTS: Record<PartKind, { label: string; desc: string; tiers: PartTier[] }> = {
-  engine: { label: '引擎', desc: '加速、極速小幅提升，也決定高檔位能不能發揮', tiers: [{ name: '原廠 2.0L', price: 0 }, { name: '強化進氣', price: 30000 }, { name: '雙渦輪', price: 50000 }, { name: '賽道規格 V8', price: 80000 }] },
-  gearbox: { label: '變速箱', desc: '多一檔＝極速更高；引擎不夠力時高檔位用不到', tiers: [{ name: '4 速', price: 0 }, { name: '5 速', price: 10000 }, { name: '6 速', price: 30000 }, { name: '7 速序列式', price: 50000 }] },
-  dry: { label: '乾地胎', desc: '晴天抓地與過彎', tiers: [{ name: '街胎', price: 0 }, { name: '運動胎', price: 1000 }, { name: '半熱熔', price: 2000 }, { name: '光頭胎', price: 4000 }] },
-  wet: { label: '雨胎', desc: '雨天、雪地抓地', tiers: [{ name: '一般胎', price: 0 }, { name: '溝紋胎', price: 1000 }, { name: '深溝胎', price: 2000 }, { name: '全天候胎', price: 3000 }] },
-  nitro: { label: '氮氣', desc: '氮氣更猛、噴更久', tiers: [{ name: '小鋼瓶', price: 0 }, { name: '雙鋼瓶', price: 5000 }, { name: '高壓噴射', price: 15000 }, { name: '直噴燃燒', price: 30000 }] },
-  armorF: { label: '前裝甲', desc: '追撞前車時少掉完美度', tiers: [{ name: '原廠', price: 0 }, { name: '強化保桿', price: 5000 }, { name: '碳纖維', price: 10000 }, { name: '鋼骨保桿', price: 20000 }] },
-  armorS: { label: '側裝甲', desc: '擦撞路邊與側面碰撞少掉完美度', tiers: [{ name: '原廠', price: 0 }, { name: '側邊護條', price: 5000 }, { name: '防滾籠', price: 10000 }, { name: '裝甲側板', price: 20000 }] },
-  armorR: { label: '後裝甲', desc: '被後車撞時少掉完美度', tiers: [{ name: '原廠', price: 0 }, { name: '強化後保', price: 5000 }, { name: '碳纖維', price: 10000 }, { name: '鋼骨後保', price: 20000 }] },
+  engine: { label: '引擎', desc: '加速、極速；高階引擎要搭配高階變速箱才跑得到極速', tiers: tiers([30000, 50000, 80000]) },
+  gearbox: { label: '變速箱', desc: '檔位越多極速越高（引擎不夠力時高檔位用不到）', tiers: tiers([10000, 30000, 50000]) },
+  nitro: { label: '氮氣', desc: '氮氣更猛、噴更久（每場一律 3 次）', tiers: tiers([5000, 15000, 30000]) },
+  dry: { label: '乾地胎', desc: '晴天、夜晚、霧天的抓地與過彎', tiers: tiers([1000, 2000, 4000]) },
+  wet: { label: '雨胎', desc: '下雨、下雪時自動換上', tiers: tiers([1000, 2000, 3000]) },
+  armorF: { label: '前裝甲', desc: '追撞前車時少掉完美度', tiers: tiers([5000, 10000, 20000]) },
+  armorR: { label: '後裝甲', desc: '被後車撞時少掉完美度', tiers: tiers([5000, 10000, 20000]) },
+  armorS: { label: '側裝甲', desc: '擦撞路邊與側面碰撞少掉完美度', tiers: tiers([5000, 10000, 20000]) },
 };
 export const PART_KINDS = Object.keys(PARTS) as PartKind[];
 export type Parts = Record<PartKind, number>;
 export const STOCK_PARTS: Parts = { engine: 0, gearbox: 0, dry: 0, wet: 0, nitro: 0, armorF: 0, armorS: 0, armorR: 0 };
 export const normParts = (p: any): Parts => { const o = { ...STOCK_PARTS }; for (const k of PART_KINDS) o[k] = Math.max(0, Math.min(PARTS[k].tiers.length - 1, Math.floor(Number(p?.[k]) || 0))); if (p?.armor && !p.armorS) o.armorS = Math.min(3, p.armor); return o; };
 export function partPrice(kind: PartKind, tier: number) { return PARTS[kind]?.tiers[tier]?.price ?? null; }
+/** 全部升到 3 階要多少 ◎（直接買 3 階，不用一階一階買） */
+export const MAX_OUT_COST = (Object.keys(PARTS) as PartKind[]).reduce((n, k) => n + PARTS[k].tiers[3].price, 0);
 
-/** 玩家車款（9 款原創外觀＋小幅特性）。電腦車一律用灰色通用車。 */
+/** 玩家車款：9 款原創外觀，免費隨意換、性能完全一樣（TG2 的改裝店只賣零件和塗裝；性能全部來自零件）。電腦車一律用灰色通用車。 */
 export interface CarModel { id: string; name: string; price: number; top: number; accel: number; grip: number; tough: number; desc: string }
+const car = (id: string, name: string, desc: string): CarModel => ({ id, name, price: 0, top: 1, accel: 1, grip: 1, tough: 1, desc });
 export const CARS: CarModel[] = [
-  { id: 'falcon', name: '隼 GT', price: 0, top: 1, accel: 1, grip: 1, tough: 1, desc: 'GT3 賽車，均衡入門' },
-  { id: 'arrow', name: '箭 RS', price: 25000, top: 1.03, accel: 1.04, grip: 0.98, tough: 0.92, desc: '楔形超跑，起步快' },
-  { id: 'muscle', name: '野馬 V8', price: 30000, top: 1.04, accel: 0.98, grip: 0.94, tough: 1.2, desc: '肌肉車，直線猛、彎道笨重' },
-  { id: 'rally', name: '鷹 拉力', price: 35000, top: 0.98, accel: 1.05, grip: 1.1, tough: 1.15, desc: '拉力掀背，雨雪最穩' },
-  { id: 'rhino', name: '犀 R', price: 40000, top: 1, accel: 1.02, grip: 1.06, tough: 1.25, desc: '四驅性能跑車，耐撞' },
-  { id: 'drift', name: '鬼 甩尾', price: 45000, top: 1.02, accel: 1.04, grip: 1.02, tough: 1, desc: '日系寬體，靈活' },
-  { id: 'comet', name: '彗星 Z', price: 90000, top: 1.07, accel: 1.05, grip: 1.04, tough: 1, desc: '後置引擎經典跑車' },
-  { id: 'lmp', name: '曙 LMP', price: 120000, top: 1.1, accel: 1.07, grip: 1.08, tough: 0.95, desc: '利曼原型車，下壓力大' },
-  { id: 'f1', name: '燕 F1', price: 160000, top: 1.13, accel: 1.1, grip: 1.12, tough: 0.8, desc: '開輪方程式，最快也最怕撞' },
+  car('falcon', '隼 GT', 'GT3 賽車'), car('arrow', '箭 RS', '楔形超跑'), car('muscle', '野馬 V8', '肌肉車'),
+  car('rally', '鷹 拉力', '拉力掀背'), car('rhino', '犀 R', '四驅性能跑車'), car('drift', '鬼 甩尾', '日系寬體'),
+  car('comet', '彗星 Z', '後置引擎經典跑車'), car('lmp', '曙 LMP', '利曼原型車'), car('f1', '燕 F1', '開輪方程式'),
 ];
 export const carById = (id: string) => CARS.find((c) => c.id === id) ?? CARS[0];
-export const PAINTS = 6; // 免費塗裝數
+/** 8 種免費塗裝（TG2）。四階綠畫面裡用「深淺搭配＋花紋」區分，見 web race-cars.ts LIVERIES。 */
+export const PAINT_NAMES = ['紅', '灰', '綠', '淺藍', '深藍', '黃', '黑', '紫'];
+export const PAINTS = PAINT_NAMES.length;
 
 export interface CarStats { topSpeed: number; accel: number; grip: number; wetGrip: number; nitroBoost: number; nitroTicks: number; armor: { F: number; S: number; R: number } }
 export function carStats(partsIn: Partial<Parts>, carId = 'falcon'): CarStats {
@@ -115,7 +119,8 @@ export function buildTrack(t: Track): Segment[] {
 export const trackLength = (segs: Segment[]) => segs.length * SEG_LEN;
 
 // ---------------- 獎金、積分、晉級（同一張表，每條賽道一樣） ----------------
-export const PRIZES = [10000, 6000, 4000, 3000, 2000, 1000];
+/** 獎金（◎ 寵物金幣）：保留 TG2 10:6:4:3:2:1 比例，但壓低到「每分鐘賺得比下樓梯少」，錢主要還是從下樓梯來。 */
+export const PRIZES = [60, 36, 24, 18, 12, 6];
 export const POINTS = [10, 6, 4, 3, 2, 1];
 export const prizeFor = (rank: number) => PRIZES[rank - 1] ?? 0;
 export const pointsFor = (rank: number) => POINTS[rank - 1] ?? 0;
@@ -151,8 +156,6 @@ export function settleCup(cupIn: Cup, unlocked: number, trackId: string, ranking
   return { cup: newCup(champion && cup.country + 1 < COUNTRIES.length ? next : cup.country), counted: true, qualified: true, countryDone: true, champion, unlocked: unl, standings: st };
 }
 
-// ---------------- 換匯（賽車獎金 ↔ 寵物金幣） ----------------
-export const EXCHANGE = { coinToCash: 500, cashPerCoin: 1000, dailyCapCoins: 50 };
 
 // ---------------- 模擬 ----------------
 export interface RaceInput { gas: boolean; brake: boolean; left: boolean; right: boolean; nitro: boolean }

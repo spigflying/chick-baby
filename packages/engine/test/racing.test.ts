@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createRace, stepRace, raceRanking, setRaceInput, carStats, STOCK_PARTS, PARTS, PART_KINDS, TRACKS, COUNTRIES, buildTrack, prizeFor, pointsFor, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, newCup, cupTrack, ME, condition, condFactor, seasonOf, segAt, type Parts } from '../src/racing';
+import { MAX_OUT_COST, PAINTS, createRace, stepRace, raceRanking, setRaceInput, carStats, STOCK_PARTS, PARTS, PART_KINDS, TRACKS, COUNTRIES, buildTrack, prizeFor, pointsFor, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, newCup, cupTrack, ME, condition, condFactor, seasonOf, segAt, type Parts } from '../src/racing';
 
 const run = (s: ReturnType<typeof createRace>, f?: (s: any) => void) => { while (!s.over) { f?.(s); stepRace(s); } return s; };
 const drive = (s: any, id: string, nitro = false) => { const me = s.cars.find((c: any) => c.id === id); let tgt = segAt(s, me.z + 40).curve * 0.12;
@@ -45,13 +45,13 @@ describe('racing engine v5', () => {
   });
   it('TG2-style shop: 3 tiers, prices rise; gearbox needs engine; wet tyres matter in rain', () => {
     for (const k of PART_KINDS) { expect(PARTS[k].tiers.length).toBe(4); PARTS[k].tiers.forEach((t, i) => { if (i) expect(t.price).toBeGreaterThan(PARTS[k].tiers[i - 1].price); }); }
-    expect(PARTS.engine.tiers[3].price).toBe(80000); expect(PARTS.dry.tiers[1].price).toBe(1000);
+    expect(PARTS.engine.tiers[3].price).toBe(3200); expect(PARTS.engine.tiers[3].tg2).toBe(80000); expect(PARTS.dry.tiers[1].price).toBe(40); expect(MAX_OUT_COST).toBe(9080); expect(PAINTS).toBe(8); expect(PART_KINDS).toEqual(['engine', 'gearbox', 'nitro', 'dry', 'wet', 'armorF', 'armorR', 'armorS']); expect(PARTS.wet.tiers.map((t) => t.price)).toEqual([0, 40, 80, 120]);
     expect(carStats({ gearbox: 3 }).topSpeed).toBeLessThan(carStats({ gearbox: 3, engine: 3 }).topSpeed);
     expect(carStats({ gearbox: 3, engine: 2 }).topSpeed).toBeGreaterThan(carStats({ engine: 2 }).topSpeed);
     expect(carStats({ wet: 3 }).wetGrip).toBeGreaterThan(carStats({}).wetGrip);
   });
   it('prizes/points top 6 only', () => {
-    expect([1, 2, 3, 4, 5, 6, 7].map(prizeFor)).toEqual([10000, 6000, 4000, 3000, 2000, 1000, 0]);
+    expect([1, 2, 3, 4, 5, 6, 7].map(prizeFor)).toEqual([60, 36, 24, 18, 12, 6, 0]);
     expect([1, 6, 7, 10].map(pointsFor)).toEqual([10, 1, 0, 0]);
   });
   it('cup: only current track counts, DNQ (>10) restarts country, winning 4 races unlocks next country', () => {

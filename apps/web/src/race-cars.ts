@@ -178,8 +178,24 @@ export const CAR_SPECS: Record<string, { name: string; ops: Op[] }> = {
 };
 export const CAR_MODELS = Object.keys(CAR_SPECS).filter((m) => m !== 'ai');
 /** 塗裝（四階綠）：[車身, 配色] */
-export const LIVERIES: [number, number][] = [[0, 2], [1, 3], [2, 0], [0, 3], [1, 0], [2, 1]];
-export const LIVERY_NAMES = ['白／墨', '淺綠／黑', '墨綠／白', '白／黑', '淺綠／白', '墨綠／淺'];
+/**
+ * 8 種塗裝（TG2：紅 灰 綠 淺藍 深藍 黃 黑 紫）。畫面只有四階綠，所以每種顏色＝「車身深淺＋配色深淺＋花紋」的獨特組合：
+ * solid 單色、stripe 中央雙條紋、dither 細格點（兩階混色＝中間色調）、band 斜紋。電腦車是另一款灰色通用車（無配色、無燈），不會混淆。
+ */
+export type Pattern = 'solid' | 'stripe' | 'dither' | 'band';
+export interface Livery { name: string; body: number; accent: number; pat: Pattern }
+export const PAINT_LIVERIES: Livery[] = [
+  { name: '紅', body: 1, accent: 3, pat: 'stripe' },
+  { name: '灰', body: 2, accent: 1, pat: 'solid' },
+  { name: '綠', body: 0, accent: 2, pat: 'solid' },
+  { name: '淺藍', body: 0, accent: 1, pat: 'dither' },
+  { name: '深藍', body: 2, accent: 3, pat: 'dither' },
+  { name: '黃', body: 0, accent: 3, pat: 'stripe' },
+  { name: '黑', body: 3, accent: 1, pat: 'solid' },
+  { name: '紫', body: 1, accent: 2, pat: 'band' },
+];
+export const LIVERIES: [number, number][] = PAINT_LIVERIES.map((l) => [l.body, l.accent]);
+export const LIVERY_NAMES = PAINT_LIVERIES.map((l) => l.name);
 export interface CarLook { brake?: boolean; nitro?: boolean; hit?: boolean; frame?: number }
 
 const cache = new Map<string, (number | null)[][]>();
@@ -189,7 +205,9 @@ export function carPixels(model: string, livery: number, lod: number, look: CarL
   const key = `${model}:${livery}:${lod}:${+!!look.brake}:${+!!look.nitro}:${+!!look.hit}:${(look.frame ?? 0) & 1}`;
   const hit = cache.get(key); if (hit) return hit.map((r) => r.slice());
   const W = LODS[lod], k = (W - 2) / DESIGN_W, H = Math.round(DESIGN_H * k) + 2;
-  const [body, accent] = model === 'ai' ? [2, 2] : LIVERIES[livery % LIVERIES.length];
+  const lv = PAINT_LIVERIES[livery % PAINT_LIVERIES.length];
+  const [body, accent] = model === 'ai' ? [2, 2] : [lv.body, lv.accent];
+  const pat: Pattern = model === 'ai' ? 'solid' : lv.pat;
   const flash = look.hit && (look.frame ?? 0) % 2 === 1;
   const b = flash ? (body === 0 ? 2 : 0) : body;
   const col: Record<C, number | null> = {
@@ -198,7 +216,10 @@ export function carPixels(model: string, livery: number, lod: number, look: CarL
   };
   const g: (number | null)[][] = Array.from({ length: H }, () => Array(W).fill(null));
   const X = (x: number) => 1 + Math.round(x * k), Y = (y: number) => 1 + Math.round(y * k);
-  const put = (x: number, y: number, c: C) => { if (y >= 0 && y < H && x >= 0 && x < W) g[y][x] = col[c]; };
+  const cx = W / 2, sw = Math.max(1, Math.round(W / 24));
+  const patCol = (x: number, y: number) => pat === 'stripe' ? (Math.abs(x + 0.5 - cx) >= sw * 0.5 && Math.abs(x + 0.5 - cx) <= sw * 1.5 + 0.5 ? accent : b)
+    : pat === 'dither' ? ((x + y) & 1 ? accent : b) : pat === 'band' ? ((x + y) % 6 < 2 ? accent : b) : b;
+  const put = (x: number, y: number, c: C) => { if (y >= 0 && y < H && x >= 0 && x < W) g[y][x] = c === 'b' && !flash ? patCol(x, y) : col[c]; };
   for (const op of CAR_SPECS[model]?.ops ?? CAR_SPECS.falcon.ops) {
     const minW = (op[0] === 'rect' || op[0] === 'ell') ? op[6] : op[0] === 'trap' ? op[8] : op[0] === 'fins' ? op[7] : op[5];
     if (minW && W < minW) continue;

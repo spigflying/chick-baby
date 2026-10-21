@@ -216,13 +216,11 @@ const migrations: Record<string, Migration> = {
   },
   '0008_racing': {
     async up(db: Kysely<unknown>) {
-      // 賽車模式：獨立的賽車獎金（可和金幣換匯）、零件、塗裝、錦標賽進度、每月賽季
+      // 賽車模式：零件與獎金都用寵物金幣（coin_ledger：race_part 買零件、race_prize 獎金）；這裡只存零件、車款、塗裝、錦標賽進度、每月賽季
       await sql`CREATE TABLE race_profiles (
           user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-          cash integer NOT NULL DEFAULT 15000 CHECK (cash >= 0),
           parts jsonb NOT NULL DEFAULT '{}',
           car text NOT NULL DEFAULT 'falcon',
-          cars text[] NOT NULL DEFAULT ARRAY['falcon'],
           paint integer NOT NULL DEFAULT 0,
           season text NOT NULL,
           unlocked integer NOT NULL DEFAULT 1,
@@ -252,11 +250,11 @@ const migrations: Record<string, Migration> = {
           points integer NOT NULL, wins integer NOT NULL, races integer NOT NULL, unlocked integer NOT NULL,
           PRIMARY KEY (season, user_id));
         ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
-        ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus','outfit','race_exchange_in','race_exchange_out'));`.execute(db);
+        ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus','outfit','race_part','race_prize'));`.execute(db);
     },
     async down(db: Kysely<unknown>) {
       await sql`DROP TABLE race_seasons; DROP TABLE race_results; DROP TABLE race_profiles;
-        DELETE FROM coin_ledger WHERE reason IN ('race_exchange_in','race_exchange_out');
+        DELETE FROM coin_ledger WHERE reason IN ('race_part','race_prize');
         ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
         ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus','outfit'));`.execute(db);
     },

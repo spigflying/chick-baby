@@ -38,36 +38,34 @@ async function openWs(cookie: string) {
 
 const drive = (id: string) => (s: any) => { const c = s.cars.find((x: any) => x.id === id); setRaceInput(s, id, { gas: true, left: c.x > 0.2, right: c.x < -0.2, nitro: s.tick % 200 === 50 }); };
 describe('racing (server) v5', () => {
-  it('profile/cash, tier-by-tier parts, car + paint', async () => {
+  const bal = async (id: string) => Number((await sql<any>`SELECT balance FROM wallets WHERE user_id=${id}`.execute(db)).rows[0].balance);
+  it('TG2 shop in pet coins: buy any tier directly, switching discards (full price, no refund), stock is free; car + paint free', async () => {
     const a = await login('racer1');
     const p = await a.call('GET', '/race/profile');
-    expect(p.status).toBe(200); expect(p.json.profile.cash).toBe(15000); expect(p.json.profile.season).toBe(seasonOf(Date.now()));
-    expect(p.json.catalog.tracks.length).toBe(TRACKS.length); expect(p.json.catalog.slots).toBe(20);
-    expect((await a.call('POST', '/race/buy', { kind: 'engine', tier: 2 })).json.error).toBe('TIER_LOCKED');
-    expect((await a.call('POST', '/race/buy', { kind: 'engine', tier: 1 })).json.error).toBe('INSUFFICIENT_RACE_CASH');
-    const b = await a.call('POST', '/race/buy', { kind: 'nitro', tier: 1 });
-    expect(b.json.parts.nitro).toBe(1); expect(b.json.cash).toBe(15000 - partPrice('nitro', 1)!);
-    await db.updateTable('race_profiles').set({ cash: 100000 }).where('user_id', '=', a.id).execute();
-    const c = await a.call('POST', '/race/buy', { car: 'arrow', paint: 3 }); expect(c.json.car).toBe('arrow'); expect(c.json.paint).toBe(3);
-    expect((await a.call('POST', '/race/repair')).status).toBe(404);
-  });
-  it('exchange coins <-> cash with daily 50 cap each way', async () => {
-    const a = await login('racer3');
-    await sql`UPDATE wallets SET balance = 1000 WHERE user_id = ${a.id}`.execute(db);
-    const bal0 = Number((await sql<any>`SELECT balance FROM wallets WHERE user_id=${a.id}`.execute(db)).rows[0].balance);
-    const r = await a.call('POST', '/race/exchange', { dir: 'in', coins: 30 });
-    expect(r.status).toBe(200); expect(r.json.profile.cash).toBe(15000 + 30 * 500); expect(r.json.balance).toBe(bal0 - 30);
-    expect((await a.call('POST', '/race/exchange', { dir: 'in', coins: 21 })).json.error).toBe('EXCHANGE_CAP');
-    expect((await a.call('POST', '/race/exchange', { dir: 'in', coins: 20 })).status).toBe(200);
-    const o = await a.call('POST', '/race/exchange', { dir: 'out', coins: 10 });
-    expect(o.json.profile.cash).toBe(15000 + 50 * 500 - 10000); expect(o.json.balance).toBe(bal0 - 50 + 10);
-    expect((await a.call('POST', '/race/exchange', { dir: 'out', coins: 0 })).status).toBe(400);
+    expect(p.status).toBe(200); expect(p.json.profile.cash).toBeUndefined(); expect(p.json.profile.season).toBe(seasonOf(Date.now()));
+    expect(p.json.catalog.tracks.length).toBe(TRACKS.length); expect(p.json.catalog.slots).toBe(20); expect(p.json.catalog.max_out_cost).toBe(9080);
+    const b0 = await bal(a.id);
+    expect((await a.call('POST', '/race/buy', { kind: 'engine', tier: 3 })).json.error).toBe('INSUFFICIENT_COINS');
+    await sql`UPDATE wallets SET balance = 5000 WHERE user_id = ${a.id}`.execute(db);
+    const e3 = await a.call('POST', '/race/buy', { kind: 'engine', tier: 3 }); // 直接買 3 階
+    expect(e3.status).toBe(200); expect(e3.json.parts.engine).toBe(3); expect(e3.json.balance).toBe(5000 - 3200);
+    expect((await a.call('POST', '/race/buy', { kind: 'engine', tier: 3 })).json.error).toBe('ALREADY_OWNED');
+    const e1 = await a.call('POST', '/race/buy', { kind: 'engine', tier: 1 }); // 降級：全額、不退錢
+    expect(e1.json.parts.engine).toBe(1); expect(e1.json.balance).toBe(5000 - 3200 - partPrice('engine', 1)!);
+    const e0 = await a.call('POST', '/race/buy', { kind: 'engine', tier: 0 }); // 原廠標準免費
+    expect(e0.json.parts.engine).toBe(0); expect(e0.json.balance).toBe(e1.json.balance);
+    const led = await sql<any>`SELECT reason, delta FROM coin_ledger WHERE user_id=${a.id} AND reason='race_part' ORDER BY created_at`.execute(db);
+    expect(led.rows.map((r: any) => Number(r.delta))).toEqual([-3200, -1200]);
+    const c = await a.call('POST', '/race/buy', { car: 'f1', paint: 7 }); expect(c.json.car).toBe('f1'); expect(c.json.paint).toBe(7);
+    expect((await a.call('POST', '/race/buy', { paint: 8 })).status).toBe(400);
+    expect((await a.call('POST', '/race/exchange', { dir: 'in', coins: 1 })).status).toBe(404);
+    expect(b0).toBeGreaterThanOrEqual(0);
   });
   it('season rollover archives and resets points/unlocks, keeps cash+parts', async () => {
     const a = await login('racer4'); await a.call('GET', '/race/profile');
-    await db.updateTable('race_profiles').set({ season: '2000-01', points: 99, unlocked: 3, cash: 77777, parts: JSON.stringify({ engine: 2 }) } as any).where('user_id', '=', a.id).execute();
+    await db.updateTable('race_profiles').set({ season: '2000-01', points: 99, unlocked: 3, parts: JSON.stringify({ engine: 2 }) } as any).where('user_id', '=', a.id).execute();
     const p = (await a.call('GET', '/race/profile')).json.profile;
-    expect(p.points).toBe(0); expect(p.unlocked).toBe(1); expect(p.cash).toBe(77777); expect(p.parts.engine).toBe(2);
+    expect(p.points).toBe(0); expect(p.unlocked).toBe(1); expect(p.parts.engine).toBe(2);
     const arch = await (db as any).selectFrom('race_seasons').selectAll().where('user_id', '=', a.id).execute();
     expect(arch[0].season).toBe('2000-01'); expect(arch[0].points).toBe(99);
   });
@@ -87,8 +85,10 @@ describe('racing (server) v5', () => {
     const end = await w.wait((m) => m.type === 'race.ended');
     expect(end.ranking.length).toBe(20); expect(end.me.prize).toBe(prizeFor(end.me.rank)); expect(end.me.qualified).toBe(end.me.rank <= 10);
     expect(end.me.condition).toBeGreaterThan(0);
+    const b0 = await bal(a.id);
     const prof = (await a.call('GET', '/race/profile')).json.profile;
-    expect(prof.races).toBe(1); expect(prof.cash).toBe(15000 + end.me.prize);
+    expect(prof.races).toBe(1); expect(end.me.prize).toBeLessThanOrEqual(60);
+    const pz = await sql<any>`SELECT COALESCE(SUM(delta),0)::int AS n FROM coin_ledger WHERE user_id=${a.id} AND reason='race_prize'`.execute(db); expect(pz.rows[0].n).toBe(end.me.prize); expect(b0).toBeGreaterThanOrEqual(end.me.prize);
     const lb = (await a.call('GET', '/race/leaderboard/tw1')).json; expect(lb.best.length).toBe(end.me.time_ms === null ? 0 : 1); expect(lb.championship.length).toBe(1);
     expect(inRace(a.id)).toBe(false); w.ws.close();
   });
