@@ -191,7 +191,8 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       const fk = (c: ViewCar) => c.fin ?? 1e12; const ranked = [...cars].sort((p, q) => fk(p) - fk(q) || q.z - p.z);
       if (import.meta.env.DEV && meCar) (window as any).__race = { x: meCar.x, z: meCar.z, curve: segAt(trackById(race.track)!.id, meCar.z + 40) };
       const flash = meCar?.fin != null ? 'FINISH!' : meCar && meCar.hit > 0 ? 'CRASH!' : meCar && meCar.nitroT > 0 ? 'NITRO!' : meCar && Math.abs(meCar.x) > 1 ? 'OFF ROAD' : undefined;
-      drawRace(x, { track: t, me: meCar, cars, tick: last.tick, countdown: last.countdown, laps: race.laps, len: race.len, rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash });
+      const stt = prof ? carStats(prof.parts, prof.car) : null;
+      drawRace(x, { gears: [4, 5, 5, 6][Math.min(prof?.parts?.gearbox ?? 0, (prof?.parts?.engine ?? 0) + 1)], top: stt?.topSpeed, track: t, me: meCar, cars, tick: last.tick, countdown: last.countdown, laps: race.laps, len: race.len, rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash });
       if (mode === 'results') drawResultsOverlay(); return;
     }
     if (mode === 'lobby') return drawWait();

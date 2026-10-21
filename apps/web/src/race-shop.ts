@@ -28,7 +28,7 @@ const DIGITS: Record<string, string> = {
   '4': '00010001100101010010111110001000010', '5': '11111100001111000001000011000101110', '6': '00110010001000011110100011000101110',
   '7': '11111000010001000100010000100001000', '8': '01110100011000101110100011000101110', '9': '01110100011000101111000010001001100',
 };
-function bigDigit(x: CanvasRenderingContext2D, n: number, ox: number, oy: number) {
+export function bigDigit(x: CanvasRenderingContext2D, n: number, ox: number, oy: number) {
   const f = DIGITS[String(n)], cw = 6, ch = 15;
   const bit = (c: number, r: number) => c >= 0 && c < 5 && r >= 0 && r < 7 && f[r * 5 + c] === '1';
   const on = (c: number, r: number) => bit(c, r) || bit(c - 1, r); // 粗體：每一筆往右加粗一格
@@ -40,6 +40,16 @@ function bigDigit(x: CanvasRenderingContext2D, n: number, ox: number, oy: number
     x.fillStyle = G[edge ? 2 : band < 18 ? 0 : band < 22 ? (dith ? 0 : 1) : band < 36 ? 1 : band < 39 ? (dith ? 1 : 2) : band < 43 ? 2 : (dith ? 2 : 0)]; x.fillRect(ox + px, oy + py, 1, 1);
   }
 }
+/** 大號鍍鉻「1」：粗斜柱＋左上旗角，斜向亮暗條紋（原創造型） */
+function bigOne(x: CanvasRenderingContext2D) {
+  const polys: [number, number][][] = [[[24, 10], [48, 10], [36, 132], [12, 132]], [[6, 34], [30, 20], [27, 46], [4, 52]]];
+  const inP = (px: number, py: number, p: [number, number][]) => { let c = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) { const [xi, yi] = p[i], [xj, yj] = p[j]; if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) c = !c; } return c; };
+  const on = (px: number, py: number) => polys.some((p) => inP(px + 0.5, py + 0.5, p));
+  for (let py = 8; py < 134; py++) for (let px = 2; px < 52; px++) { if (!on(px, py)) continue;
+    const edge = !on(px - 1, py) || !on(px + 1, py) || !on(px, py - 1) || !on(px, py + 1);
+    const band = (px * 1.2 + py * 0.9 + 600) % 40, d = (px + py) & 1;
+    x.fillStyle = G[edge ? 2 : band < 10 ? 0 : band < 13 ? (d ? 0 : 1) : band < 22 ? 1 : band < 25 ? (d ? 1 : 2) : band < 33 ? 2 : (d ? 2 : 1)]; x.fillRect(px, py, 1, 1); }
+}
 /** ◎ 金幣符號（7×7） */
 function coin(x: CanvasRenderingContext2D, px: number, py: number, col: number) {
   x.fillStyle = G[col]; const m = ['0111110', '1000001', '1011101', '1010101', '1011101', '1000001', '0111110'];
@@ -50,11 +60,13 @@ function price(x: CanvasRenderingContext2D, n: number, cx: number, y: number, co
 }
 /** 方框：外框（一般第 2 階、選中第 0 階粗框）、內底兩段色（上淺下深，像原作的藍色漸層） */
 function frame(x: CanvasRenderingContext2D, px: number, py: number, s: number, sel: boolean, blink: boolean, hh = s) {
-  x.fillStyle = G[sel && blink ? 0 : sel ? 1 : 2]; x.fillRect(px - (sel ? 1 : 0), py - (sel ? 1 : 0), s + (sel ? 2 : 0), hh + (sel ? 2 : 0));
-  x.fillStyle = G[3]; x.fillRect(px + 2, py + 2, s - 4, hh - 4);
-  x.fillStyle = G[1]; x.fillRect(px + 3, py + 3, s - 6, Math.floor((hh - 6) * 0.55));
-  for (let j = py + 3 + Math.floor((hh - 6) * 0.55); j < py + hh - 3; j++) for (let i = px + 3; i < px + s - 3; i++) { x.fillStyle = G[(i + j) & 1 && j < py + hh * 0.7 ? 1 : 2]; x.fillRect(i, j, 1, 1); }
-  x.fillStyle = G[2]; x.fillRect(px + 4, py + 4, 2, 2); x.fillRect(px + s - 6, py + 4, 2, 2); // 螺絲
+  // TG2：細亮框（選中＝粗框閃爍），內底上淺下深兩段（分界約 55%），四角小螺絲
+  if (sel) { x.fillStyle = G[blink ? 0 : 1]; x.fillRect(px - 1, py - 1, s + 2, hh + 2); x.fillStyle = G[3]; x.fillRect(px + 2, py + 2, s - 4, hh - 4); }
+  else { x.fillStyle = G[0]; x.fillRect(px, py, s, hh); x.fillStyle = G[3]; x.fillRect(px + 1, py + 1, s - 2, hh - 2); }
+  const i0 = sel ? 3 : 2, split = py + Math.round(hh * 0.55);
+  x.fillStyle = G[1]; x.fillRect(px + i0, py + i0, s - i0 * 2, split - py - i0);
+  x.fillStyle = G[2]; x.fillRect(px + i0, split, s - i0 * 2, py + hh - i0 - split);
+  x.fillStyle = G[3]; x.fillRect(px + 5, py + 4, 3, 1); x.fillRect(px + s - 8, py + 4, 3, 1);
 }
 function title(x: CanvasRenderingContext2D, s: string) {
   const px = 46, py = 3, w = 190, h = 20;
@@ -78,7 +90,7 @@ export function drawShop(x: CanvasRenderingContext2D, ui: ShopUI, prof: any, coi
   x.fillStyle = G[3]; x.fillRect(0, 0, W, H);
   const paintScr = isPaint(ui.cat), k = PART_KINDS[ui.cat] as PartKind | undefined;
   const blink = fr % 16 < 11;
-  bigDigit(x, ui.cat + 1, 4, 14);
+  bigOne(x); // TG2：大號「1」＝1P（每個畫面都一樣）
   title(x, paintScr ? '塗裝' : PARTS[k!].label);
   backdrop(x, prof.car, paintScr && ui.cur >= 0 ? ui.cur : prof.paint);
   // 左：目前裝的
@@ -110,7 +122,7 @@ export function drawShop(x: CanvasRenderingContext2D, ui: ShopUI, prof: any, coi
   const l1 = (s: string, c = 0) => zh(x, s, 10, 167, c), l2 = (s: string, c = 1) => zh(x, s, 10, 181, c);
   if (ui.note && fr < ui.noteT) { l1(ui.note, 0); l2('←→ 換類別／選格子　A 確定　B 取消'); return; }
   if (paintScr) {
-    const n = PAINT_NAMES[ui.cur] ?? ''; l1(`${n}${prof.paint === ui.cur ? '（使用中）' : '・免費'}　${CARS.find((c) => c.id === prof.car)?.name ?? ''}`); l2(prof.paint === ui.cur ? '←→↑↓ 選顏色，後面的車會跟著變' : '按 A 換上這個顏色'); return;
+    const n = PAINT_NAMES[ui.cur] ?? ''; l1(`${n}${prof.paint === ui.cur ? '（使用中）' : ''}　${CARS.find((c) => c.id === prof.car)?.name ?? ''}`); l2(prof.paint === ui.cur ? '←→↑↓ 選顏色，後面的車會跟著變' : '按 A 直接換上（不用付錢）'); return;
   }
   const t = PARTS[k!].tiers[ui.cur], equipped = prof.parts[k!] === ui.cur;
   if (ui.confirm && t) { l1(t.price ? `換成${t.name}：付 ${t.price} 金幣？` : `換回${t.name}（免費）？`, 0); l2(`舊的「${PARTS[k!].tiers[prof.parts[k!]].name}」丟掉不退錢　A 確定　B 取消`, 1); return; }

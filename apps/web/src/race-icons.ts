@@ -31,98 +31,135 @@ class Pen {
   /** 等級標記：右下角 L 顆亮色寶石（原廠＝一條短線） */
   pips(L: number) { if (!L) { for (let x = 36; x < 46; x++) this.px(x, 45, 3); return; } for (let i = 0; i < L; i++) { const x = 42 - i * 6; for (let j = 0; j < 5; j++) for (let k = 0; k < 5; k++) this.px(x + k, 41 + j, (j === 0 || j === 4 || k === 0 || k === 4) ? 3 : (j === 1 && k === 1) ? 0 : 1); } }
 }
-function engine(p: Pen, L: number) {
-  p.rect(5, 13, 22, 26, 2); p.rect(5, 13, 22, 14, 1); p.rect(5, 25, 22, 26, 3);           // 缸體
-  for (let x = 7; x < 21; x += 3) p.rect(x, 15, x + 1, 24, 3);                              // 散熱鰭
-  p.rect(7, 8, 20, 13, L >= 1 ? 1 : 2); for (let x = 8; x < 20; x += 2) p.rect(x, 9, x + 1, 12, L >= 1 ? 0 : 1); // 汽缸蓋
-  p.rect(8, 26, 19, 29, 3); p.disc(5, 20, 3, 1); p.disc(5, 20, 1, 3);                       // 油底殼、皮帶輪
-  if (L >= 1) { p.rect(12, 3, 15, 8, 2); p.disc(13.5, 3, 3, 1); p.ring(13.5, 3, 2, 3, 2); p.set(13, 3, 0); } // 進氣＋空濾
-  if (L >= 2) { p.rect(21, 15, 24, 18, 2); p.disc(26, 16.5, 4.5, 1); p.ring(26, 16.5, 3.5, 4.5, 2); p.disc(26, 16.5, 1.5, 3); p.line(26, 12, 29, 15, 0); } // 渦輪（蝸殼）
-  if (L >= 3) {
-    p.rect(21, 8, 24, 11, 2); p.disc(26, 8.5, 3.5, 1); p.ring(26, 8.5, 2.5, 3.5, 2); p.disc(26, 8.5, 1, 3);  // 第二顆渦輪
-    p.line(9, 19, 13, 15, 0); p.line(13, 15, 12, 19, 0); p.line(12, 19, 16, 22, 0);                          // 閃電
-    for (let i = 0; i < 4; i++) p.rect(23 + i, 23 + (i & 1), 24 + i, 24 + (i & 1), 0);                         // 尾焰火花
-  }
+// ======== v9：TG2 風格的金屬零件（48px 直接畫，不經 32 格）——3/4 視角、鍍鉻明暗（亮→中→暗→反光） ========
+type P = Pen;
+const px = (p: P, x: number, y: number, c: number) => p.px(Math.round(x), Math.round(y), c);
+const R = (p: P, x0: number, y0: number, x1: number, y1: number, c: number | ((x: number, y: number) => number)) => { for (let y = Math.round(y0); y < Math.round(y1); y++) for (let x = Math.round(x0); x < Math.round(x1); x++) p.px(x, y, typeof c === 'number' ? c : c(x, y)); };
+/** 鍍鉻漸層：t∈[0,1]（上→下或左→右），亮帶＋暗帶＋底部反光，交界用 2×2 混色 */
+const chrome = (t: number, x: number, y: number): number => { const d = (x + y) & 1;
+  return t < 0.12 ? 1 : t < 0.3 ? 0 : t < 0.38 ? (d ? 0 : 1) : t < 0.55 ? 1 : t < 0.62 ? (d ? 1 : 2) : t < 0.82 ? 2 : t < 0.9 ? (d ? 2 : 1) : 1; };
+/** 3/4 方塊：正面（x0..x1, y0..y1）＋上面＋右側面，往右上退 (dx, dy) */
+function box(p: P, x0: number, y0: number, x1: number, y1: number, dx: number, dy: number, front: (t: number, x: number, y: number) => number = chrome) {
+  for (let k = 0; k < dy; k++) { const o = Math.round(k * dx / dy); R(p, x0 + o + 1, y0 - k - 1, x1 + o + 1, y0 - k, k === dy - 1 ? 1 : (k & 1) ? 0 : 1); } // 上面（亮）
+  for (let x = 0; x < dx; x++) { const o = Math.round(x * dy / dx); R(p, x1 + x, y0 - o, x1 + x + 1, y1 - o, (xx, yy) => ((xx + yy) & 1) && x > dx / 2 ? 3 : 2); } // 側面（暗）
+  R(p, x0, y0, x1, y1, (x, y) => front((y - y0) / (y1 - y0), x, y));
 }
-function gear(p: Pen, cx: number, cy: number, r: number, teeth: number, c: number) {
-  p.disc(cx, cy, r, c);
-  for (let i = 0; i < teeth; i++) { const a = (i / teeth) * Math.PI * 2; p.disc(cx + Math.cos(a) * (r + 1), cy + Math.sin(a) * (r + 1), 1.1, c); }
-  p.ring(cx, cy, r - 2, r - 1.2, c === 1 ? 2 : 1); p.disc(cx, cy, Math.max(1, r / 3), 3); p.set(cx - 1, cy - 1, 0);
+/** 直立圓柱的明暗（左→右）：輪胎、鋼瓶 */
+const cylC = (u: number, x: number, y: number) => { const d = (x + y) & 1; return u < 0.08 ? 3 : u < 0.2 ? 2 : u < 0.3 ? (d ? 1 : 2) : u < 0.42 ? 0 : u < 0.5 ? (d ? 0 : 1) : u < 0.7 ? 1 : u < 0.8 ? (d ? 1 : 2) : u < 0.93 ? 2 : 3; };
+function disc(p: P, cx: number, cy: number, r: number, f: (dx: number, dy: number, d: number) => number | null) { for (let y = Math.floor(cy - r); y <= cy + r; y++) for (let x = Math.floor(cx - r); x <= cx + r; x++) { const dx = x + 0.5 - cx, dy = y + 0.5 - cy, d = Math.hypot(dx, dy); if (d <= r) { const c = f(dx, dy, d / r); if (c !== null) p.px(x, y, c); } } }
+/** 皮帶輪／齒輪：外圈亮暗分兩半、中心螺帽 */
+function pulley(p: P, cx: number, cy: number, r: number, teeth = 0) {
+  disc(p, cx, cy, r + (teeth ? 1.2 : 0), (dx, dy, d) => { if (teeth && d * (r + 1.2) > r) { const a = Math.atan2(dy, dx); return Math.cos(a * teeth) > 0.1 ? (dx + dy < 0 ? 1 : 2) : null; } return d > 0.78 ? (dx + dy < 0 ? 0 : 2) : d > 0.62 ? 3 : d > 0.3 ? (dx + dy < 0 ? 1 : 2) : d > 0.18 ? 3 : 0; });
 }
-function gearbox(p: Pen, L: number) {
-  const G4: [number, number, number, number, number][] = [[12, 18, 8, 12, 1], [24, 10, 5, 9, 2], [24, 24, 4.5, 8, 1], [6, 7, 3.5, 7, 2]];
-  for (let i = 0; i <= L; i++) gear(p, ...G4[i]);
-  if (L >= 3) { p.rect(27, 15, 29, 21, 2); p.disc(28, 14, 2.5, 0); p.ring(28, 14, 1.6, 2.5, 1); }   // 序列式排檔桿
+/** 螺栓（TG2 的紅黃螺栓，四階綠用最亮＋最暗框） */
+const bolt = (p: P, x: number, y: number, h = 5) => { R(p, x - 1, y, x + 2, y + h, 3); R(p, x, y + 1, x + 1, y + h - 1, 0); };
+
+function engine(p: P, L: number) {
+  const big = L >= 2, x0 = 10 - L, x1 = 31 + L, y0 = 24, y1 = 36;
+  box(p, x0, y0, x1, y1, 7, 5);                                            // 缸體
+  for (let x = x0 + 2; x < x1 - 1; x += 3) R(p, x, y0 + 2, x + 1, y1 - 2, 3); // 缸體散熱鰭
+  R(p, x0 + 2, y1, x1 - 2, y1 + 3, (x, y) => ((x + y) & 1 ? 2 : 3));        // 油底殼
+  // 汽缸蓋（V 型：兩排）
+  const heads = big ? 2 : 1;
+  for (let h = 0; h < heads; h++) { const hx = x0 + 2 + h * 5, hy = y0 - 6 - h * 3; box(p, hx, hy, x1 - 3 + h * 2, hy + 5, 4, 3, (t, x, y) => (x % 3 === 0 ? 3 : chrome(t, x, y))); }
+  // 進氣歧管（一排進氣管）
+  const n = 4 + L * 2, top = big ? y0 - 14 : y0 - 10;
+  for (let i = 0; i < n; i++) { const x = x0 + 3 + i * ((x1 - x0 - 4) / n); R(p, x, top, x + 2, top + 5, (xx) => xx === Math.round(x) ? 0 : 2); px(p, x, top - 1, 3); }
+  if (L >= 1) { box(p, x0 + 6, top - 5, x1 - 6, top, 4, 2); }              // 進氣集氣室
+  if (L >= 3) { box(p, x0 + 9, top - 11, x1 - 9, top - 5, 3, 2, (t, x, y) => (x & 1 ? chrome(t, x, y) : 2)); R(p, x0 + 12, top - 15, x1 - 12, top - 11, (x) => (x & 1 ? 0 : 1)); } // 機械增壓＋進氣口
+  pulley(p, x0 + 2, y0 + 6, 4.5); pulley(p, x0 + 3, y0 - 2 - (big ? 3 : 0), 2.8);     // 曲軸／發電機皮帶輪
+  for (let y = y0 - 1 - (big ? 3 : 0); y < y0 + 4; y++) { px(p, x0 - 2, y, 3); px(p, x0 + 5, y, 3); } // 皮帶
+  if (L >= 2) pulley(p, x1 + 4, y0 + 3, 3);                                 // 水泵
 }
-function nitro(p: Pen, L: number) {
-  const n = L + 1, w = 5, gap = 2, x0 = Math.round((32 - (n * w + (n - 1) * gap)) / 2);
-  for (let i = 0; i < n; i++) {
-    const x = x0 + i * (w + gap);
-    p.rect(x, 12, x + w, 28, 1); p.rect(x + 1, 13, x + 2, 27, 0); p.rect(x + w - 1, 13, x + w, 28, 2);   // 鋼瓶＋高光＋陰影
-    p.rect(x, 18, x + w, 20, 3); p.set(x + 2, 19, 0);                                                       // 標籤帶
-    p.rect(x + 1, 9, x + w - 1, 12, 2); p.rect(x + 2, 7, x + 3, 9, 3);                                     // 瓶頸、閥
-    const fl = 1 + L * 1.6;                                                                                  // 火焰（往上）
-    for (let k = 0; k < fl; k++) { const y = 6 - k; p.rect(x + 1 + (k > fl * 0.6 ? 1 : 0), y, x + w - 1 - (k > fl * 0.6 ? 1 : 0), y + 1, k < fl * 0.4 ? 0 : k < fl * 0.8 ? 1 : 2); }
-  }
-  if (L >= 2) p.rect(x0 - 1, 22, x0 + n * (w + gap) - 1, 23, 3);                                           // 高壓管路
+function gearbox(p: P, L: number) {
+  const w = 18 + L * 3, x0 = 14 - L, y0 = 22, y1 = 36;
+  box(p, x0, y0, x0 + w, y1, 6, 4);                                          // 變速箱殼
+  // 正面格柵（越高階越細）
+  const step = L >= 2 ? 2 : 3; for (let x = x0 + 3; x < x0 + w - 2; x += step) R(p, x, y0 + 3, x + 1, y1 - 2, 3);
+  if (L === 0) { for (let i = 0; i < 8; i++) { px(p, x0 + 4 + i * 1.5, y0 + 4 + i, 3); px(p, x0 + w - 4 - i * 1.5, y0 + 4 + i, 3); } } // 交叉補強
+  pulley(p, x0 - 1, y0 + 3, 4.5 + (L >= 2 ? 0.8 : 0), 8);                     // 主齒輪
+  if (L >= 1) pulley(p, x0 + 2, y0 - 4, 3, 6);                               // 第二顆齒輪
+  if (L >= 2) R(p, x0 + w + 2, y0 + 2, x0 + w + 9, y0 + 4, (x) => (x & 1 ? 0 : 1)); // 輸出軸
+  R(p, x0 + w / 2, y0 - 10 - L, x0 + w / 2 + 2, y0 - 3, (x, y) => (x === Math.round(x0 + w / 2) ? 0 : 2)); // 排檔桿
+  R(p, x0 + w / 2 - 3, y0 - 12 - L, x0 + w / 2 + 5, y0 - 9 - L, (x, y) => (y === Math.round(y0 - 12 - L) ? 0 : 1)); // 排檔頭（T 字）
+  if (L >= 3) { R(p, x0 + w - 6, y0 - 8, x0 + w + 6, y0 - 7, 3); R(p, x0 + w - 6, y0 - 7, x0 + w + 6, y0 - 6, 0); } // 序列式拉桿
 }
-/** 輪胎（正面看）：w 胎寬，grooves(x,y) 回傳是否是溝紋 */
-function tyre(p: Pen, w: number, groove: (x: number, y: number) => boolean) {
-  const x0 = 16 - w / 2, x1 = 16 + w / 2;
-  const R = 3.5; // 胎肩圓角
-  for (let y = 3; y < 29; y++) { const d = Math.min(y - 3, 28 - y), inset = d < R ? Math.round(R - Math.sqrt(R * R - (R - d - 0.5) ** 2)) : 0;
-    for (let x = Math.ceil(x0) + inset; x < x1 - inset; x++) p.set(x, y, groove(x - x0, y) ? 3 : (x - x0 > w - 2.5 ? 3 : 2)); }
-  for (let y = 6; y < 26; y++) p.set(Math.ceil(x0) + 1, y, 1);                                               // 高光
-  p.rect(Math.ceil(x0) + 2, 4, Math.ceil(x0) + 4, 5, 1);
+function nitro(p: P, L: number) {
+  const tall = L >= 2;
+  // 鋼瓶（橫放在後面）
+  const by0 = tall ? 16 : 20, bx0 = 12, bx1 = 34;
+  for (let y = by0; y < by0 + 9; y++) for (let x = bx0; x < bx1; x++) p.px(x, y, cylC((y - by0) / 9, x, y));
+  disc(p, bx0, by0 + 4.5, 4.5, (dx, dy, d) => (d > 0.7 ? 3 : dx + dy < 0 ? 0 : 1));             // 瓶口
+  R(p, bx0 - 6, by0 + 3, bx0 - 2, by0 + 6, 2); px(p, bx0 - 7, by0 + 4, 0);                        // 閥
+  // 控制盒（前面）
+  const cx0 = 16, cy0 = by0 + 7, cx1 = 34 + L, cy1 = 37;
+  box(p, cx0, cy0, cx1, cy1, 5, 3);
+  if (!tall) { R(p, cx1 - 10, cy0 + 2, cx1 - 2, cy0 + 8, 3); R(p, cx1 - 9, cy0 + 3, cx1 - 3, cy0 + 7, (x) => ((x & 1) ? 0 : 1)); }  // 數位儀表（亮）
+  else { for (let x = cx0 + 2; x < cx1 - 2; x += 2) R(p, x, cy0 + 2, x + 1, cy1 - 2, 3); R(p, cx0 + 2, cy0 + 5, cx1 - 2, cy0 + 6, 3); } // 散熱格柵
+  if (L === 1) { R(p, cx0 + 1, cy0 + 9, cx1 - 12, cy1 - 1, 0); }                                     // 亮面板
+  if (tall) for (let i = 0; i < L; i++) { R(p, cx1 + 5, cy0 + 3 + i * 4, cx1 + 9, cy0 + 4 + i * 4, 0); R(p, cx1 + 10, cy0 + 3 + i * 4, cx1 + 12, cy0 + 4 + i * 4, 1); } // 噴射線
 }
-function dry(p: Pen, L: number) {
-  const w = 10 + L * 3;
-  tyre(p, w, (x, y) => (L === 0 ? (Math.round(x) === Math.round(w / 2) || ((y >> 1) % 2 === 0 && (Math.round(x) === 2 || Math.round(x) === Math.round(w) - 2))) : L < 3 && (Math.round(x) === Math.round(w / 3) || Math.round(x) === Math.round((2 * w) / 3))));
-  if (L >= 2) { p.rect(16 - w / 2 - 1, 15, 16 - w / 2, 18, 1); p.rect(16 + w / 2, 15, 16 + w / 2 + 1, 18, 1); } // 胎側字樣
-  if (L >= 3) { p.line(26, 3, 26, 7, 0); p.line(24, 5, 28, 5, 0); p.set(5, 25, 0); p.set(4, 25, 1); p.set(6, 25, 1); } // 光頭胎閃光
+/** 輪胎（正面看，像 TG2：直立圓柱＋胎面花紋） */
+function tyreFront(p: P, w: number, tread: (u: number, v: number, x: number, y: number) => boolean) {
+  const x0 = Math.round(24 - w / 2), x1 = x0 + w, y0 = 12, y1 = 38;
+  for (let y = y0; y < y1; y++) { const v = (y - y0) / (y1 - y0), edge = y === y0 || y === y1 - 1 ? 2 : y === y0 + 1 || y === y1 - 2 ? 1 : 0;
+    for (let x = x0 + edge; x < x1 - edge; x++) { const u = (x - x0) / w; let c = cylC(u, x, y); if (tread(u, v, x, y)) c = Math.min(3, c + 2); p.px(x, y, c); } }
 }
-function wet(p: Pen, L: number) {
-  const w = 12 + L * 2, step = Math.max(2, 5 - L);
-  tyre(p, w, (x, y) => { const cx = Math.abs(x - w / 2); return (Math.round(y + cx * 0.8) % step === 0 && cx > 1) || (L >= 2 && Math.round(cx) === 0); });
-  const drops: [number, number][] = [[3, 5], [28, 9], [4, 20], [28, 24]];
-  for (let i = 0; i < L + 1 && i < drops.length; i++) { const [x, y] = drops[i]; p.set(x, y - 2, 1); p.rect(x - 1, y - 1, x + 2, y + 2, 1); p.set(x - 1, y - 1, 0); }
+function dry(p: P, L: number) {
+  const w = 14 + L * 2;
+  tyreFront(p, w, (u, v, x, y) => {
+    if (L === 0) return false;                                                   // 光頭胎
+    if (L === 1) return Math.abs(u - 0.33) < 0.04 || Math.abs(u - 0.67) < 0.04;    // 2 條溝
+    if (L === 2) return Math.abs(u - 0.25) < 0.035 || Math.abs(u - 0.5) < 0.035 || Math.abs(u - 0.75) < 0.035 || (v > 0.55 && (y % 4 === 0) && u > 0.2 && u < 0.8);
+    return Math.abs(u - 0.33) < 0.04 || Math.abs(u - 0.67) < 0.04 || (y % 4 === 0 && u > 0.12 && u < 0.88) || (v > 0.5 && (x + (y >> 2)) % 5 === 0); // 塊狀胎紋
+  });
 }
-const rivets = (p: Pen, x0: number, x1: number, y: number, n: number) => { for (let i = 0; i < n; i++) p.set(x0 + ((x1 - x0) * (i + 0.5)) / n, y, 3); };
-function carFront(p: Pen, rear: boolean) {
-  p.rect(9, 8, 23, 14, 2); p.rect(10, 9, 22, 13, rear ? 3 : 3); p.rect(11, 9, 14, 10, 1);   // 車頂＋擋風玻璃
-  p.rect(4, 14, 28, 24, 2); p.rect(4, 14, 28, 15, 1);                                         // 車身
-  p.rect(5, 24, 10, 28, 3); p.rect(22, 24, 27, 28, 3);                                        // 輪胎
-  if (rear) { p.rect(5, 16, 10, 18, 3); p.rect(6, 16, 9, 17, 1); p.rect(22, 16, 27, 18, 3); p.rect(23, 16, 26, 17, 1); p.rect(13, 17, 19, 20, 1); }
-  else { p.rect(5, 16, 10, 19, 0); p.rect(22, 16, 27, 19, 0); p.rect(12, 18, 20, 21, 3); for (let x = 13; x < 20; x += 2) p.set(x, 19, 2); }
+function wet(p: P, L: number) {
+  const w = 14 + L * 2;
+  tyreFront(p, w, (u, v, x, y) => {
+    const ribs = 3 + L; const k = u * ribs; const groove = Math.abs(k - Math.round(k)) < 0.16 && u > 0.1 && u < 0.9;
+    if (L === 0) return groove;
+    if (L === 1) return groove || ((y + Math.round(u * 8)) % 5 === 0 && u > 0.15 && u < 0.85);
+    if (L === 2) return groove || (Math.round(y - Math.abs(u - 0.5) * 18) % 4 === 0 && u > 0.12 && u < 0.88); // V 形排水
+    return (Math.round(y - Math.abs(u - 0.5) * 22) % 3 === 0 && u > 0.1 && u < 0.9) || (groove && (y & 2) > 0);
+  });
 }
-function armorFR(p: Pen, L: number, rear: boolean) {
-  carFront(p, rear);
-  if (!L) return;
-  const t = 1 + L * 1.5, y0 = Math.round(24 - t);                                             // 保桿鋼板
-  p.rect(2, y0, 30, 25, 1); p.rect(2, y0, 30, y0 + 1, 0); p.rect(2, 24, 30, 25, 3);
-  rivets(p, 2, 30, y0 + Math.floor(t / 2), 2 + L * 2);
-  if (L >= 2) { p.rect(3, 13, 5, y0, 1); p.rect(27, 13, 29, y0, 1); }                         // 防撞桿
-  if (L >= 3) { p.rect(13, 3, 19, 8, 1); p.rect(14, 4, 18, 7, 0); p.rect(15, 5, 17, 7, 2); p.set(16, 7, 2); } // 盾牌徽章
+/** 橫桿（側／後裝甲）：圓管明暗 */
+function bar(p: P, x0: number, x1: number, y: number, h: number) { for (let j = 0; j < h; j++) R(p, x0, y + j, x1, y + j + 1, (x, yy) => chrome(j / h, x, yy)); R(p, x1, y, x1 + 1, y + h, 2); }
+function armorS(p: P, L: number) {
+  const len = 22 + L * 4, x0 = 24 - len / 2, h = 3 + (L >= 2 ? 1 : 0);
+  bar(p, x0, x0 + len, 20, h); R(p, x0 + 1, 20 + h, x0 + 3, 30, 2); px(p, x0 + 1, 21 + h, 0); // 支架
+  if (L >= 1) R(p, x0 + len - 4, 20 + h, x0 + len - 2, 28, 2);
+  if (L >= 3) { bar(p, x0 - 2, x0 + len + 2, 27, 4); R(p, x0 - 3, 27, x0 - 1, 31, 1); }    // 雙桿＋端蓋
+  if (L >= 2) for (const f of [0.25, 0.75]) { bolt(p, x0 + len * f, 19, h + 2); if (L >= 3) bolt(p, x0 + len * f, 26, 6); }
 }
-function armorS(p: Pen, L: number) {
-  p.rect(9, 9, 21, 15, 2); p.rect(10, 10, 15, 14, 3); p.rect(16, 10, 20, 14, 3); p.rect(10, 10, 12, 11, 1);
-  p.rect(2, 15, 30, 23, 2); p.rect(2, 15, 30, 16, 1); p.rect(2, 22, 30, 23, 3);
-  p.disc(8, 23.5, 4, 3); p.disc(8, 23.5, 1.8, 1); p.disc(24, 23.5, 4, 3); p.disc(24, 23.5, 1.8, 1);
-  if (!L) return;
-  const h = 1 + L * 1.6, y0 = Math.round(21 - h);
-  p.rect(12, y0, 20, 22, 1); p.rect(12, y0, 20, y0 + 1, 0); rivets(p, 12, 20, y0 + Math.ceil(h / 2), 1 + L);
-  if (L >= 2) { p.rect(3, 19, 13, 21, 1); p.rect(19, 19, 29, 21, 1); }                         // 延伸側裙
-  if (L >= 3) { p.line(10, 9, 15, 15, 3); p.line(20, 9, 15, 15, 3); p.rect(2, 16, 30, 17, 0); } // 防滾籠
+function armorR(p: P, L: number) {
+  const len = 22 + L * 3, x0 = 22 - len / 2, h = 3 + (L >= 2 ? 1 : 0);
+  bar(p, x0, x0 + len, 20, h);
+  R(p, x0 + len, 17, x0 + len + 3, 30, (x, y) => (x === Math.round(x0 + len) ? 0 : 2)); R(p, x0 + len - 2, 28, x0 + len + 3, 30, 1); // 後掛鉤（直角支架）
+  if (L >= 3) { bar(p, x0, x0 + len, 26, 4); R(p, x0 - 3, 19, x0, 31, (x, y) => (y & 1 ? 0 : 1)); }
+  if (L >= 2) for (const f of [0.1, 0.9]) { bolt(p, x0 + len * f, 19, h + 2); if (L >= 3) bolt(p, x0 + len * f, 25, 6); }
+}
+function armorF(p: P, L: number) {
+  // 前保險桿彎管（3/4 視角的 U 形管＋固定腳）；越高階越大、越多圈
+  const s = 1 + L * 0.22, cx = 22, cy = 25;
+  const tube = (r: number, th: number) => disc(p, cx, cy, r * s, (dx, dy, d) => { if (dx > 1) return null; return d > 1 - th / (r * s) ? (dy < 0 ? (dx < -r * s * 0.5 ? 0 : 1) : 2) : null; });
+  tube(8, 3); if (L >= 2) tube(5, 2);
+  R(p, cx, cy - 8 * s, cx + 10 * s, cy - 8 * s + 3, (x, y) => chrome((y - (cy - 8 * s)) / 3, x, y));   // 上管往後延伸
+  R(p, cx, cy + 8 * s - 3, cx + 10 * s, cy + 8 * s, (x, y) => chrome((y - (cy + 8 * s - 3)) / 3, x, y)); // 下管
+  for (const fx of [cx + 4 * s, cx + 8 * s]) R(p, fx, cy + 8 * s, fx + 2, cy + 8 * s + 4, 2);              // 固定腳
+  if (L >= 1) R(p, cx - 2, cy - 2, cx + 6 * s, cy + 1, (x, y) => chrome((y - cy + 2) / 3, x, y));          // 中間橫撐
+  if (L >= 3) { bolt(p, cx + 3, cy - 9 * s, 4); bolt(p, cx + 3, cy + 6 * s, 4); }
 }
 const DRAW: Record<PartKind, (p: Pen, L: number) => void> = {
-  engine, gearbox, nitro, dry, wet, armorF: (p, L) => armorFR(p, L, false), armorR: (p, L) => armorFR(p, L, true), armorS,
+  engine, gearbox, nitro, dry, wet, armorF, armorR, armorS,
 };
 const cache = new Map<string, HTMLCanvasElement>();
 function toCanvas(g: Px) { const c = document.createElement('canvas'); c.width = c.height = ICON; const x = c.getContext('2d')!; for (let y = 0; y < ICON; y++) for (let i = 0; i < ICON; i++) { const v = g[y][i]; if (v !== null) { x.fillStyle = G[v]; x.fillRect(i, y, 1, 1); } } return c; }
 /** 零件圖示（透明底）。 */
 export function partIcon(kind: PartKind, level: number): HTMLCanvasElement {
   const k = `${kind}:${level}`; const hit = cache.get(k); if (hit) return hit;
-  const p = new Pen(); DRAW[kind](p, level); p.outline(); p.pips(level);
+  const p = new Pen(); DRAW[kind](p, level); p.outline();
   const c = toCanvas(p.g); cache.set(k, c); return c;
 }
 /** 塗裝圖示：上方一道油漆刷痕（實際花紋＋深淺），下方是這個塗裝的車（48px 車尾）。 */

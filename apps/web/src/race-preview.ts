@@ -1,5 +1,5 @@
 // 開發用：賽車美術設計稿與畫面模擬（不進正式頁面）。/race-preview.html?v=sheet|grid|pack|nitro|rain|night（v3：240×200）
-import { drawRace, carCanvas, G, W, H, text, type ViewCar } from './race-gfx';
+import { drawRace, carCanvas, G, W, H, text, setColorMode, type ViewCar } from './race-gfx';
 import { CAR_MODELS, LODS, LIVERIES, LIVERY_NAMES } from './race-cars';
 import { trackById, trackSegs, SEG_LEN, CARS } from '@chick/engine';
 
@@ -34,7 +34,7 @@ function sheet() {
   d.append(c); root.append(d);
 }
 function scene(kind: string) {
-  const track = trackById(kind === 'rain' ? 'tw4' : kind === 'night' ? 'tw3' : kind === 'fog' ? 'tw2' : kind === 'pack' ? 'us1' : 'tw1')!;
+  const track = trackById(kind === 'tg2' ? 'tw1' : kind === 'rain' ? 'tw4' : kind === 'night' ? 'tw3' : kind === 'fog' ? 'tw2' : kind === 'pack' ? 'us1' : 'tw1')!;
   const len = trackSegs(track.id).length * SEG_LEN;
   const mk = (i: number, z: number, xx: number, extra: Partial<ViewCar> = {}): ViewCar => ({ id: 'c' + i, name: 'c' + i, ai: true, car: 'ai', color: 0, z, x: xx, speed: 50, damage: 0, nitro: 3, nitroT: 0, fin: null, hit: 0, ...extra });
   const cars: ViewCar[] = []; let me: ViewCar;
@@ -46,7 +46,8 @@ function scene(kind: string) {
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.style.width = W * 3 + 'px'; cv.style.height = H * 3 + 'px';
   const x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
   let frame = 0;
-  const draw = () => { frame++; drawRace(x, { track, me, cars, tick: kind === 'grid' ? 30 : 400, countdown: kind === 'grid' ? 40 : 0, laps: track.laps, len, rank: kind === 'grid' ? 20 : kind === 'nitro' ? 9 : 12, frame, hud: true, flash: kind === 'nitro' ? 'NITRO!' : undefined }); };
+  const draw = () => { frame++; drawRace(x, { track, me, cars, tick: kind === 'grid' ? 30 : kind === 'tg2' ? 80 : 400, countdown: kind === 'grid' ? 40 : 0, laps: track.laps, len, rank: kind === 'grid' ? 20 : kind === 'nitro' ? 9 : 12, frame, hud: true, gears: 5, top: 84, flash: kind === 'nitro' ? 'NITRO!' : undefined }); };
+  if (new URLSearchParams(location.search).get('color')) setColorMode(true);
   draw(); draw();
   const d = document.createElement('div'); d.id = 'shots'; d.append(cv); root.append(d);
 }
@@ -98,9 +99,9 @@ async function icons() {
   const x = c.getContext('2d')!; x.imageSmoothingEnabled = false; x.fillStyle = G[0]; x.fillRect(0, 0, c.width, c.height);
   const { zh } = await import('./race-gfx');
   text(x, 'TG2 SHOP ICONS 48PX', 4, 4, 3, 1);
-  const tile = (img: HTMLCanvasElement, tx: number, ty: number, label: string, price: string) => { x.fillStyle = G[1]; x.fillRect(tx, ty, ICON + 4, ICON + 4); x.fillStyle = G[3]; x.strokeRect(tx + 0.5, ty + 0.5, ICON + 3, ICON + 3); x.drawImage(img, tx + 2, ty + 2); zh(x, label, tx + ICON + 6, ty + 8, 3); text(x, price, tx + ICON + 6, ty + 28, 3); };
-  PART_KINDS.forEach((k, r) => { const y = 20 + r * rh; zh(x, PARTS[k].label, 4, y + 12, 3); PARTS[k].tiers.forEach((t, i) => tile(partIcon(k, i), 50 + i * cw, y, i ? `${i}階` : '原廠', t.price ? String(t.price) : 'FREE')); });
-  PAINT_NAMES.forEach((n, i) => { const y = 20 + (PART_KINDS.length + (i >> 2)) * rh; if (i % 4 === 0) zh(x, '塗裝', 4, y + 12, 3); tile(paintIcon(i), 50 + (i % 4) * cw, y, n, 'FREE'); });
+  const tile = (img: HTMLCanvasElement, tx: number, ty: number, label: string, price: string) => { x.fillStyle = G[0]; x.fillRect(tx, ty, ICON + 4, ICON + 4); x.fillStyle = G[1]; x.fillRect(tx + 1, ty + 1, ICON + 2, Math.round((ICON + 2) * 0.55)); x.fillStyle = G[2]; x.fillRect(tx + 1, ty + 1 + Math.round((ICON + 2) * 0.55), ICON + 2, ICON + 2 - Math.round((ICON + 2) * 0.55)); x.drawImage(img, tx + 2, ty + 2); zh(x, label, tx + ICON + 6, ty + 8, 3); text(x, price, tx + ICON + 6, ty + 28, 3); };
+  PART_KINDS.forEach((k, r) => { const y = 20 + r * rh; zh(x, PARTS[k].label, 4, y + 12, 3); PARTS[k].tiers.forEach((t, i) => tile(partIcon(k, i), 50 + i * cw, y, i ? `${i}階` : '原廠', t.price ? String(t.price) : '')); });
+  PAINT_NAMES.forEach((n, i) => { const y = 20 + (PART_KINDS.length + (i >> 2)) * rh; if (i % 4 === 0) zh(x, '塗裝', 4, y + 12, 3); tile(paintIcon(i), 50 + (i % 4) * cw, y, n, ''); });
   const d = document.createElement('div'); d.id = 'sheet'; d.append(c); root.append(d);
 }
 if (v === 'icons') void icons(); else if (v === 'sheet') sheet(); else if (v === 'page') void page(); else scene(v);
