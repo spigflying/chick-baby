@@ -1,6 +1,6 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
 import { SEG_LEN, trackSegs, trackById, NITRO_PER_RACE, type Track } from '@chick/engine';
-import { carBodyH, carPixels, LODS, type CarLook } from './race-cars';
+import { carBodyH, carPixels, LODS, PLAYER_W, type CarLook } from './race-cars';
 
 /** v3：內部解析度加倍（240×200）；HUD 仍以 120×100 座標畫、放大 2 倍（像經典賽車的粗 HUD）。 */
 export const W = 240, H = 200, R = 2;
@@ -53,7 +53,7 @@ const PROPS: Record<string, string[]> = {
   tyres: ['.3333.', '312213', '.3333.', '312213', '.3333.', '312213', '.3333.'],
   bush: ['..333..', '.32223.', '3212223', '3222223', '.33333.'],
 };
-const SCENE_PROPS: Record<string, string[]> = { city: ['lamp', 'tower', 'sign', 'tyres', 'bush'], forest: ['pine', 'pine', 'rock', 'bush', 'tyres'], desert: ['cactus', 'rock', 'sign', 'tyres'], farm: ['fence', 'hay', 'pine', 'bush', 'tyres'], coast: ['palm', 'palm', 'sign', 'tyres', 'bush'], snow: ['snowpine', 'rock', 'snowpine', 'tyres'] };
+const SCENE_PROPS: Record<string, string[]> = { city: ['tyres', 'bush', 'pine', 'bush'], forest: ['pine', 'pine', 'rock', 'bush', 'tyres'], desert: ['cactus', 'rock', 'sign', 'tyres'], farm: ['fence', 'hay', 'pine', 'bush', 'tyres'], coast: ['palm', 'palm', 'sign', 'tyres', 'bush'], snow: ['snowpine', 'rock', 'snowpine', 'tyres'] };
 const propCache = new Map<string, HTMLCanvasElement>();
 function propCanvas(name: string, night: boolean) {
   const key = name + night + Q[1]; let c = propCache.get(key); if (c) return c;
@@ -144,7 +144,7 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean }
 export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number }
 
-const ROAD_W = 1.05, CAM_H = 6, DEPTH = 0.9, DRAW = 60, HORIZON = 104; // v9：地平線約 52%（TG2 版面），上方是 HUD 與天空
+const ROAD_W = 1.05, CAM_H = 6, DEPTH = 0.9, DRAW = 60, HORIZON = 120; // v9：地平線約 52%（TG2 版面），上方是 HUD 與天空
 /** 玩家深度的半路寬（px）。車寬一律 = CAR_W × 半路寬 × 2 再乘同一個常數，所以只跟深度有關。 */
 const playerPw = () => ROAD_W * (DEPTH * 6 / (PLAYER_DZ + 4)) * (W / 2);
 /** 畫一個畫面。 */
@@ -162,7 +162,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   else if (t.weather === 'clear' && !v.hud) { x.fillStyle = Q[1]; const sx0 = Math.floor(((192 - bend * 0.6) % 280 + 280) % 280) - 20; x.fillRect(sx0 + 2, 16, 8, 12); x.fillRect(sx0, 18, 12, 8); }
   role('city'); drawSkyline(x, t.scenery, bend, night ? NIGHT : Q);
   // 道路：由近到遠投影，再由遠到近畫
-  const pts: { y: number; x: number; w: number; scale: number; i: number; clip: number; wx: number; wy: number }[] = [];
+  const pts: { y: number; x: number; w: number; scale: number; i: number; clip: number; wx: number; wy: number; z?: number }[] = [];
   let dx = -segs[((base % n) + n) % n].curve * frac, cx = 0, maxy = H;
   for (let k = 0; k < DRAW; k++) {
     const i = base + k, s = segs[((i % n) + n) % n];
@@ -170,7 +170,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     const scale = DEPTH / zRel * 6;
     const py = HORIZON - (segY(i) - camY) * scale * (W / 2) / 6;
     const pxc = W / 2 + (cx * 0.06 - camX * ROAD_W) * scale * (W / 2) / 6 * 6 / 6;
-    pts.push({ y: py, x: pxc, w: ROAD_W * scale * (W / 2), scale, i, clip: maxy, wx: cx * 0.06, wy: segY(i) });
+    pts.push({ y: py, x: pxc, w: ROAD_W * scale * (W / 2), scale, i, clip: maxy, wx: cx * 0.06, wy: segY(i), z: zRel });
     if (py < maxy) maxy = py;
     cx += dx; dx += s.curve;
   }
@@ -183,7 +183,8 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     for (let yy = y1; yy < y2; yy++) {
       const f = (yy - b.y) / (a.y - b.y || 1);
       const rx = b.x + (a.x - b.x) * f, rw = b.w + (a.w - b.w) * f;
-      role('grass'); x.fillStyle = fog ? fogC : night ? (alt ? Q[2] : Q[3]) : (alt ? Q[1] : Q[0]); if (t.scenery === 'snow' && !night) x.fillStyle = alt ? Q[0] : Q[1]; if (t.scenery === 'desert' && !fog) x.fillStyle = alt ? Q[1] : Q[0];
+      // 草地色帶：逐行用透視還原真實距離（1/z 內插），每 3m 換色 → 遠處細、近處粗，平順交替
+      const zw = 1 / ((1 - f) / (b.z ?? 1) + f / (a.z ?? 1)), galt = Math.floor((camZ + zw) / (SEG_LEN * 0.6)) % 2 === 0; role('grass'); x.fillStyle = fog ? fogC : night ? (galt ? Q[2] : Q[3]) : (galt ? Q[1] : Q[0]); if (t.scenery === 'snow' && !night) x.fillStyle = galt ? Q[0] : Q[1]; if (t.scenery === 'desert' && !fog) x.fillStyle = galt ? Q[1] : Q[0];
       x.fillRect(0, yy, W, 1);
       role('rumble'); x.fillStyle = fog ? fogC : (alt ? Q[3] : Q[0]); const rum = Math.max(1, rw * 0.14);
       x.fillRect(Math.round(rx - rw - rum), yy, Math.ceil(rum), 1); x.fillRect(Math.round(rx + rw), yy, Math.ceil(rum), 1);
@@ -196,13 +197,13 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   // 路邊物與其他車（遠到近）
   const sprites: { k: number; draw: () => void }[] = [];
   const names = SCENE_PROPS[t.scenery];
-  for (let k = DRAW - 1; k > 1; k--) {
-    const p = pts[k]; if (!p.scale) continue;
+  for (let k = Math.min(DRAW - 1, 26); k > 1; k--) {
+    const p = pts[k]; if (!p.scale || p.w < 4) continue;
     const segIdx = ((p.i % n) + n) % n;
     if (segIdx % 4 === 0) for (const side of [-1, 1]) {
       const h = hash(segIdx * 2 + (side > 0 ? 1 : 0)); if (h < 0.25) continue;
       const name = names[Math.floor(h * 97) % names.length]; role('prop'); const img = propCanvas(name, night);
-      const wx = p.x + side * p.w * (1.9 + h * 0.6), sc = p.w / 14 * (name === 'tower' ? 2.2 : 1.6);
+      const wx = p.x + side * p.w * (1.45 + h * 0.6), sc = p.w / 14 * (name === 'tower' ? 2.2 : 1.6);
       const ww = img.width * sc, hh = img.height * sc;
       if (p.y > pts[k].clip + 1) continue;
       sprites.push({ k, draw: () => { x.drawImage(img, Math.round(wx - ww / 2), Math.round(p.y - hh), Math.max(1, Math.round(ww)), Math.max(1, Math.round(hh))); } });
@@ -222,14 +223,14 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     const isMe = !!v.me && c.id === v.me.id, p = place(c); if (!p) continue;
     if (!isMe && p.py > p.clip + 2) continue; // 被坡頂擋住
     if (!isMe && t.weather === 'fog' && p.k > 13) continue; // 霧裡看不到遠方的車
-    const target = 48 * p.pw / playerPw(), lod = isMe ? 0 : pickLod(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
+    const target = PLAYER_W * p.pw / playerPw(); if (!isMe && target < 5) continue; const lod = isMe ? -1 : pickLod(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
     const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 60 && v.frame % 20 < 2), frame: v.frame }, lod);
     const bh = (img as any).bodyH as number;
     const bob = isMe && c.speed > 5 && v.frame % 4 < 2 ? 1 : 0, shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
     // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
-    const scale = !isMe && target > 52 ? target / 48 : 1;
+    const scale = !isMe && target > 50 ? target / 48 : 1;
     const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
-    const sx = Math.round(p.pxc + c.x * p.pw - dw / 2) + shake, sy = Math.round(p.py - bh * scale) - bob;
+    const sx = Math.round(p.pxc + c.x * p.pw - dw / 2) + shake, sy = (isMe ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.round(p.py - bh * scale)) - bob;
     sprites.push({ k: p.k + (isMe ? -0.5 : 0), draw: () => {
       x.drawImage(img, sx, sy, dw, dh);
       if (isMe && c.damage > 50) for (let i = 0; i < 3; i++) { x.fillStyle = Q[i % 2 ? 1 : 2]; x.fillRect(sx + 6 + ((v.frame * 3 + i * 7) % 12), sy - 3 - ((v.frame + i * 3) % 6), 2, 2); }
@@ -255,9 +256,9 @@ function drawSkyline(x: CanvasRenderingContext2D, scene: string, bend: number, P
     else if (scene === 'coast') h = wx < 40 ? 2 : 4 + Math.round(5 * Math.abs(Math.sin(wx / 13)));
     else if (scene === 'snow') h = 6 + Math.round(9 * Math.abs(Math.sin(wx / 15)) - (wx % 30 < 15 ? (wx % 15) / 3 : 0));
     else h = 4 + Math.round(5 * Math.abs(Math.sin(wx / 11)) + 3 * Math.abs(Math.sin(wx / 4.3)));
-    x.fillStyle = P[2]; x.fillRect(px, HORIZON - h * R, 1, h * R + 1);
-    if (scene === 'snow') { x.fillStyle = Q[0]; x.fillRect(px, HORIZON - h * R, 1, 3); }
-    if (scene === 'city' && (wx * 7 + h) % 5 === 0 && h > 8) { x.fillStyle = P[0] === Q[0] ? Q[1] : Q[1]; x.fillRect(px, HORIZON - h * R + 5, 1, 2); }
+    const hh = Math.min(10, Math.round(h * 0.6)); x.fillStyle = P[2]; x.fillRect(px, HORIZON - 4 - hh, 1, hh + 5); // v10：天際線矮一點、貼近地平線
+    if (scene === 'snow') { x.fillStyle = Q[0]; x.fillRect(px, HORIZON - 4 - Math.min(10, Math.round(h * 0.6)), 1, 2); }
+    if (scene === 'city' && (wx * 7 + h) % 5 === 0 && h > 8) { x.fillStyle = P[0] === Q[0] ? Q[1] : Q[1]; x.fillRect(px, HORIZON - 2 - Math.min(10, Math.round(h * 0.6)), 1, 1); }
   }
   if (scene === 'city' || scene === 'coast') { // 海灣：天際線前一條水面＋反光
     const Wp = PAL?.water ?? P; x.fillStyle = Wp === P ? P[1] : Wp[1]; x.fillRect(0, HORIZON - 5, W, 5);
@@ -294,14 +295,22 @@ export function drawMinimap(x: CanvasRenderingContext2D, v: View, mx: number, my
   const at = (z: number) => m.pts[((Math.floor(((z % v.len) + v.len) % v.len / SEG_LEN)) % n + n) % n];
   const dot = (p: [number, number], c: number) => { x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 2, my + p[1] - 2, 5, 5); x.fillStyle = Q[c]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 3, 3); };
   if (!v.hud) { for (const c of v.cars) { if (v.me && c.id === v.me.id) continue; const p = at(c.z); x.fillStyle = Q[1]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 2, 2); } }
+  // 標籤放在點的外側（離地圖中心遠的那邊），1ST 在上、1P 在下，避免互相重疊
+  const lab = (t: string, p: [number, number], vy: number, col: number) => { const left = p[0] < bw / 2, tx = left ? mx + p[0] - 4 - textW(t) : mx + p[0] + 5; otext(x, t, Math.max(W - bw - 30, Math.min(W - 2 - textW(t), tx)), my + p[1] + (vy < 0 ? -9 : 3), col); };
   const leader = [...v.cars].sort((a, b) => b.z - a.z)[0];
-  if (leader && (!v.me || leader.id !== v.me.id)) { const p = at(leader.z); dot(p, 2); if (v.hud) otext(x, '1ST', mx + p[0] - 22, my + p[1] - 3, 0); }
-  if (v.me) { const p = at(v.me.z); dot(p, v.frame % 10 < 6 ? 1 : 0); if (v.hud) otext(x, '1P', mx + p[0] + 5, my + p[1] + 1, 1); }
+  if (leader && (!v.me || leader.id !== v.me.id)) { const p = at(leader.z); dot(p, 2); if (v.hud) lab('1ST', p, -1, 0); }
+  if (v.me) { const p = at(v.me.z); dot(p, v.frame % 10 < 6 ? 1 : 0); if (v.hud) lab('1P', p, 1, 1); }
 }
 /** 外框字：先畫 8 方向最暗色，再填色（HUD 疊在天空上也看得清楚） */
 function otext(x: CanvasRenderingContext2D, s: string, px: number, py: number, col: number, scale = 1) {
-  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [1, -1], [-1, 1]]) text(x, s, px + dx, py + dy, 3, scale);
-  text(x, s, px + scale, py + scale, 3, scale); text(x, s, px, py, col, scale);
+  // 乾淨的粗體像素字：字形遮罩（大字每筆加粗 1px）→ 外圍一圈 1px 最暗色 → 實心填色
+  const bold = scale >= 2, cw = textW(s, scale) + 4, ch = 7 * scale + 3, m = new Uint8Array(cw * ch);
+  [...s.toUpperCase()].forEach((c, k) => { const f = FONT[c] ?? FONT[' ']; for (let i = 0; i < 35; i++) if (f[i] === '1') for (let a = 0; a < scale + (bold ? 1 : 0); a++) for (let b = 0; b < scale; b++) { const X = 1 + (k * 6 + (i % 5)) * scale + a, Y = 1 + Math.floor(i / 5) * scale + b; if (X < cw && Y < ch) m[Y * cw + X] = 1; } });
+  // 綠色模式天空是最亮色：字用最暗色實心＋中淺色 1px 外框；全彩模式用亮字＋黑框（像 TG2）
+  const fill = PAL ? Q[col] : Q[col === 0 ? 3 : 2], edge = PAL ? Q[3] : Q[1];
+  x.fillStyle = edge;
+  for (let y = 0; y < ch; y++) for (let i = 0; i < cw; i++) if (!m[y * cw + i] && ((i > 0 && m[y * cw + i - 1]) || m[y * cw + i + 1] || (y > 0 && m[(y - 1) * cw + i]) || m[(y + 1) * cw + i])) x.fillRect(px - 1 + i, py - 1 + y, 1, 1);
+  x.fillStyle = fill; for (let y = 0; y < ch; y++) for (let i = 0; i < cw; i++) if (m[y * cw + i]) x.fillRect(px - 1 + i, py - 1 + y, 1, 1);
 }
 const SUF = (n: number) => (n % 100 >= 11 && n % 100 <= 13) ? 'TH' : ['TH', 'ST', 'ND', 'RD'][n % 10] ?? 'TH';
 /** v9 HUD（TG2 版面）：左上 轉速弧＋大速度、氮氣列、AUTO＋檔位、車體損傷圖、完美度 E…F；右上 計時、地圖、LAP、名次。 */
@@ -317,8 +326,8 @@ function drawHud(x: CanvasRenderingContext2D, v: View) {
     const red = i >= SEG - 4; role(red ? 'tachR' : i >= SEG - 8 ? 'tachY' : 'tachG'); if (!PAL) Q = G;
     for (let r = 0; r < 7; r++) for (let a = a0; a <= a1; a += 0.004) {
       const px = Math.round(cxA + Math.cos(a) * (rx - r)), py = Math.round(cyA + Math.sin(a) * (ry - r * 0.9)); if (py < 2) continue;
-      x.fillStyle = Q[i < lit ? (r === 0 || r === 6 ? 3 : r < 3 ? 0 : 1) : (r === 0 || r === 6 ? 3 : 2)]; x.fillRect(px, py, 1, 1);
-      if (i < lit && red && v.frame % 4 < 2 && r > 2 && r < 5) { x.fillStyle = Q[0]; x.fillRect(px, py, 1, 1); }
+      x.fillStyle = PAL ? Q[i < lit ? (r === 0 || r === 6 ? 3 : r < 3 ? 0 : 1) : (r === 0 || r === 6 ? 3 : 2)] : Q[i < lit ? (r === 0 || r === 6 ? 3 : r < 3 ? 2 : 3) : (r === 0 || r === 6 ? 2 : 1)]; x.fillRect(px, py, 1, 1);
+      if (i < lit && red && v.frame % 4 < 2 && r > 2 && r < 5) { x.fillStyle = Q[PAL ? 0 : 1]; x.fillRect(px, py, 1, 1); }
     }
   }
   role('hud');
@@ -358,11 +367,11 @@ function drawHud(x: CanvasRenderingContext2D, v: View) {
   // 右上：計時 0'28"98
   const ms = Math.max(0, v.tick - 60) * 50, ts = `${Math.floor(ms / 60000)}'${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}"${String(Math.floor(ms / 10) % 100).padStart(2, '0')}`;
   otext(x, ts, W - 6 - textW(ts, 2), 5, 0, 2);
-  drawMinimap(x, v, W - 72, 21, 66, 46);
+  drawMinimap(x, v, W - 70, 24, 58, 40);
   role('hud');
   const lap = Math.min(v.laps, Math.floor(Math.max(0, me.z) / v.len) + 1);
-  otext(x, 'LAP', W - 84, 75, 0); otext(x, `${lap}/${v.laps}`, W - 62, 70, 0, 2);
-  const rk = String(v.rank); otext(x, rk, W - 52 - textW(rk, 3) / 2, 82, 0, 3); otext(x, SUF(v.rank), W - 50 + textW(rk, 3) / 2, 82, 0);
+  otext(x, 'LAP', W - 86, 76, 0); otext(x, `${lap}/${v.laps}`, W - 62, 72, 0, 2);
+  const rk = String(v.rank), rw = textW(rk, 3) + 3 + textW(SUF(v.rank)); otext(x, rk, W - 8 - rw, 93, 0, 3); otext(x, SUF(v.rank), W - 8 - textW(SUF(v.rank)), 93, 0);
   // 倒數／訊息
   if (v.countdown > 0) { const s = String(Math.ceil(v.countdown / 20)); otext(x, s, W / 2 - 15, 40, 0, 6); }
   else if (v.tick - 60 < 20 && v.tick >= 60) otext(x, 'GO!', W / 2 - 34, 46, 0, 4);

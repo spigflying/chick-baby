@@ -5,6 +5,9 @@
  */
 export const LODS = [48, 32, 20, 12, 8] as const;
 export const DESIGN_W = 48, DESIGN_H = 30;
+/** 玩家車專用尺寸（lod = -1）：約畫面 1/4 寬，跟 TG2 比例接近；在這個寬度直接點陣化，不放大。 */
+export const PLAYER_W = 62;
+const lodW = (lod: number) => lod < 0 ? PLAYER_W : LODS[lod];
 type C = 'b' | 's' | 'h' | 'g' | 'r' | 'l' | 'L' | 'd' | 'm' | 'a' | 'k';
 // b 車身 s 車身陰影 h 車身亮面 g 玻璃 r 玻璃反光 l 尾燈 L 尾燈中心 d 最暗 m 中暗 a 配色 k 強制透明
 type Op =
@@ -204,7 +207,7 @@ export function carPixels(model: string, livery: number, lod: number, look: CarL
   if (model === 'ai') livery = 0;
   const key = `${model}:${livery}:${lod}:${+!!look.brake}:${+!!look.nitro}:${+!!look.hit}:${(look.frame ?? 0) & 1}`;
   const hit = cache.get(key); if (hit) return hit.map((r) => r.slice());
-  const W = LODS[lod], k = (W - 2) / DESIGN_W, H = Math.round(DESIGN_H * k) + 2;
+  const W = lodW(lod), k = (W - 2) / DESIGN_W, H = Math.round(DESIGN_H * k) + 2;
   const lv = PAINT_LIVERIES[livery % PAINT_LIVERIES.length];
   const [body, accent] = model === 'ai' ? [2, 2] : [lv.body, lv.accent];
   const pat: Pattern = model === 'ai' ? 'solid' : lv.pat;
@@ -234,7 +237,7 @@ export function carPixels(model: string, livery: number, lod: number, look: CarL
   const out = g.map((r) => r.slice());
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (g[y][x] === null && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => g[y + dy]?.[x + dx] != null)) out[y][x] = 3;
   if (look.nitro && lod <= 2) { // 排氣火焰（往下噴、閃動）
-    const len = Math.round((lod === 0 ? 14 : lod === 1 ? 9 : 5) + ((look.frame ?? 0) & 1) * k * 3), fw = Math.max(1, Math.round(4 * k));
+    const len = Math.round((lod < 0 ? 18 : lod === 0 ? 14 : lod === 1 ? 9 : 5) + ((look.frame ?? 0) & 1) * k * 3), fw = Math.max(1, Math.round(4 * k));
     const ex: Record<string, number[]> = { falcon: [24], f1: [24], rhino: [11, 37], muscle: [9, 39], rally: [35], drift: [36], lmp: [20, 28] };
     const xs = (ex[model] ?? [21, 27]).map((e) => X(e) - (fw >> 1));
     const top = Y(27);
@@ -244,4 +247,4 @@ export function carPixels(model: string, livery: number, lod: number, look: CarL
   cache.set(key, out); return out.map((r) => r.slice());
 }
 /** 車身高度（不含火焰），用來對齊地面 */
-export const carBodyH = (lod: number) => Math.round(DESIGN_H * (LODS[lod] - 2) / DESIGN_W) + 2;
+export const carBodyH = (lod: number) => Math.round(DESIGN_H * (lodW(lod) - 2) / DESIGN_W) + 2;
