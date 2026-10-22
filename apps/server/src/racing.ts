@@ -164,7 +164,7 @@ export function onRaceBus(m: any) {
     return;
   }
   if (!['rrace.invite', 'rrace.reply', 'rrace.cancel', 'rrace.leave'].includes(m.t) || !m.home || !isAuthority(m.home)) return;
-  if (m.t === 'rrace.invite') void invite(m.home, m.user, m.name);
+  if (m.t === 'rrace.invite') void invite(m.home, m.user, m.name).catch((err) => console.error('race invite failed', err));
   else if (m.t === 'rrace.reply') reply(m.home, m.user, String(m.invite), !!m.accept);
   else if (m.t === 'rrace.cancel') { const lb = lobbies.get(m.home); if (lb && lb.invite.from === m.user) cancelLobby(lb, 'CANCELLED'); }
   else if (m.t === 'rrace.leave') leaveLobby(m.home, m.user);
@@ -190,7 +190,10 @@ async function invite(home: string, user: string, name?: string, now = Date.now(
   if (byUser.has(user) || deps!.userBusy?.(home, user)) return notice(home, user, 'ALREADY_IN_MATCH');
   starting.add(home);
   let track: string;
-  try { const p = await getProfile(deps!.db, user); track = cupTrack(p.cup)?.id ?? TRACKS[0].id; } finally { starting.delete(home); }
+  // 讀檔失敗（資料庫出錯）要在這裡接住：invite 是 void 呼叫，沒接住的 rejection 會讓整個程序結束
+  try { const p = await getProfile(deps!.db, user); track = cupTrack(p.cup)?.id ?? TRACKS[0].id; }
+  catch (err) { console.error('race invite failed', err); return notice(home, user, 'INTERNAL'); }
+  finally { starting.delete(home); }
   const others = users.filter((u) => u.id !== user && !byUser.has(u.id) && !deps!.userBusy?.(home, u.id)).map((u) => u.id).slice(0, MAX_HUMANS - 1);
   if (!others.length) return void start(home, user, [user], track, null);
   const inv = createInvite(randomUUID(), user, others, now, RACE_INVITE_MS);
@@ -346,6 +349,7 @@ async function finish(r: Room) {
   const db = deps.db;
   outRace(r, snap(r));
   const st = r.state, rank = raceRanking(st), season = seasonOf(Date.now());
+  const humans = r.seats.filter((x) => !x.void).length; // 作廢的座位（沒連上）不算這場的真人
   const results: any[] = [];
   for (const s of r.seats) {
     if (s.void) continue; // 一次都沒連上這場（race.started 沒送到）：不算這場、不動錦標賽
@@ -360,7 +364,7 @@ async function finish(r: Room) {
         const cupR = settleCup(p.cup, p.unlocked, r.track, ranking);
         if (prize > 0) await changeBalance(t, s.userId, prize, 'race_prize', { type: 'race', id: r.id });
         await t.updateTable('race_profiles').set({ unlocked: cupR.unlocked, cup: JSON.stringify(cupR.cup), points: p.points + pts, races: p.races + 1, wins: p.wins + (pos === 1 ? 1 : 0), updated_at: new Date() }).where('user_id', '=', s.userId).execute();
-        await t.insertInto('race_results').values({ race_id: r.id, season, track: r.track, user_id: s.userId, rank: pos, time_ms: time, prize, points: pts, condition: condition(car), humans: r.seats.length, private: !!r.home }).execute();
+        await t.insertInto('race_results').values({ race_id: r.id, season, track: r.track, user_id: s.userId, rank: pos, time_ms: time, prize, points: pts, condition: condition(car), humans, private: !!r.home }).execute();
         // 比賽之間只修好撞壞的部分：完美度不存檔，下一場回到 100%
         results.push({ user_id: s.userId, rank: pos, prize, points: pts, time_ms: time, condition: condition(car), hits: car.hits, qualified: cupR.qualified, cup_counted: cupR.counted, country_done: cupR.countryDone, champion: cupR.champion, unlocked: cupR.unlocked, cup: cupR.cup, standings: cupR.standings.slice(0, 10) });
       });
