@@ -149,9 +149,11 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       showResults(m); void load();
     }
   });
-  const stName = (k: string) => k === ME ? '你' : k.startsWith('user:') ? '其他玩家' : k;
+  let knownNames = new Map<string, string>(); // 這場比賽裡其他真人的名字（積分榜 user:id → 名字）
+  const stName = (k: string) => k === ME ? '你' : k.startsWith('user:') ? knownNames.get(k.slice(5)) ?? '其他玩家' : k;
   function standingsHtml(st: [string, number][]) { return `<ol class="results">${st.slice(0, 10).map(([k, p]) => `<li class="${k === ME ? 'me' : ''}"><span>${esc(stName(k))}</span><span>${p} 分</span></li>`).join('')}</ol>`; }
   function showResults(m: any) {
+    for (const c of m.ranking ?? []) if (!c.ai) knownNames.set(c.id, c.name);
     const e = m.me;
     body.innerHTML = `<h3>${esc(trackById(m.track)!.name)} 結果</h3><ol class="results">${m.ranking.map((c: any) => `<li class="${c.id === me.user.id ? 'me' : ''}"><span>${c.rank}. ${esc(c.name)}${c.ai ? ' <span class="muted">電腦</span>' : ''}</span><span>${fmtMs(c.time_ms)}</span></li>`).join('')}</ol>
       ${e ? `<p>獎金 <b>${money(e.prize)}</b>　積分 +${e.points}　完美度 <b>${e.condition}%</b>（撞傷下一場前自動修好）</p>
