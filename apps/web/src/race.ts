@@ -1,6 +1,7 @@
 /** 賽車模式頁面：錦標賽選單、車庫、比賽（WS 即時多人，伺服器權威）、結果。 */
 import { tabNav } from './race-nav';
 import { raceOrder, kmhShown } from './race-gfx';
+import { fitScale } from './race-fit';
 import { api, errText } from './api';
 import type { Live } from './ws';
 import { createRace, stepRace, trackSegs, SEG_LEN, raceRanking, trackById, CARS, PARTS, PART_KINDS, TRACKS, COUNTRIES, carStats, fillField, cupTrack, prizeFor, PRIZES, POINTS, ME, PAINT_NAMES, MAX_OUT_COST, PRICE_DIVISOR, QUALIFY_RANK, RACES_PER_COUNTRY, RACE_SLOTS, NITRO_PER_RACE, type RaceState, type PartKind } from '@chick/engine';
@@ -52,6 +53,9 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       <div class="tabs" id="rtabs"><button data-t="cup" class="on">錦標賽</button><button data-t="garage">車庫</button><button data-t="board">排行榜</button></div>
       <div id="rbody"></div></div></main>`;
   const cv = root.querySelector('#rc') as HTMLCanvasElement, x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
+  // v24：整數倍縮放（裝置像素），置中；k<2 時維持填滿寬度
+  const fit = () => { const box = cv.parentElement!, f = fitScale(box.clientWidth, window.devicePixelRatio || 1); cv.style.width = f.k ? `${f.cssW}px` : ''; cv.style.margin = f.k ? '0 auto' : ''; };
+  const ro = new ResizeObserver(fit); ro.observe(cv.parentElement!); fit();
   const body = root.querySelector('#rbody') as HTMLElement, msg = root.querySelector('#rmsg') as HTMLElement;
   let prof: any = null, cat: any = null, tab = 'cup', sel = 'tw1', coins = 0;
   const shop = newShop();
@@ -290,5 +294,5 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   setAttract(); loop(); void load();
   const pend = (window as any).__pendingRace; if (pend) { (window as any).__pendingRace = null; onStarted(pend); } // 在家裡接受邀請後被帶過來
   else { const sv = savedRace(); if (sv) { resuming = sv; mode = 'lobby'; setMatch(true); msg.textContent = '接回剛才的比賽…'; tryResume(); renderPanel(); } } // 比賽中重新整理頁面
-  return () => { dead = true; cancelAnimationFrame(raf); clearInterval(sendTimer); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); off?.(); if (mode === 'lobby' || mode === 'race') live?.send(leaveMsg()); stopResume(); saveRace(null); setMatch(false); };
+  return () => { ro.disconnect(); dead = true; cancelAnimationFrame(raf); clearInterval(sendTimer); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); off?.(); if (mode === 'lobby' || mode === 'race') live?.send(leaveMsg()); stopResume(); saveRace(null); setMatch(false); };
 }

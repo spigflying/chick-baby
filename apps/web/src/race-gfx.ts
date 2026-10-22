@@ -311,14 +311,14 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   for (let k = DRAW - 1; k > 0; k--) {
     const a = pts[k - 1], b = pts[k]; if (b.scale === 0 || a.scale === 0) continue;
     if (b.y >= a.y) continue; // 被坡擋住
-    const alt = Math.floor(b.i / 2) % 2 === 0;
+    const alt = Math.floor(b.i / 5) % 2 === 0; // v24：路邊紅白／車道虛線每 100m 換一次（原 40m：高速時 2–3 幀就閃一次）
     const y1 = Math.max(0, Math.round(b.y)), y2 = Math.min(H, Math.round(a.y));
     const fog = (night && k > 18) || (t.weather === 'fog' && k > 11), fogC = night ? Q[3] : Q[1];
     for (let yy = y1; yy < y2; yy++) {
       const f = (yy - b.y) / (a.y - b.y || 1);
       const rx = b.x + (a.x - b.x) * f, rw = b.w + (a.w - b.w) * f;
       // 草地色帶：逐行用透視還原真實距離（1/z 內插），每 3m 換色 → 遠處細、近處粗，平順交替
-      const zw = 1 / ((1 - f) / (b.z ?? 1) + f / (a.z ?? 1)), galt = Math.floor((camZ + zw) / (SEG_LEN * 0.6)) % 2 === 0; role('grass'); x.fillStyle = fog ? fogC : night ? (galt ? Q[2] : Q[3]) : (galt ? Q[1] : Q[0]); if (t.scenery === 'snow' && !night) x.fillStyle = galt ? Q[0] : Q[1]; if (t.scenery === 'desert' && !fog) x.fillStyle = galt ? Q[1] : Q[0];
+      const zw = 1 / ((1 - f) / (b.z ?? 1) + f / (a.z ?? 1)), galt = Math.floor((camZ + zw) / (SEG_LEN * 1.8)) % 2 === 0; /* v24：草地色帶 36m（原 12m；全滿＋氮氣 489 m/s 時仍 ≥4.4 幀才換色） */ role('grass'); x.fillStyle = fog ? fogC : night ? (galt ? Q[2] : Q[3]) : (galt ? Q[1] : Q[0]); if (t.scenery === 'snow' && !night) x.fillStyle = galt ? Q[0] : Q[1]; if (t.scenery === 'desert' && !fog) x.fillStyle = galt ? Q[1] : Q[0];
       x.fillRect(0, yy, W, 1);
       role('rumble'); x.fillStyle = fog ? fogC : (alt ? Q[3] : Q[0]); const rum = Math.max(1, rw * 0.14);
       x.fillRect(Math.round(rx - rw - rum), yy, Math.ceil(rum), 1); x.fillRect(Math.round(rx + rw), yy, Math.ceil(rum), 1);
@@ -376,7 +376,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     const target = PLAYER_W * p.lat / gw; /* v14：車寬跟畫在那一列的路寬成正比 */ if (!isMe && target < 5) continue; const lod = isMe ? -1 : lodFor(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
     const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 60 && v.frame % 20 < 2), frame: v.frame }, lod);
     const bh = (img as any).bodyH as number;
-    const bob = isMe && c.speed > 5 && v.frame % 4 < 2 ? 1 : 0, shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
+    const bob = isMe && c.speed > 5 && c.speed < 60 && Math.floor(now / 160) % 2 ? 1 : 0, /* v24：只在低速輕輕晃（依毫秒），高速不晃 */ shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
     // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
     // v14：AI 與玩家同比例 —— 挑「不小於目標寬度」的 LOD 再縮到剛好目標寬（以前挑較小的 LOD 不放大，遠一點就小一截）
     const scale = isMe ? 1 : target / LODS[lod];
