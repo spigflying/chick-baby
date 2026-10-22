@@ -18,6 +18,7 @@ import type { Bus } from './bus';
 import type { PresenceStore } from './presence';
 import { env } from './env';
 import { petLook, spriteKey } from './pets';
+import { ROOM_PRIZES, startRoomStairs, STAIRS_ROOM_MAX, STAIRS_ROOM_MIN } from './mstairs';
 import { newRoom, roomConfig, roomDrop, roomJoin, roomLeave, roomReady, roomTick, roomView, type RaceRoom } from './race-rooms';
 
 export const CLOSING_GUARD_MS = 8 * 60_000; // 關門前 8 分鐘不開新比賽（最長比賽＋等待時間）
@@ -108,8 +109,8 @@ interface Room { id: string; home: string | null; host: string; inst: string; tr
   remote: boolean;
   /** 結算後的 rrace.ended（剛結束時重連的人還拿得到結果） */
   final: Record<string, unknown> | null;
-  /** v27 從賽車房開的：圈數跟賽道預設不同＝友誼賽（不給獎金、不算錦標賽、不記最快時間） */
-  friendly?: boolean }
+  /** v27 從賽車房開的：獎金一律改成真人前三名 ◎150／100／50；fullLaps＝圈數跟賽道預設相同（才算積分、錦標賽、最快時間） */
+  room?: { fullLaps: boolean } }
 interface Lobby { home: string; invite: Invite; track: string; createdAt: number }
 interface Deps {
   db: Db; bus: Bus; presence: PresenceStore; instance: () => string;
@@ -279,7 +280,7 @@ async function start(home: string | null, host: string, users: string[], track: 
     const seed = randomSeed();
     const state = createRace(seed, track, fillField(seats.map((s) => ({ id: s.userId, name: s.name, car: s.car, parts: s.parts, color: s.paint }))), 1, room?.laps);
     state.maxTicks = capRaceTicks(state.maxTicks, state.countdown, clock().status(Date.now()).closes_at, Date.now());
-    const r: Room = { id: randomUUID(), home, host, inst: deps!.instance(), track, seats, state, startAt: Date.now(), ended: false, seq: new Map(), remote: !!room, final: null, friendly: !!room && room.laps !== trackById(track)!.laps };
+    const r: Room = { id: randomUUID(), home, host, inst: deps!.instance(), track, seats, state, startAt: Date.now(), ended: false, seq: new Map(), remote: !!room, final: null, room: room ? { fullLaps: room.laps === trackById(track)!.laps } : undefined };
     if (cancelled?.()) return null; // 準備中按了離開：從這裡到送出 race.started 都是同步的，不會漏
     rooms.set(r.id, r); for (const s of seats) byUser.set(s.userId, r.id);
     outRace(r, startedMsg(r));
@@ -371,22 +372,25 @@ async function finish(r: Room) {
   const db = deps.db;
   outRace(r, snap(r));
   const st = r.state, rank = raceRanking(st), season = seasonOf(Date.now());
-  const humans = r.seats.filter((x) => !x.void).length; // 作廢的座位（沒連上）不算這場的真人
+  const humans = r.seats.filter((x) => !x.void).length;
+  const humanRank = rank.filter((c) => !c.ai && c.finishedTick !== null && r.seats.some((x) => x.userId === c.id && !x.void)).map((c) => c.id); // 作廢的座位（沒連上）不算這場的真人
   const results: any[] = [];
   for (const s of r.seats) {
     if (s.void) continue; // 一次都沒連上這場（race.started 沒送到）：不算這場、不動錦標賽
     const car = st.cars.find((c) => c.id === s.userId)!; const pos = rank.indexOf(car) + 1;
-    const done = car.finishedTick !== null && !r.friendly, prize = done ? prizeFor(pos) : 0, pts = done ? pointsFor(pos) : 0, time = r.friendly ? null : raceTimeMs(st, car);
+    const finished = car.finishedTick !== null, counts = !r.room || r.room.fullLaps;
+    const humanPos = humanRank.indexOf(s.userId) + 1; // 房間獎金看「真人之間」的名次（完賽才有）
+    const prize = !finished ? 0 : r.room ? (ROOM_PRIZES[humanPos - 1] ?? 0) : prizeFor(pos), pts = finished && counts ? pointsFor(pos) : 0, time = counts ? raceTimeMs(st, car) : null;
     // 錦標賽積分榜：自己＝ME，電腦用名字，其他真人用 user:id
     const ranking = rank.map((c, i) => ({ key: c.id === s.userId ? ME : c.ai ? c.name : `user:${c.id}`, rank: c.finishedTick === null && c.id === s.userId ? RACE_SLOTS : i + 1 }));
     try {
       await tx(db, async (t) => {
         await lockWallets(t, [s.userId]);
         const p = await loadForUpdate(t, s.userId);
-        const cupR = r.friendly ? settleCup(p.cup, p.unlocked, '__friendly__', ranking) : settleCup(p.cup, p.unlocked, r.track, ranking);
+        const cupR = settleCup(p.cup, p.unlocked, r.room && !r.room.fullLaps ? '__custom_laps__' : r.track, ranking);
         if (prize > 0) await changeBalance(t, s.userId, prize, 'race_prize', { type: 'race', id: r.id });
         await t.updateTable('race_profiles').set({ unlocked: cupR.unlocked, cup: JSON.stringify(cupR.cup), points: p.points + pts, races: p.races + 1, wins: p.wins + (pos === 1 ? 1 : 0), updated_at: new Date() }).where('user_id', '=', s.userId).execute();
-        await t.insertInto('race_results').values({ race_id: r.id, season, track: r.track, user_id: s.userId, rank: pos, time_ms: time, prize, points: pts, condition: condition(car), humans, private: !!r.home || r.remote }).execute();
+        await t.insertInto('race_results').values({ race_id: r.id, season, track: r.track, user_id: s.userId, rank: pos, time_ms: time, prize, points: pts, condition: condition(car), humans, private: !!r.home || !!r.room }).execute();
         // 比賽之間只修好撞壞的部分：完美度不存檔，下一場回到 100%
         results.push({ user_id: s.userId, rank: pos, prize, points: pts, time_ms: time, condition: condition(car), hits: car.hits, qualified: cupR.qualified, cup_counted: cupR.counted, country_done: cupR.countryDone, champion: cupR.champion, unlocked: cupR.unlocked, cup: cupR.cup, standings: cupR.standings.slice(0, 10) });
       });
@@ -446,31 +450,38 @@ async function roomName(userId: string) {
 }
 const parseLaps = (v: unknown) => { const n = Math.floor(Number(v)); return Number.isFinite(n) && n >= 1 && n <= MAX_LAPS ? n : null; };
 /** 開房（在收到請求的執行個體上，這台就是這間房的負責者）。回傳房間 id。 */
-export async function createRoom(userId: string, trackIn: unknown, lapsIn: unknown, now = Date.now()): Promise<string> {
+export async function createRoom(userId: string, trackIn: unknown, lapsIn: unknown, now = Date.now(), game: 'race' | 'stairs' = 'race'): Promise<string> {
   if (!deps) fail('INTERNAL');
   const why = closingCode(now); if (why) fail(why);
   if (byUser.has(userId)) fail('ALREADY_IN_MATCH');
+  if (game === 'stairs') { // 下樓梯房：沒有賽道／圈數設定（局長與規則同一般多人下樓梯）
+    const r = newRoom(randomUUID(), deps!.instance(), { user: userId, name: await roomName(userId) }, '', 0, now, 'stairs', STAIRS_ROOM_MIN);
+    rrooms.set(r.id, r); pushRoom(r); await inviteFriends(r, userId); return r.id;
+  }
   const p = await getProfile(deps!.db, userId);
   const t = trackIn ? trackById(String(trackIn)) : cupTrack(p.cup) ?? TRACKS[0]; if (!t) fail('BAD_REQUEST');
   if (t!.countryIdx >= p.unlocked) fail('TRACK_LOCKED');
   const laps = lapsIn === undefined || lapsIn === null ? 3 : parseLaps(lapsIn); if (!laps) fail('BAD_REQUEST');
   const r = newRoom(randomUUID(), deps!.instance(), { user: userId, name: await roomName(userId) }, t!.id, laps!, now);
-  rrooms.set(r.id, r); pushRoom(r);
-  try { const to = await raceFriends(deps!.db, userId); if (to.length) outUsers({ t: 'rrace.roominvite', to, room: r.id, inst: r.inst, from: userId, from_name: r.members[0].name, track: r.track, laps: r.laps }); }
-  catch (err) { console.error('race room invite failed', err); }
+  rrooms.set(r.id, r); pushRoom(r); await inviteFriends(r, userId);
   return r.id;
+}
+async function inviteFriends(r: RaceRoom, userId: string) {
+  try { const to = await raceFriends(deps!.db, userId); if (to.length) outUsers({ t: 'rrace.roominvite', to, room: r.id, inst: r.inst, game: r.game, from: userId, from_name: r.members[0].name, track: r.track, laps: r.laps }); }
+  catch (err) { console.error('race room invite failed', err); }
 }
 function onRoomIntent(m: any) {
   const r = rrooms.get(String(m.room)); const now = Date.now();
   if (!r) { if (m.t === 'rrace.rjoin') roomNotice(m.user, 'ROOM_CLOSED'); if (m.t !== 'rrace.rdrop') outUsers({ t: 'rrace.roomgone', users: [m.user], room: String(m.room), code: 'ROOM_CLOSED' }); return; }
   if (m.t === 'rrace.rjoin') {
     if (byUser.has(m.user)) return roomNotice(m.user, 'ALREADY_IN_MATCH');
-    void roomName(m.user).then((name) => { const code = roomJoin(r, { user: m.user, name }, Date.now(), MAX_HUMANS); if (code) return roomNotice(m.user, code); pushRoom(r); }).catch((err) => console.error('race room join failed', err));
+    void roomName(m.user).then((name) => { const code = roomJoin(r, { user: m.user, name }, Date.now(), r.game === 'stairs' ? STAIRS_ROOM_MAX : MAX_HUMANS); if (code) return roomNotice(m.user, code); pushRoom(r); }).catch((err) => console.error('race room join failed', err));
     return;
   }
   if (m.t === 'rrace.rleave') { roomLeave(r, m.user, now); return pushRoom(r, [m.user]); }
   if (m.t === 'rrace.rdrop') { roomDrop(r, m.user, now); return pushRoom(r); }
   if (m.t === 'rrace.rconf') {
+    if (r.game !== 'race') return roomNotice(m.user, 'BAD_REQUEST');
     const t = m.track ? trackById(String(m.track)) : null; if (m.track && !t) return roomNotice(m.user, 'BAD_REQUEST');
     const laps = m.laps === undefined || m.laps === null ? null : parseLaps(m.laps); if (m.laps != null && !laps) return roomNotice(m.user, 'BAD_REQUEST');
     const code = roomConfig(r, m.user, t?.id ?? null, laps, now); if (code) return roomNotice(m.user, code); return pushRoom(r);
@@ -486,6 +497,14 @@ function stepRooms(now: number) {
       const users = r.members.map((m) => m.user).filter((u) => !byUser.has(u));
       const why = closingCode(now);
       if (why || !users.length) { r.closed = why ?? 'EMPTY'; pushRoom(r); continue; }
+      if (r.game === 'stairs') {
+        const names = new Map(r.members.map((m) => [m.user, m.name]));
+        void startRoomStairs(r.id, r.host, users, names).then((res) => {
+          for (const d of res.dropped) roomNotice(d.user, d.code);
+          outUsers({ t: 'rrace.roomgone', users: before, room: r.id, code: res.ok ? 'STARTED' : res.code ?? 'INTERNAL' });
+        }).catch((err) => { console.error('stairs room start failed', err); outUsers({ t: 'rrace.roomgone', users: before, room: r.id, code: 'INTERNAL' }); });
+        continue;
+      }
       outUsers({ t: 'rrace.roomgone', users: before, room: r.id, code: 'STARTED' });
       void start(null, users.includes(r.host) ? r.host : users[0], users, r.track, null, undefined, { laps: r.laps });
       continue;

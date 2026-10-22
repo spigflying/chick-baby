@@ -31,4 +31,8 @@ describe('race rooms (state machine)', () => {
     roomDrop(r, 'b', 300); roomTick(r, 300 + ROOM_DROP_MS + 1); expect(r.members.map((m) => m.user)).toEqual(['a']);
   });
   it('expires after 10 min idle', () => { const r = mk(); expect(roomTick(r, ROOM_IDLE_MS - 1)).toBeNull(); expect(r.closed).toBeNull(); roomTick(r, ROOM_IDLE_MS + 1); expect(r.closed).toBe('EXPIRED'); });
+  it('stairs room needs at least 2 ready members', () => {
+    const r = newRoom('s1', 'i1', A, '', 0, 0, 'stairs', 2); roomReady(r, 'a', true, 0); expect(r.countdownAt).toBeNull();
+    roomJoin(r, B, 1, 6); roomReady(r, 'b', true, 2); expect(r.countdownAt).toBe(2 + ROOM_COUNTDOWN_MS); expect(roomView(r, 2).game).toBe('stairs');
+  });
 });

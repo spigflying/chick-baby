@@ -1,3 +1,4 @@
+import { mountStairsRoom } from './stairs-room';
 import { trackById } from '@chick/engine';
 import { blip, presenceDiff } from './visitors';
 import './style.css';
@@ -272,9 +273,9 @@ function showRoomInvite(m: any) {
   if (live?.room || live?.inMatch) return;
   roomPop?.remove(); clearTimeout(roomPopT);
   const el = document.createElement('div'); el.className = 'room-pop';
-  el.innerHTML = `<div class="room-pop-txt"><b>「${escHtml(m.from_name)}」的賽車房</b><span>${escHtml(trackName(m.track))}・${Number(m.laps) || 3} 圈</span></div><button class="room-pop-go">加入</button><button class="room-pop-x" aria-label="關閉">✕</button>`;
+  el.innerHTML = `<div class="room-pop-txt">${m.game === 'stairs' ? `<b>「${escHtml(m.from_name)}」的下樓梯房</b><span>一起下樓梯・前三名 ◎150／100／50</span>` : `<b>「${escHtml(m.from_name)}」的賽車房</b><span>${escHtml(trackName(m.track))}・${Number(m.laps) || 3} 圈</span>`}</div><button class="room-pop-go">加入</button><button class="room-pop-x" aria-label="關閉">✕</button>`;
   const close = () => { el.remove(); if (roomPop === el) roomPop = null; clearTimeout(roomPopT); };
-  (el.querySelector('.room-pop-go') as HTMLElement).onclick = () => { if (!live?.send({ type: 'room.join', room: m.room, inst: m.inst })) { toast('連線中，請稍候'); return; } close(); if (location.pathname !== '/race') nav('/race'); };
+  (el.querySelector('.room-pop-go') as HTMLElement).onclick = () => { if (!live?.send({ type: 'room.join', room: m.room, inst: m.inst })) { toast('連線中，請稍候'); return; } close(); if (m.game !== 'stairs' && location.pathname !== '/race') nav('/race'); };
   (el.querySelector('.room-pop-x') as HTMLElement).onclick = close;
   document.body.append(el); roomPop = el; roomPopT = window.setTimeout(close, 60_000);
 }
@@ -283,6 +284,7 @@ const escHtml = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&'
 function startLive() {
   live?.stop();
   live = new Live();
+  mountStairsRoom(live, () => me?.user?.id ?? null, () => nav('/'), toast);
   live.onStatus = (s) => {
     if (s === 'unauthorized') { me = null; void route(); }
     else if (s === 'closed') void goSleep();

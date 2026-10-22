@@ -5,14 +5,15 @@
  */
 export const ROOM_IDLE_MS = 10 * 60_000, ROOM_DROP_MS = 30_000, ROOM_COUNTDOWN_MS = 3000;
 export interface RoomMember { user: string; name: string; ready: boolean; online: boolean; joinedAt: number; offAt: number | null }
-export interface RaceRoom { id: string; inst: string; host: string; track: string; laps: number; members: RoomMember[]; createdAt: number; touchedAt: number; countdownAt: number | null; closed: string | null }
+export type RoomGame = 'race' | 'stairs';
+export interface RaceRoom { id: string; inst: string; game: RoomGame; /** 開跑最少人數（賽車 1、下樓梯 2） */ min: number; host: string; track: string; laps: number; members: RoomMember[]; createdAt: number; touchedAt: number; countdownAt: number | null; closed: string | null }
 
-export function newRoom(id: string, inst: string, host: { user: string; name: string }, track: string, laps: number, now: number): RaceRoom {
-  return { id, inst, host: host.user, track, laps, members: [{ user: host.user, name: host.name, ready: false, online: true, joinedAt: now, offAt: null }], createdAt: now, touchedAt: now, countdownAt: null, closed: null };
+export function newRoom(id: string, inst: string, host: { user: string; name: string }, track: string, laps: number, now: number, game: RoomGame = 'race', min = 1): RaceRoom {
+  return { id, inst, game, min, host: host.user, track, laps, members: [{ user: host.user, name: host.name, ready: false, online: true, joinedAt: now, offAt: null }], createdAt: now, touchedAt: now, countdownAt: null, closed: null };
 }
 /** 全員準備且在線 → 開始倒數；否則取消 */
 function recount(r: RaceRoom, now: number) {
-  const go = r.members.length > 0 && r.members.every((m) => m.ready && m.online);
+  const go = r.members.length >= Math.max(1, r.min) && r.members.every((m) => m.ready && m.online);
   r.countdownAt = go ? (r.countdownAt ?? now + ROOM_COUNTDOWN_MS) : null;
 }
 const touch = (r: RaceRoom, now: number) => { r.touchedAt = now; };
@@ -60,6 +61,6 @@ export function roomTick(r: RaceRoom, now: number): 'start' | null {
 }
 /** 給客戶端的樣子 */
 export function roomView(r: RaceRoom, now: number) {
-  return { id: r.id, inst: r.inst, host: r.host, track: r.track, laps: r.laps, closed: r.closed, countdown_ms: r.countdownAt === null ? null : Math.max(0, r.countdownAt - now),
+  return { id: r.id, inst: r.inst, game: r.game, min: r.min, host: r.host, track: r.track, laps: r.laps, closed: r.closed, countdown_ms: r.countdownAt === null ? null : Math.max(0, r.countdownAt - now),
     expires_ms: Math.max(0, r.touchedAt + ROOM_IDLE_MS - now), members: r.members.map((m) => ({ user: m.user, name: m.name, ready: m.ready, online: m.online, host: m.user === r.host })) };
 }

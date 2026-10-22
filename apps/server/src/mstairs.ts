@@ -8,7 +8,7 @@ import type { Db } from './db';
 import type { Bus } from './bus';
 import type { PresenceStore, PresenceUser } from './presence';
 import { changeBalance, lockWallets, notify } from './core';
-import { insertEvents, lockPet, savePet, settle, spriteKey } from './pets';
+import { insertEvents, lockPet, petLook, savePet, settle, spriteKey } from './pets';
 import { randomSeed, stableHash } from './util';
 import { env } from './env';
 import { clock } from './hours';
@@ -22,7 +22,9 @@ const ACTIVE_WINDOW_MS = 61 * 60_000;
 
 interface PendingInput { tick: number; seq: number; left: boolean; right: boolean }
 interface Seat { userId: string; petId: string; name: string; sp: string; num: number; pending: PendingInput[]; lastSeq: number; lastProcessedSeq: number; late: number }
-export interface MMatch { id: string; home: string; host: string; state: StairsState; startAt: number; closingEnd: boolean; seats: Seat[]; ended: boolean }
+export interface MMatch { id: string; home: string; host: string; state: StairsState; startAt: number; closingEnd: boolean; seats: Seat[]; ended: boolean;
+  /** v27 下樓梯房開的局：home 是虛擬鍵 'room:<id>'，由開房的執行個體負責；獎勵改成前三名 150／100／50 */
+  room?: { inst: string } }
 interface Lobby { home: string; invite: Invite; deadlines: Map<string, number> }
 const lobbies = new Map<string, Lobby>();
 /** home → 進行中的多人局 */
@@ -42,14 +44,15 @@ export function initMStairs(d: Omit<Deps, 'instance'> & { instance?: () => strin
 const isAuthority = (home: string) => !!deps && deps.presence.instances(home)[0] === deps.instance();
 /** 送給這個家的所有執行個體（只有自己一個時直接本機處理）。 */
 function out(m: Record<string, unknown> & { home: string }) {
+  if (m.home.startsWith('room:')) { void deps!.bus.publish(m).catch(() => {}); return; } // v27 房間局：成員可能在任何執行個體 → 一律 NOTIFY（本機也從 LISTEN 收）
   const inst = deps!.presence.instances(m.home);
   if (deps!.local && inst.length === 1 && inst[0] === deps!.instance()) deps!.local(m);
   else void deps!.bus.publish(m).catch(() => {});
 }
 /** 送給負責這個家的執行個體（自己就是 → 直接處理）。 */
-export function toAuthority(m: Record<string, unknown> & { t: string; home: string }) {
+export function toAuthority(m: Record<string, unknown> & { t: string; home: string; inst?: string }) {
   if (!deps) return;
-  if (isAuthority(m.home)) onMStairsBus(m); else void deps.bus.publish(m).catch(() => {});
+  if (m.inst ? m.inst === deps.instance() : isAuthority(m.home)) onMStairsBus(m); else void deps.bus.publish(m).catch(() => {});
 }
 const notice = (home: string, user: string, code: string) => out({ t: 'mstairs.notice', home, user, code });
 const okPet = (p: PresenceUser['pet'] | undefined) => !!p && p.status === 'alive' && !p.sleeping;
@@ -72,7 +75,7 @@ function closingBlock(now: number): string | null {
 /** 每個執行個體都收到同一則 NOTIFY；只有負責的執行個體處理意圖。 */
 export function onMStairsBus(m: any) {
   if (!deps || !m?.home || typeof m.t !== 'string') return;
-  if (!['mstairs.invite', 'mstairs.reply', 'mstairs.cancel', 'mstairs.in', 'mstairs.leave'].includes(m.t) || !isAuthority(m.home)) return;
+  if (!['mstairs.invite', 'mstairs.reply', 'mstairs.cancel', 'mstairs.in', 'mstairs.leave'].includes(m.t) || !(m.inst ? m.inst === deps.instance() : isAuthority(m.home))) return;
   const deadline = Number.isFinite(m.deadline) ? Number(m.deadline) : Infinity;
   if (m.t === 'mstairs.invite') invite(m.home, m.user, deadline);
   else if (m.t === 'mstairs.reply') reply(m.home, m.user, String(m.invite), !!m.accept, deadline);
@@ -219,7 +222,7 @@ export function stepMStairs(now = Date.now()) {
   for (const lb of [...lobbies.values()]) { if (!isAuthority(lb.home)) onMStairsPresence(lb.home); else resolveLobby(lb, now); }
   for (const m of [...mmatches.values()]) {
     if (m.ended) continue;
-    if (!isAuthority(m.home)) { void abort(m); continue; }
+    if (m.room ? m.room.inst !== deps.instance() : !isAuthority(m.home)) { void abort(m); continue; }
     const target = currentTick(m, now);
     while (m.state.tick < target && !m.state.over) {
       const next = m.state.tick + 1;
@@ -256,7 +259,7 @@ export async function finish(m: MMatch, reason: 'over' | 'quit') {
         const row = await lockPet(tx, s.petId);
         const { state } = await settle(tx, row);
         let coins = 0;
-        if (state.status === 'alive') { applyStairsResult(state, r.floor, undefined, m.state.tick); coins = multiStairsCoins(n, r.rank); }
+        if (state.status === 'alive') { applyStairsResult(state, r.floor, undefined, m.state.tick); coins = m.room ? (ROOM_PRIZES[r.rank - 1] ?? 0) : multiStairsCoins(n, r.rank); }
         await savePet(tx, s.petId, state);
         if (coins > 0) await changeBalance(tx, s.userId, coins, 'stairs_match', { type: 'stair_match', id: m.id });
         await insertEvents(tx, s.petId, [{ type: 'stairs_match', actor: s.userId, payload: { match_id: m.id, floors: r.floor, rank: r.rank, players: n, coins, reason, cause: r.cause } }]);
@@ -292,4 +295,49 @@ export async function abortMStairs() {
   await Promise.all([...mmatches.values()].map((m) => abort(m)));
 }
 export const _lobbies = lobbies;
+/** v27 房間獎勵（賽車房、下樓梯房共用）：前三名 ◎150／100／50 */
+export const ROOM_PRIZES = [150, 100, 50];
+export const STAIRS_ROOM_MAX = STAIRS_MULTI.maxPlayers, STAIRS_ROOM_MIN = STAIRS_MULTI.minPlayers;
+/**
+ * v27 下樓梯房開局：沒有「家」與在場名單，名字／精靈直接查資料庫；虛擬 home 鍵 'room:<房間 id>'，
+ * 由呼叫的執行個體（開房的那台）負責模擬。檢查同一般多人局（寵物合格、沒有在別場），不到 2 隻就不開。
+ */
+export async function startRoomStairs(roomId: string, host: string, users: string[], names: Map<string, string>): Promise<{ ok: boolean; code?: string; dropped: { user: string; code: string }[] }> {
+  if (!deps) return { ok: false, code: 'INTERNAL', dropped: [] };
+  const { db } = deps, home = `room:${roomId}`;
+  const why = closingBlock(Date.now()); if (why) return { ok: false, code: why, dropped: [] };
+  const seed = randomSeed();
+  const hostHome = (await db.selectFrom('homes').select('id').where('owner_id', '=', host).executeTakeFirst())?.id ?? null;
+  const res = await db.transaction().execute(async (tx) => {
+    const rows = await tx.selectFrom('pets').select(['id', 'owner_id']).where('owner_id', 'in', users).where('status', 'in', ['egg', 'alive']).orderBy('id').execute();
+    const busy = new Set((await tx.selectFrom('stair_match_players').innerJoin('stair_matches', 'stair_matches.id', 'stair_match_players.match_id').select('stair_match_players.user_id')
+      .where('stair_match_players.user_id', 'in', users).where('stair_matches.status', '=', 'playing').where('stair_matches.started_at', '>', new Date(Date.now() - ACTIVE_WINDOW_MS)).execute()).map((r: any) => r.user_id));
+    const ok: { user: string; pet: string; speed: number; stamina: number; sp: string }[] = [], dropped: { user: string; code: string }[] = [];
+    for (const r of rows) {
+      if (busy.has(r.owner_id)) { dropped.push({ user: r.owner_id, code: 'ALREADY_IN_MATCH' }); continue; }
+      const row = await lockPet(tx, r.id); const { state } = await settle(tx, row); await savePet(tx, row.id, state);
+      const err = checkStairsStart(state);
+      if (err) dropped.push({ user: r.owner_id, code: err }); else ok.push({ user: r.owner_id, pet: row.id, speed: state.speed, stamina: state.stamina, sp: spriteKey({ species: (row as any).species_id, look: petLook(row) }) });
+    }
+    for (const u of users) if (!rows.some((r: any) => r.owner_id === u)) dropped.push({ user: u, code: 'NO_PET' });
+    if (ok.length < STAIRS_MULTI.minPlayers) return { ok: null, dropped };
+    const m = await tx.insertInto('stair_matches').values({ mode: 'multi', home_id: hostHome, host_user_id: host, status: 'playing', instance_id: deps!.instance(), seed, engine_version: ENGINE_VERSION, config: JSON.stringify(P), started_at: new Date() } as any)
+      .returning('id').executeTakeFirstOrThrow();
+    await tx.insertInto('stair_match_players').values(ok.map((o) => ({ match_id: m.id, user_id: o.user, pet_id: o.pet }))).execute();
+    return { ok, id: m.id as string, dropped };
+  });
+  if (!res.ok) return { ok: false, code: 'NOT_ENOUGH_PLAYERS', dropped: res.dropped };
+  const startAt = Date.now() + START_DELAY_MS, closesAt = clock().status(startAt).closes_at;
+  const endAt = closesAt === null ? Infinity : closesAt - STAIRS_CUTOFF_MS;
+  const ticks = Math.max(1, Math.min(P.matchMaxTicks, Math.floor((endAt - startAt) / TICK_MS)));
+  const mp = { ...P, matchMaxTicks: ticks };
+  await db.updateTable('stair_matches').set({ config: JSON.stringify(mp) }).where('id', '=', res.id!).execute();
+  const seats: Seat[] = res.ok.map((o, i) => ({ userId: o.user, petId: o.pet, name: names.get(o.user) ?? '?', sp: o.sp, num: i + 1, pending: [], lastSeq: 0, lastProcessedSeq: 0, late: 0 }));
+  const m: MMatch = { id: res.id!, home, host, state: createStairs(seed, res.ok.map((o) => ({ petId: o.pet, speed: o.speed, stamina: o.stamina })), mp), startAt, closingEnd: ticks < P.matchMaxTicks, seats, ended: false, room: { inst: deps.instance() } };
+  mmatches.set(home, m);
+  out({ t: 'mstairs.started', home, inst: deps.instance(), users: seats.map((x) => x.userId), match_id: m.id, seed, engine_version: ENGINE_VERSION, config_hash: stableHash(mp), start_tick: 0, server_time_at_start: startAt, params: mp,
+    ends_at: startAt + ticks * TICK_MS, closing_end: m.closingEnd, room: true,
+    players: res.ok.map((o, i) => ({ user_id: o.user, pet_id: o.pet, name: seats[i].name, sp: seats[i].sp, num: seats[i].num, speed: o.speed, stamina: o.stamina })) });
+  return { ok: true, dropped: res.dropped };
+}
 export const _mstairsDeps = () => deps;

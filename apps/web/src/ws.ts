@@ -12,6 +12,8 @@ export class Live {
   inLobby = false;
   /** v27 賽車房：目前所在的房間（伺服器最新狀態＋收到的本地時間）；在房裡也算活躍（不暫停、不主動重連） */
   room: any = null;
+  /** v27：下樓梯房開始時寵物頁可能還沒掛上，留著最近一次房間比賽的 match.started 讓 Device 補收。 */
+  roomMatch: { m: any; at: number } | null = null;
   get busy() { return this.inMatch || this.inFight || this.inLobby || !!this.room; }
   homeId: string | null = null;
   offset = 0; // 伺服器時間 − 本地時間
@@ -64,6 +66,7 @@ export class Live {
         if (this.room) this.send({ type: 'room.join', room: this.room.id, inst: this.room.inst }); // v27：斷線 30 秒內回到房間
       } else if (m.type === 'time.pong') this.pong(m);
       else if (m.type === 'room.state') this.room = { ...m.room, at: Date.now() };
+      else if (m.type === 'match.started' && String(m.home_id ?? '').startsWith('room:')) this.roomMatch = { m, at: Date.now() };
       else if (m.type === 'room.gone') { if (!this.room || this.room.id === m.room) this.room = null; }
       else if (m.type === 'server.draining') { setTimeout(() => { if (this.ws === ws) this.reconnect('draining'); }, Math.random() * 500); }
       else if (m.type === 'error' && m.code === 'UNAUTHORIZED') { this.stopped = true; this.onStatus('unauthorized'); }

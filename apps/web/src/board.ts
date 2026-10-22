@@ -14,8 +14,8 @@ export function boardRows(b: Board): { rows: BoardRow[]; gap: boolean; me: Board
 }
 const row = (r: BoardRow) => `<div class="wide brow${r.mine ? ' mine' : ''}"><span>${r.rank}. ${esc(r.pet_name)}<small>（${r.mine ? '你' : esc(r.owner_name)}）</small></span><em>${r.best_floor} 樓</em></div>`;
 /** 排行榜在中間可捲動；「開始」「返回」固定在畫面底部，永遠看得到。 */
-export function boardHtml(b: Board | null, err = false, opts: { solo?: boolean; multi?: boolean; race?: boolean } = {}): string {
-  const { solo = true, multi = false, race = false } = opts;
+export function boardHtml(b: Board | null, err = false, opts: { solo?: boolean; multi?: boolean; race?: boolean; room?: boolean } = {}): string {
+  const { solo = true, multi = false, race = false, room = false } = opts;
   let list: string;
   if (!b) list = `<div class="note">${err ? '排行榜載入失敗' : '載入中…'}</div>`;
   else if (!b.top.length && !b.me) list = '<div class="note">還沒有人下過樓梯</div>';
@@ -23,7 +23,7 @@ export function boardHtml(b: Board | null, err = false, opts: { solo?: boolean; 
     const v = boardRows(b);
     list = v.rows.map(row).join('') + (v.me ? (v.gap ? '<div class="bgap">…</div>' : '') + row(v.me) : '');
   }
-  return `<div class="board"><div class="mt">— 下樓梯排行榜 —</div><div class="blist">${list}</div><div class="bfoot">${solo ? '<div class="mi on go" data-go="1">▶ 開始</div>' : ''}${multi ? `<div class="mi${solo ? '' : ' on'} go" data-multi="1">▶ 一起玩</div>` : ''}${race ? '<div class="mi go" data-race="1">▶ 一起賽車</div>' : ''}${!solo && !multi && !race ? '<div class="note">這裡沒有可以一起玩的寵物</div>' : ''}<div class="mi back">✕ 返回</div></div></div>`;
+  return `<div class="board"><div class="mt">— 下樓梯排行榜 —</div><div class="blist">${list}</div><div class="bfoot">${solo ? '<div class="mi on go" data-go="1">▶ 開始</div>' : ''}${multi ? `<div class="mi${solo ? '' : ' on'} go" data-multi="1">▶ 一起玩</div>` : ''}${room ? '<div class="mi go" data-room="1">▶ 開房間（邀朋友）</div>' : ''}${race ? '<div class="mi go" data-race="1">▶ 一起賽車</div>' : ''}${!solo && !multi && !race && !room ? '<div class="note">這裡沒有可以一起玩的寵物</div>' : ''}<div class="mi back">✕ 返回</div></div></div>`;
 }
 /** 下樓梯結算畫面。time_up = 時間到（寵物沒有死；closing = 因為快關門）（寵物沒有死）。 */
 export function stairsResultHtml(r: { aborted?: boolean; floors: number; coins: number; time_up?: boolean; closing?: boolean }, wallet: number): string {

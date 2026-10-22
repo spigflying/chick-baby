@@ -337,6 +337,7 @@ export class Device {
     this.bind(); this.bindTopTip(); this.bindFit();
     this.timer = window.setInterval(() => this.loop(), 33);
     this.off.push(ctx.live.on((m) => this.onLive(m)));
+    { const rm = ctx.live.roomMatch; if (rm && Date.now() - rm.at < 8000) { ctx.live.roomMatch = null; queueMicrotask(() => { if (!this.stairs) this.onLive(rm.m); }); } }
   }
   /** 讓蛋殼永遠包住畫面：依內容實際高度，二分搜尋畫面寬度（佔蛋寬的比例），直到四個角都在彩色邊以內。 */
   private fitRaf = 0; private fitLcdH = -1;
@@ -580,7 +581,7 @@ export class Device {
         return;
       }
       if (this.menu === 'result') { this.endStairsView(); return; }
-      if (this.menu === 'board') { if (t.closest('[data-go]')) { this.closeMenu(); this.startStairs(); } else if (t.closest('[data-multi]')) { this.closeMenu(); this.startMulti(); } else if (t.closest('[data-race]')) { this.closeMenu(); this.startRace(); } else if (t.closest('.back')) this.closeMenu(); return; }
+      if (this.menu === 'board') { if (t.closest('[data-go]')) { this.closeMenu(); this.startStairs(); } else if (t.closest('[data-multi]')) { this.closeMenu(); this.startMulti(); } else if (t.closest('[data-race]')) { this.closeMenu(); this.startRace(); } else if (t.closest('[data-room]')) { this.closeMenu(); this.startRoom(); } else if (t.closest('.back')) this.closeMenu(); return; }
       if (this.menu === 'shop') { const it = t.closest('.mi') as HTMLElement | null; if (!it) return; const i = +it.dataset.i!; if (i < 0) return this.closeMenu(); this.menuSel = i; return void this.shopPick(i); }
       this.closeMenu();
     });
@@ -696,7 +697,7 @@ export class Device {
     if (!this.menu) { el.hidden = true; return; }
     el.hidden = false;
     const p = this.pet, coins = this.ctx.wallet(), cfg = this.ctx.cfg;
-    if (this.menu === 'board') { el.innerHTML = boardHtml(this.board, this.boardErr, { solo: this.isOwner, multi: this.othersHere() > 0, race: true }); return; }
+    if (this.menu === 'board') { el.innerHTML = boardHtml(this.board, this.boardErr, { solo: this.isOwner, multi: this.othersHere() > 0, race: true, room: true }); return; }
     if (this.menu === 'feed') {
       const v = this.visitor, f = cfg.game.feed;
       el.innerHTML = `<div class="mt">— 餵食 —  ${coinHtml(coins)}</div>` + cfg.foods.map((fd: any, i: number) => {
@@ -797,7 +798,7 @@ export class Device {
     else if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('stairs.')) this.say(stairsNotice(m.code));
     else if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('race.')) this.say(raceNotice(m.code));
     else if (this.stairs) this.stairs.onLive(m);
-    else if (m.type === 'match.started') this.beginStairs(m);
+    else if (m.type === 'match.started') { if (this.ctx.live.roomMatch?.m === m) this.ctx.live.roomMatch = null; this.beginStairs(m); }
     else if (m.type === 'match.ended' && m.mode === 'multi' && m.me) { if (m.balance != null) this.ctx.setWallet(m.balance); this.ctx.toast(`一起下樓梯：${rankText(m.me.rank)}、${m.me.floor} 樓、◎${m.me.coins}`); }
     else if (m.type === 'error' && m.for === 'match.create') this.say(errText({ message: (({ TOO_TIRED: '太累了，想睡覺…', PET_SLEEPING: '噓…牠在睡覺', ALREADY_IN_MATCH: '已經在遊戲中' }) as any)[m.code] ?? m.code }));
   }
@@ -818,6 +819,15 @@ export class Device {
   othersHere() { return this.presenceAll.filter((u) => u.id !== this.ctx.me.id).length; }
   /** 多人局裡自己已經出局（還在看別人玩）。 */
   stairsOut() { const st = this.stairs; return !!st && st.multi && !st.ended && !st.state.players[st.me]?.alive; }
+  /** v27 下樓梯房：開一間房間邀朋友（不限同一個家），全員準備好倒數 3 秒後用一起下樓梯開始。 */
+  startRoom() {
+    if (this.ctx.live.room) return this.say('你已經在一個房間裡了');
+    const p = this.myPresence?.pet;
+    if (!p) return this.say('沒有寵物不能下樓梯');
+    if (p.status !== 'alive') return this.say(stairsNotice(p.status === 'egg' ? 'PET_EGG' : 'PET_DEAD'));
+    if (!this.ctx.live.send({ type: 'room.create', game: 'stairs' })) return this.say('連線中斷，稍後再試');
+    this.say('開好房間了，等朋友加入…');
+  }
   startMulti() {
     const p = this.myPresence?.pet;
     if (!p) return this.say('沒有寵物不能下樓梯');
