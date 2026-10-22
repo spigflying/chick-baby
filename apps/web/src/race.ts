@@ -31,7 +31,7 @@ const fmtMs = (ms: number | null) => ms === null ? '—' : `${Math.floor(ms / 60
 const WEATHER: Record<string, string> = { clear: '晴', rain: '雨', night: '夜', snow: '雪', fog: '霧' };
 const ERR: Record<string, string> = { TRACK_LOCKED: '這個國家還沒解鎖（拿下前一國的國家冠軍）', INSUFFICIENT_COINS: '金幣不夠（去下樓梯賺吧）', ALREADY_OWNED: '已經裝著這個了', ALREADY_IN_MATCH: '你正在另一場比賽中', RACE_CLOSING: '快關門了，關門前 8 分鐘不開新比賽', GAME_CLOSING: '快關門了', GAME_CLOSED: '現在沒有開放', INTERNAL: '伺服器出錯了，稍後再試' };
 
-interface Snap { at: number; tick: number; countdown: number; cars: Map<string, any[]> }
+interface Snap { at: number; tick: number; countdown: number; cars: Map<string, any[]>; pk?: number[] }
 export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (s: string) => void): () => void {
   root.innerHTML = `<main class="page race-page">
     <div class="race-dev"><div class="lcd race-lcd"><canvas id="rc" width="${W}" height="${H}"></canvas><p class="msg" id="rmsg">選一條賽道開始比賽！</p></div>
@@ -56,7 +56,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   const shop = newShop();
   let mode: 'menu' | 'lobby' | 'race' | 'results' = 'menu';
   let attract: RaceState | null = null, frame = 0, raf = 0, dead = false;
-  let race: { id: string; track: string; laps: number; len: number; cars: any[]; snaps: Snap[]; ended: any | null } | null = null;
+  let race: { id: string; track: string; laps: number; len: number; cars: any[]; snaps: Snap[]; ended: any | null; pickups: [number, number, number][] } | null = null;
   const keys = { gas: false, brake: false, left: false, right: false, nitro: false };
   let seq = 0, lastSent = '', sendTimer = 0; let lobbyPlayers: string[] = [], lobbyStarts = 0;
 
@@ -133,14 +133,14 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     mode = 'lobby'; setMatch(true); lobbyPlayers = [me.user.display_name]; lobbyStarts = Date.now() + 1000; msg.textContent = '準備發車…'; renderPanel();
   }
   function leave() { live?.send({ type: 'race.leave' }); race = null; mode = 'menu'; setMatch(false); msg.textContent = '已離開比賽'; renderPanel(); }
-  function onStarted(m: any) { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null }; clock.reset(); lastHitT = -1; mode = 'race'; setMatch(true); const hum = m.cars.filter((c: any) => !c.ai).length; msg.textContent = `${trackById(m.track)!.name}・${hum > 1 ? `${hum} 位玩家＋` : ''}電腦 ${m.cars.length - hum} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
+  function onStarted(m: any) { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null, pickups: Array.isArray(m.pickups) ? m.pickups : [] }; clock.reset(); lastHitT = -1; mode = 'race'; setMatch(true); const hum = m.cars.filter((c: any) => !c.ai).length; msg.textContent = `${trackById(m.track)!.name}・${hum > 1 ? `${hum} 位玩家＋` : ''}電腦 ${m.cars.length - hum} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
   const off = live?.on((m) => {
     if (m.type === 'wallet.updated') { coins = m.balance; if (tab === 'garage' && mode === 'menu') renderPanel(); }
     if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('race.')) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; toast(ERR[m.code] ?? m.code); renderPanel(); }
     else if (m.type === 'race.notice' && !m.home_id) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; renderPanel(); }
     else if (m.type === 'race.started') onStarted(m);
     else if (m.type === 'race.snap' && race && m.race_id === race.id) {
-      clock.onSnap(m.tick, performance.now()); race.snaps.push({ at: performance.now(), tick: m.tick, countdown: m.countdown, cars: new Map(m.cars.map((c: any[]) => [c[0], c])) }); if (race.snaps.length > 8) race.snaps.shift();
+      clock.onSnap(m.tick, performance.now()); race.snaps.push({ at: performance.now(), tick: m.tick, countdown: m.countdown, cars: new Map(m.cars.map((c: any[]) => [c[0], c])), pk: Array.isArray(m.pk) ? m.pk : [] }); if (race.snaps.length > 8) race.snaps.shift();
     }
     else if (m.type === 'race.ended' && race && m.race_id === race.id) {
       race.ended = m; mode = 'results'; setMatch(false);
@@ -196,7 +196,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     if (!race || race.snaps.length === 0) return null;
     const [a, b, f] = bracket(race.snaps, clock.renderTick(performance.now()));
     return race.cars.map((c) => { const p = a.cars.get(c.id), q = b.cars.get(c.id) ?? p; if (!p || !q) return null;
-      return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[1] + (q[1] - p[1]) * f, x: p[2] + (q[2] - p[2]) * f, speed: p[3] + (q[3] - p[3]) * f, damage: q[4], nitro: q[5], nitroT: q[6], fin: q[7], hit: q[8], evT: q[9] ?? 0, evK: q[10] ?? 0, evS: q[11] ?? 0, evSide: q[12] ?? 0, flip: (q[13] ?? 0) && (p[13] ?? 0) ? p[13] + (q[13] - p[13]) * f : q[13] ?? 0, brake: c.id === me.user.id ? keys.brake : q[3] < p[3] - 0.5 } as ViewCar; }).filter(Boolean) as ViewCar[];
+      return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[1] + (q[1] - p[1]) * f, x: p[2] + (q[2] - p[2]) * f, speed: p[3] + (q[3] - p[3]) * f, damage: q[4], nitro: q[5], nitroT: q[6], fin: q[7], hit: q[8], evT: q[9] ?? 0, evK: q[10] ?? 0, evS: q[11] ?? 0, evSide: q[12] ?? 0, pkT: q[14] ?? 0, flip: (q[13] ?? 0) && (p[13] ?? 0) ? p[13] + (q[13] - p[13]) * f : q[13] ?? 0, brake: c.id === me.user.id ? keys.brake : q[3] < p[3] - 0.5 } as ViewCar; }).filter(Boolean) as ViewCar[];
   }
   // 每個 rAF 都重畫（60fps）；位置依時間內插。動畫用的 frame 仍是 20Hz 計數（閃爍等節奏不變）。
   function loop() {
@@ -213,7 +213,9 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       const flash = meCar?.fin != null ? 'FINISH!' : meCar && meCar.hit > 0 ? 'CRASH!' : meCar && Math.abs(meCar.x) > 1 ? 'OFF ROAD' : undefined;
       if (meCar && (meCar.evT ?? 0) > lastHitT) { if (lastHitT >= 0) hitSound(meCar.evK === 5 ? 12 : meCar.evS ?? 2); lastHitT = meCar.evT!; }
       const stt = prof ? carStats(prof.parts, prof.car) : null;
-      drawRace(x, { gears: [4, 5, 5, 6][prof?.parts?.gearbox ?? 0], top: stt?.topSpeed, track: t, me: meCar, cars, tick: last.tick, countdown: last.countdown, laps: race.laps, len: race.len, rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash });
+      const taken = new Set(last.pk ?? []);
+      const pickups = race.pickups.filter((p) => !taken.has(p[0]) && Math.abs(p[1] - (meCar?.z ?? 0)) < race!.len / 2).map((p) => ({ z: p[1], x: p[2] }));
+      drawRace(x, { pickups, gears: [4, 5, 5, 6][prof?.parts?.gearbox ?? 0], top: stt?.topSpeed, track: t, me: meCar, cars, tick: last.tick, countdown: last.countdown, laps: race.laps, len: race.len, rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash });
       if (mode === 'results') drawResultsOverlay(); return;
     }
     if (mode === 'lobby') return drawWait();

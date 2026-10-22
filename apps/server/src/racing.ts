@@ -8,7 +8,7 @@ import { sql } from 'kysely';
 import {
   CARS, COUNTRIES, MAX_OUT_COST, ME, PAINTS, PAINT_NAMES, PRIZES, PART_KINDS, PARTS, partPrice, RACE_SLOTS, RACE_TICK_RATE, TRACKS, condition, createRace, cupTrack, fillField,
   createInvite, inviteOutcome, replyInvite, type Invite, newCup, normParts, pointsFor, prizeFor, raceRanking, raceTimeMs, seasonOf, setRaceInput, settleCup, stepRace, trackById, type PartKind, type RaceState,
-  snapCar } from '@chick/engine';
+  snapCar, snapPickups } from '@chick/engine';
 import type { Db } from './db';
 import { audit, changeBalance, lockWallets, type ReqCtx } from './core';
 import { fail } from './errors';
@@ -223,7 +223,7 @@ async function start(home: string | null, host: string, users: string[], track: 
     const state = createRace(seed, track, fillField(seats.map((s) => ({ id: s.userId, name: s.name, car: s.car, parts: s.parts, color: s.paint }))));
     const r: Room = { id: randomUUID(), home, host, inst: deps!.instance(), track, seats, state, startAt: Date.now(), ended: false, seq: new Map() };
     rooms.set(r.id, r); for (const s of seats) byUser.set(s.userId, r.id);
-    outRace(r, { t: 'rrace.started', inst: r.inst, track, seed, laps: state.laps, len: state.len, tick_rate: RACE_TICK_RATE, users: users, solo: !home,
+    outRace(r, { t: 'rrace.started', inst: r.inst, track, seed, laps: state.laps, len: state.len, tick_rate: RACE_TICK_RATE, users: users, solo: !home, pickups: state.pickups.map((p) => [p.id, p.z, p.x]),
       cars: state.cars.map((c) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color })) });
     if (home) outHome({ t: 'rrace.event', home, kind: 'start', invite: inviteId, race_id: r.id, users, names: seats.map((s) => s.name), track });
     return r.id;
@@ -261,7 +261,7 @@ function settleIfDone(r: Room) {
 /** 安全網：比賽最長 9 分鐘＋倒數；超過還沒結束就強制結算，避免鎖卡住。 */
 const STALE_RACE_MS = 10 * 60 * 1000;
 const STALE_LOBBY_MS = 2 * 60 * 1000;
-const snap = (r: Room) => ({ t: 'rrace.snap', tick: r.state.tick, countdown: r.state.countdown, cars: r.state.cars.map(snapCar) });
+const snap = (r: Room) => ({ t: 'rrace.snap', tick: r.state.tick, countdown: r.state.countdown, cars: r.state.cars.map(snapCar), pk: snapPickups(r.state) });
 export function stepRaces(now = Date.now()) {
   if (!deps) return;
   for (const lb of [...lobbies.values()]) if (now - lb.createdAt > STALE_LOBBY_MS) { console.warn('race lobby stale', lb.home); cancelLobby(lb, 'CANCELLED'); }

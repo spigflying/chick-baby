@@ -200,13 +200,13 @@ export interface RaceCar {
   /** v15 碰撞事件（給畫面特效）：evT＝最後一次被撞的 tick、evK＝種類 1 撞路邊 2 追撞前車 3 被追撞 4 側擦、evS＝力道（扣裝甲前的傷害）、evSide＝-1 左 / 0 前後 / 1 右 */
   evT?: number; evK?: number; evS?: number; evSide?: number;
   /** v16 翻車剩餘 tick（0＝沒在翻） */
-  flip?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number;
+  flip?: number; /** 路上氮氣道具：最後一次吃到的 tick（給畫面火花）與次數 */ pkT?: number; pkN?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number;
 }
 /** 完美度（%）＝ 100 − damage */
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
 /** 完美度對極速的影響：每少 1% 就少 0.4% 極速（最低 60%） */
 export const condFactor = (damage: number) => Math.max(0.6, 1 - 0.004 * damage);
-export interface RaceState { seed: number; track: string; tick: number; laps: number; len: number; cars: RaceCar[]; rng: Rng; over: boolean; maxTicks: number; countdown: number; difficulty: number }
+export interface RaceState { seed: number; track: string; tick: number; laps: number; len: number; cars: RaceCar[]; pickups: Pickup[]; rng: Rng; over: boolean; maxTicks: number; countdown: number; difficulty: number }
 export interface Entrant { id: string; name: string; ai?: boolean; car?: string; parts?: Partial<Parts>; color?: number; skill?: number }
 const NO_INPUT: RaceInput = { gas: false, brake: false, left: false, right: false, nitro: false };
 
@@ -234,7 +234,35 @@ export function createRace(seed: number, trackId: string, entrants: Entrant[], d
       aiLane: -0.55 + nextFloat(rng) * 1.1, aiSkill: form, aiRecover: 0,
       aiNitroAt: [0.08 + nextFloat(rng) * 0.2, 0.45 + nextFloat(rng) * 0.2, 0.8 + nextFloat(rng) * 0.12].map((f) => f * len * t.laps), hit: 0, hits: 0 };
   });
-  return { seed, track: trackId, tick: 0, laps: t.laps, len, cars, rng, over: false, maxTicks: RACE_TICK_RATE * 60 * 9, countdown: RACE_TICK_RATE * 3, difficulty };
+  return { seed, track: trackId, tick: 0, laps: t.laps, len, cars, pickups: racePickups(seed, trackId, t.laps), rng, over: false, maxTicks: RACE_TICK_RATE * 60 * 9, countdown: RACE_TICK_RATE * 3, difficulty };
+}
+// ---------------- 路上氮氣道具（nitro pickup） ----------------
+/** 每圈 1–2 個（前半圈必有、後半圈 50%）；隨機車道；不放在彎道（前後 4 段內彎度 ≥ PICKUP_MAX_CURVE）與起終點前後 PICKUP_START_GAP 公尺。
+ *  只有玩家能吃（電腦車直接穿過）；同一 tick 碰到的玩家全部都拿到；吃到＝立刻 PICKUP_TICKS 氮氣（玩家自己的推力），不佔原廠 3 次；
+ *  正在噴氮氣時＝加 PICKUP_TICKS，上限為這台車一次完整氮氣的長度（推力不疊加）。位置由種子決定（伺服器、所有客戶端同一份）。 */
+export interface Pickup { id: number; lap: number; /** 絕對距離（含圈數） */ z: number; x: number; /** 被吃掉的 tick（null＝還在） */ taken: number | null }
+export const PICKUP_TICKS = RACE_TICK_RATE * 5, PICKUP_DX = 0.3, PICKUP_MAX_CURVE = 1.2, PICKUP_START_GAP = 150, PICKUP_LANES = [-0.6, 0, 0.6];
+export function pickupSpotOk(trackId: string, zLap: number, len: number) {
+  if (zLap < PICKUP_START_GAP || zLap > len - PICKUP_START_GAP) return false;
+  const segs = trackSegs(trackId), n = segs.length, i = Math.floor(zLap / SEG_LEN);
+  for (let k = -4; k <= 4; k++) if (Math.abs(segs[(((i + k) % n) + n) % n].curve) >= PICKUP_MAX_CURVE) return false;
+  return true;
+}
+export function racePickups(seed: number, trackId: string, laps: number): Pickup[] {
+  const len = trackLength(trackSegs(trackId)), r = createRng((seed ^ 0x5bd1e995) >>> 0), out: Pickup[] = [];
+  const a = PICKUP_START_GAP, half = (len - 2 * a) / 2;
+  for (let lap = 0; lap < laps; lap++) for (let h = 0; h < 2; h++) {
+    const want = h === 0 || nextFloat(r) < 0.5;
+    const tries = Array.from({ length: 24 }, () => [a + h * half + nextFloat(r) * half, PICKUP_LANES[Math.floor(nextFloat(r) * 3)]]);
+    if (!want) continue;
+    const ok = tries.find(([z]) => pickupSpotOk(trackId, z, len)); if (!ok) continue;
+    out.push({ id: out.length, lap, z: lap * len + Math.round(ok[0]), x: ok[1], taken: null });
+  }
+  return out;
+}
+/** 吃到道具：沒在噴＝PICKUP_TICKS；正在噴＝加 PICKUP_TICKS，最多到一次完整氮氣 */
+export function applyPickup(c: RaceCar) {
+  c.nitroT = c.nitroT > 0 ? Math.max(c.nitroT, Math.min(c.nitroT + PICKUP_TICKS, Math.round(c.stats.nitroTicks))) : PICKUP_TICKS;
 }
 export function trackSegs(id: string) { let s = segCache.get(id); if (!s) { s = buildTrack(trackById(id)!); segCache.set(id, s); } return s; }
 const segCache = new Map<string, Segment[]>();
@@ -351,6 +379,10 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
         c.flip = FLIP_TICKS; c.nitroT = 0; break;
       }
     }
+    if (!c.ai) for (const p of s.pickups) { // 路上氮氣道具：同一 tick 碰到的玩家都拿得到
+      if ((p.taken !== null && p.taken !== s.tick) || !(p.z > z0 && p.z <= c.z) || Math.abs(c.x - p.x) > PICKUP_DX) continue;
+      p.taken = s.tick; applyPickup(c); c.pkT = s.tick; c.pkN = (c.pkN ?? 0) + 1;
+    }
     c.lap = Math.max(0, Math.floor(c.z / s.len));
     if (c.z >= total && c.finishedTick === null) c.finishedTick = s.tick;
   }
@@ -376,8 +408,10 @@ export function raceRanking(s: RaceState): RaceCar[] {
   return [...s.cars].sort((a, b) => (a.finishedTick ?? Infinity) - (b.finishedTick ?? Infinity) || b.z - a.z);
 }
 export const raceTimeMs = (s: RaceState, c: RaceCar) => c.finishedTick === null ? null : Math.round(((c.finishedTick - RACE_TICK_RATE * 3) * 1000) / RACE_TICK_RATE);
-/** 快照每台車的陣列（伺服器／預覽共用）：[id, z, x, speed, damage, nitro, nitroT, finishedTick, hit, evT, evK, evS, evSide, flip] */
-export const snapCar = (c: RaceCar) => [c.id, +c.z.toFixed(2), +c.x.toFixed(3), +c.speed.toFixed(2), +c.damage.toFixed(1), c.nitro, c.nitroT, c.finishedTick, c.hit, c.evT ?? 0, c.evK ?? 0, c.evS ?? 0, c.evSide ?? 0, c.flip ?? 0];
+/** 快照每台車的陣列（伺服器／預覽共用）：[id, z, x, speed, damage, nitro, nitroT, finishedTick, hit, evT, evK, evS, evSide, flip, pkT] */
+export const snapCar = (c: RaceCar) => [c.id, +c.z.toFixed(2), +c.x.toFixed(3), +c.speed.toFixed(2), +c.damage.toFixed(1), c.nitro, c.nitroT, c.finishedTick, c.hit, c.evT ?? 0, c.evK ?? 0, c.evS ?? 0, c.evSide ?? 0, c.flip ?? 0, c.pkT ?? 0];
+/** 快照：已被吃掉的道具 id */
+export const snapPickups = (s: RaceState) => s.pickups.filter((p) => p.taken !== null).map((p) => p.id);
 export const kmh = (v: number) => Math.round(v * 3.6);
 /** 賽季：一個日曆月（台北時間），例如 '2026-10'。 */
 export function seasonOf(ms: number) { const d = new Date(ms + 8 * 3600_000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; }

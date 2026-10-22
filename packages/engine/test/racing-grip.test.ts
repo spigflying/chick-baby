@@ -3,6 +3,7 @@ import { createRace, stepRace, setRaceInput, fillField, slideFactor, carStats } 
 
 const drive = (track: string, parts: any) => {
   const s = createRace(3, track, fillField([{ id: 'me', name: 'me', parts }]));
+  s.pickups = []; // 只量輪胎抓地：不吃路上氮氣道具
   s.cars.splice(0, s.cars.length, ...s.cars.filter((c) => c.id === 'me'));
   const me = s.cars[0]; let off = 0, n = 0;
   for (let t = 0; t < 20 * 120 && !s.over; t++) { setRaceInput(s, 'me', { gas: true, left: me.x > 0.05, right: me.x < -0.05 }); stepRace(s); if (s.countdown > 0) continue; n++; if (Math.abs(me.x) > 1) off++; }

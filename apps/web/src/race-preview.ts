@@ -55,7 +55,7 @@ function scene(kind: string) {
 async function page() {
   await import('./style.css');
   const { racePage } = await import('./race');
-  const { snapCar, createRace, stepRace, setRaceInput, raceRanking, raceTimeMs, TRACKS, PARTS, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, prizeFor, pointsFor, condition, ME, newCup } = await import('@chick/engine');
+  const { snapCar, snapPickups, createRace, stepRace, setRaceInput, raceRanking, raceTimeMs, TRACKS, PARTS, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, prizeFor, pointsFor, condition, ME, newCup } = await import('@chick/engine');
   let coins = 3400;
   const prof: any = { points: 16, wins: 1, races: 3, season: '2026-10', paint: 0, parts: { engine: 1, gearbox: 2, dry: 3, wet: 1, nitro: 2, armorF: 1, armorS: 0, armorR: 0 }, car: 'falcon', unlocked: 1, cup: { ...newCup(0), race: 2, points: { [ME]: 16, '阿飛': 14, '雷霆': 10, '閃電': 7 } } };
   const realFetch = window.fetch.bind(window);
@@ -76,8 +76,8 @@ async function page() {
   const w = window as any;
   w.__start = (track: string) => {
     sim = createRace(5, track, fillField([{ id: 'b', name: 'benson', car: 'muscle', color: 1, parts: prof.parts }, { id: 'me', name: 'racer', car: 'falcon', color: 0, parts: prof.parts as any }]));
-    emit({ type: 'race.started', race_id: 'r1', track, seed: 5, cars: sim.cars.map((c: any) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color })), laps: sim.laps, len: sim.len, tick_rate: 20 });
-    const snap = () => emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: sim.countdown, cars: sim.cars.map(snapCar) });
+    emit({ type: 'race.started', race_id: 'r1', track, seed: 5, cars: sim.cars.map((c: any) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color })), laps: sim.laps, len: sim.len, tick_rate: 20, pickups: sim.pickups.map((p: any) => [p.id, p.z, p.x]) });
+    const snap = () => emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: sim.countdown, cars: sim.cars.map(snapCar), pk: snapPickups(sim) });
     timer = window.setInterval(() => { stepRace(sim); stepRace(sim); snap(); }, 100);
   };
   w.__sim = () => sim;
@@ -140,8 +140,8 @@ async function simv() {
   (window as any).__simFrame = (left: boolean, right: boolean) => {
     if (sub === 0) { prev = new Map(sim.cars.map((c) => [c.id, [c.z, c.x, c.flip ?? 0]])); setRaceInput(sim, 'me', { gas: true, left, right }); stepRace(sim); }
     sub = (sub + 1) % 3; const f = sub === 0 ? 1 : sub / 3; frame++;
-    const cars = sim.cars.map((c) => { const p = prev.get(c.id)!; return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[0] + (c.z - p[0]) * f, x: p[1] + (c.x - p[1]) * f, speed: c.speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT, fin: c.finishedTick, hit: c.hit, evT: c.evT, evK: c.evK, evS: c.evS, evSide: c.evSide, flip: c.flip ? (prev.get(c.id)![2] || c.flip) + (c.flip - (prev.get(c.id)![2] || c.flip)) * f : 0 } as ViewCar; });
-    drawRace(x, { now: frame * 1000 / 60, track, me: cars.find((c) => c.id === 'me')!, cars, tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len, rank: 1, frame: Math.floor(frame / 3), hud: true, gears: 5, top: 160 });
+    const cars = sim.cars.map((c) => { const p = prev.get(c.id)!; return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[0] + (c.z - p[0]) * f, x: p[1] + (c.x - p[1]) * f, speed: c.speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT, fin: c.finishedTick, hit: c.hit, evT: c.evT, evK: c.evK, evS: c.evS, evSide: c.evSide, pkT: c.pkT ?? 0, flip: c.flip ? (prev.get(c.id)![2] || c.flip) + (c.flip - (prev.get(c.id)![2] || c.flip)) * f : 0 } as ViewCar; });
+    drawRace(x, { pickups: sim.pickups.filter((p) => p.taken === null).map((p) => ({ z: p.z, x: p.x })), now: frame * 1000 / 60, track, me: cars.find((c) => c.id === 'me')!, cars, tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len, rank: 1, frame: Math.floor(frame / 3), hud: true, gears: 5, top: 160 });
     return sim.cars.find((c) => c.id === 'me')!.x;
   };
   const d = document.createElement('div'); d.id = 'shots'; d.append(cv); root.append(d); (window as any).__ok = 1;

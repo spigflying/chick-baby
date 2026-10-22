@@ -68,7 +68,7 @@ function forwardRace(m: any) {
     const ids = new Set(m.users as string[]);
     for (const c of conns) if (ids.has(c.user.id) && !c.rr) { c.rr = { id: m.race_id, inst: m.inst }; send(c, { type: 'race.started', home_id: home, ...rest }); }
   } else if (t === 'rrace.snap') {
-    for (const c of conns) if (c.rr?.id === m.race_id) send(c, { type: 'race.snap', race_id: m.race_id, tick: m.tick, countdown: m.countdown, cars: m.cars });
+    for (const c of conns) if (c.rr?.id === m.race_id) send(c, { type: 'race.snap', race_id: m.race_id, tick: m.tick, countdown: m.countdown, cars: m.cars, pk: m.pk ?? [] });
   } else if (t === 'rrace.ended') {
     for (const c of conns) if (c.rr?.id === m.race_id) { c.rr = null; send(c, { type: 'race.ended', race_id: m.race_id, track: m.track, ranking: m.ranking, aborted: !!m.aborted, me: (m.results ?? []).find((p: any) => p.user_id === c.user.id) ?? null }); }
   }
