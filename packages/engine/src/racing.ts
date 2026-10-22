@@ -40,7 +40,7 @@ const tiers = (tg2: number[], price?: number[]): PartTier[] => [0, ...tg2].map((
 export const PARTS: Record<PartKind, { label: string; desc: string; tiers: PartTier[] }> = {
   engine: { label: '引擎', desc: '加速＋極速（每階 +2.5 加速、+7 km/h）', tiers: tiers([30000, 50000, 80000], [2000, 5000, 7000]) },
   gearbox: { label: '變速箱', desc: '極速（每階 +11 km/h，跟引擎各自相加）', tiers: tiers([10000, 30000, 50000], [2000, 4000, 6000]) },
-  nitro: { label: '氮氣', desc: '噴更久：原廠 5 秒，每階 +2 秒（7／9／11 秒）；推力不變，每場一律 3 次', tiers: tiers([5000, 15000, 30000]) },
+  nitro: { label: '氮氣', desc: '噴更久：原廠 5 秒，每階 +2 秒（7／9／11 秒）；推力隨等級增加（極速 ×1.22／1.31／1.40／1.49），每場一律 3 次', tiers: tiers([5000, 15000, 30000]) },
   dry: { label: '乾地胎', desc: '晴天、夜晚、霧天的抓地與過彎；每階極速 +4 km/h', tiers: tiers([1000, 2000, 4000]) },
   wet: { label: '雨胎', desc: '下雨、下雪時自動換上；每階極速 +4 km/h（雨雪天）', tiers: tiers([1000, 2000, 3000]) },
   armorF: { label: '前裝甲', desc: '追撞前車時少掉完美度', tiers: tiers([5000, 10000, 20000]) },
