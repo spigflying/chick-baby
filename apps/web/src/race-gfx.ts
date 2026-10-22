@@ -389,11 +389,11 @@ function drawNitroFx(x: CanvasRenderingContext2D, v: View, now: number) {
   const st = 0.03 + 0.02 * pulse, sy = HORIZON, sh = H - HORIZON;
   if (x.canvas && (x.canvas as any).width) x.drawImage(x.canvas, 0, sy, W, sh, -W * st / 2, sy, W * (1 + st), sh);
   // 2) 速度線：從消失點往外，越外面越長，最亮／最暗交錯
-  for (let i = 0; i < 26; i++) {
+  for (let i = 0; i < 52; i++) { // 手動氮氣與路上道具共用（都是 nitroT > 0）；v23 線數 ×2、更長更粗
     const a = hash(i + 300) * Math.PI * 2, sp = (t * (2.2 + hash(i + 400)) + hash(i + 500)) % 1;
-    const r0 = 30 + sp * 140, r1 = r0 + 10 + sp * 34;
+    const r0 = 24 + sp * 140, r1 = r0 + 22 + sp * 70;
     x.fillStyle = Q[i % 3 ? 0 : 3];
-    for (let r = r0; r < r1; r += 1.5) { const px = Math.round(cx + Math.cos(a) * r * 1.3), py = Math.round(cy + Math.sin(a) * r * 0.8); if (px < 0 || px >= W || py < 0 || py >= H) break; if (Math.abs(px - cx) < 40 && py > H - 70) continue; x.fillRect(px, py, 2, 1); }
+    for (let r = r0; r < r1; r += 1.5) { const px = Math.round(cx + Math.cos(a) * r * 1.3), py = Math.round(cy + Math.sin(a) * r * 0.8); if (px < 0 || px >= W || py < 0 || py >= H) break; if (Math.abs(px - cx) < 40 && py > H - 70) continue; x.fillRect(px, py, 3, 2); }
   }
   // 3) 邊緣色調脈動：左右兩條抖動的亮色網點
   const bw = 6 + Math.round(pulse * 6); x.fillStyle = Q[0];
@@ -559,11 +559,11 @@ function drawHud(x: CanvasRenderingContext2D, v: View, now = performance.now()) 
   // 右上：計時 0'28"98
   const ms = Math.max(0, v.tick - 60) * 50, ts = `${Math.floor(ms / 60000)}'${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}"${String(Math.floor(ms / 10) % 100).padStart(2, '0')}`;
   otext(x, ts, W - 6 - textW(ts, 2), 5, 0, 2);
-  drawMinimap(x, v, W - 104, 22, 100, 68); // v23：小地圖放大約 1.7 倍（原 58×40）
+  drawMinimap(x, v, W - 104, 20, 100, 62); // v23：小地圖放大約 1.7 倍（原 58×40）
   role('hud');
   const lap = Math.min(v.laps, Math.floor(Math.max(0, me.z) / v.len) + 1);
-  otext(x, 'LAP', W - 86, 98, 0); otext(x, `${lap}/${v.laps}`, W - 62, 94, 0, 2);
-  const rk = String(v.rank), rw = textW(rk, 3) + 3 + textW(SUF(v.rank)); otext(x, rk, W - 8 - rw, 112, 0, 3); otext(x, SUF(v.rank), W - 8 - textW(SUF(v.rank)), 112, 0);
+  otext(x, 'LAP', W - 86, 88, 0); otext(x, `${lap}/${v.laps}`, W - 62, 84, 0, 2);
+  const rk = String(v.rank), rw = textW(rk, 2) + 3 + textW(SUF(v.rank)); otext(x, rk, W - 8 - rw, 100, 0, 2); otext(x, SUF(v.rank), W - 8 - textW(SUF(v.rank)), 100, 0); // 名次留在地平線（路面）上方
   // 倒數／訊息
   if (v.countdown > 0) { const s = String(Math.ceil(v.countdown / 20)); otext(x, s, W / 2 - 15, 40, 0, 6); }
   else if (v.tick - 60 < 20 && v.tick >= 60) otext(x, 'GO!', W / 2 - 34, 46, 0, 4);
