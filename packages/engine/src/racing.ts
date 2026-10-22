@@ -200,7 +200,7 @@ export interface RaceCar {
   /** v15 碰撞事件（給畫面特效）：evT＝最後一次被撞的 tick、evK＝種類 1 撞路邊 2 追撞前車 3 被追撞 4 側擦、evS＝力道（扣裝甲前的傷害）、evSide＝-1 左 / 0 前後 / 1 右 */
   evT?: number; evK?: number; evS?: number; evSide?: number;
   /** v16 翻車剩餘 tick（0＝沒在翻） */
-  flip?: number; /** 路上氮氣道具：最後一次吃到的 tick（給畫面火花）與次數 */ pkT?: number; pkN?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number;
+  flip?: number; /** 路上氮氣道具：最後一次吃到的 tick（給畫面火花）與次數 */ pkT?: number; pkN?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v23：前／側／後 分區損傷 0–100（HUD 用） */ zd?: number[]; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number;
 }
 /** 完美度（%）＝ 100 − damage */
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
@@ -320,7 +320,9 @@ export function gripOf(c: RaceCar, w: Weather) { return w === 'rain' ? c.stats.w
 export const HIT_WALL = 1, HIT_REAR_END = 2, HIT_REARED = 3, HIT_SWIPE = 4, HIT_OBJECT = 5;
 function hurt(c: RaceCar, amount: number, zone: 'F' | 'S' | 'R', tick = 0, kind = 0, side = 0) {
   if (kind) { c.evT = tick; c.evK = kind; c.evS = +amount.toFixed(2); c.evSide = side; }
-  c.damage = Math.min(100, c.damage + amount * (1 - c.stats.armor[zone])); c.hits++;
+  const add = Math.min(100 - c.damage, amount * (1 - c.stats.armor[zone]));
+  c.damage += add; c.hits++;
+  const zd = (c.zd ??= [0, 0, 0]); const zi = zone === 'F' ? 0 : zone === 'S' ? 1 : 2; zd[zi] = Math.min(100, zd[zi] + add * 3); // v23：HUD 分區損傷（各區 0–100，只畫圖用）
   if (c.ai) c.aiRecover = amount > 2 ? 20 : 8;
 }
 export function stepRace(s: RaceState) {
@@ -399,7 +401,7 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
       a.hit = Math.max(a.hit, 8); b.hit = Math.max(b.hit, 6);
       const push = a.x < b.x ? -0.12 : 0.12; a.x += push; b.x -= push;
     } else if (dz <= 1.5 && a.hit <= 0 && b.hit <= 0) { // 並排擦撞
-      hurt(a, 2.5, 'S', s.tick, HIT_SWIPE, a.x < b.x ? 1 : -1); hurt(b, 2.5, 'S', s.tick, HIT_SWIPE, a.x < b.x ? -1 : 1); a.hit = b.hit = 8; a.speed *= 0.92; b.speed *= 0.92;
+      hurt(a, 1, 'S', s.tick, HIT_SWIPE, a.x < b.x ? 1 : -1); hurt(b, 1, 'S', s.tick, HIT_SWIPE, a.x < b.x ? -1 : 1); // v23：輕擦 ≈ −1% a.hit = b.hit = 8; a.speed *= 0.92; b.speed *= 0.92;
       const push = a.x < b.x ? -0.2 : 0.2; a.x += push; b.x -= push;
     }
   }
@@ -408,8 +410,8 @@ export function raceRanking(s: RaceState): RaceCar[] {
   return [...s.cars].sort((a, b) => (a.finishedTick ?? Infinity) - (b.finishedTick ?? Infinity) || b.z - a.z);
 }
 export const raceTimeMs = (s: RaceState, c: RaceCar) => c.finishedTick === null ? null : Math.round(((c.finishedTick - RACE_TICK_RATE * 3) * 1000) / RACE_TICK_RATE);
-/** 快照每台車的陣列（伺服器／預覽共用）：[id, z, x, speed, damage, nitro, nitroT, finishedTick, hit, evT, evK, evS, evSide, flip, pkT] */
-export const snapCar = (c: RaceCar) => [c.id, +c.z.toFixed(2), +c.x.toFixed(3), +c.speed.toFixed(2), +c.damage.toFixed(1), c.nitro, c.nitroT, c.finishedTick, c.hit, c.evT ?? 0, c.evK ?? 0, c.evS ?? 0, c.evSide ?? 0, c.flip ?? 0, c.pkT ?? 0];
+/** 快照每台車的陣列（伺服器／預覽共用）：[id, z, x, speed, damage, nitro, nitroT, finishedTick, hit, evT, evK, evS, evSide, flip, zdF, zdS, zdR, pkT] */
+export const snapCar = (c: RaceCar) => [c.id, +c.z.toFixed(2), +c.x.toFixed(3), +c.speed.toFixed(2), +c.damage.toFixed(1), c.nitro, c.nitroT, c.finishedTick, c.hit, c.evT ?? 0, c.evK ?? 0, c.evS ?? 0, c.evSide ?? 0, c.flip ?? 0, Math.round(c.zd?.[0] ?? 0), Math.round(c.zd?.[1] ?? 0), Math.round(c.zd?.[2] ?? 0), c.pkT ?? 0];
 /** 快照：已被吃掉的道具 id */
 export const snapPickups = (s: RaceState) => s.pickups.filter((p) => p.taken !== null).map((p) => p.id);
 export const kmh = (v: number) => Math.round(v * 3.6);

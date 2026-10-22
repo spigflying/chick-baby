@@ -9,3 +9,13 @@ describe('racing v15 hit events in snapshots', () => {
   it('rear-end: attacker front, victim rear', () => { const { s, me, a } = setup(); me.x = a.x = 0; a.z = me.z + 3; a.speed = 30; stepRace(s);
     expect(me.evK).toBe(HIT_REAR_END); expect(a.evK).toBe(HIT_REARED); });
 });
+import { describe as d23, it as i23, expect as e23 } from 'vitest';
+import { createRace as cr23, fillField as ff23, stepRace as sr23, snapCar as sc23, condition as cond23 } from '../src/racing';
+d23('v23 HUD zones', () => {
+  i23('zone damage is tracked and synced in snapCar[14..16]; condition = round(100 - damage)', () => {
+    const s = cr23(1, 'tw1', ff23([{ id: 'me', name: 'me' }])); const me = s.cars.find((c) => c.id === 'me')!;
+    while (s.countdown > 0) sr23(s);
+    me.x = 1.6; me.speed = 100; sr23(s);
+    const sn = sc23(me); e23(sn[15]).toBeGreaterThan(0); e23(sn[14]).toBe(0); e23(cond23(me)).toBe(Math.round(100 - me.damage));
+  });
+});

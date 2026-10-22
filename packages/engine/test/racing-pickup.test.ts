@@ -30,7 +30,7 @@ describe('nitro pickups', () => {
     const s = createRace(3, 'tw1', field()); driveOver(s, ['p0']);
     const c = s.cars.find((c) => c.id === 'p0')!;
     expect(c.nitro).toBe(3); expect(c.nitroT).toBe(PICKUP_TICKS);
-    expect(s.pickups[0].taken).toBe(s.tick); expect(snapPickups(s)).toEqual([0]); expect(snapCar(c)[14]).toBe(s.tick);
+    expect(s.pickups[0].taken).toBe(s.tick); expect(snapPickups(s)).toEqual([0]); expect(snapCar(c)[17]).toBe(s.tick);
     // 第二台之後經過：已經沒了
     const o = s.cars.find((c) => c.id === 'p1')!; o.z = s.pickups[0].z - 3; o.x = s.pickups[0].x; o.speed = 60; setRaceInput(s, 'p1', { gas: true }); stepRace(s);
     expect(o.nitroT).toBe(0); expect(o.pkN ?? 0).toBe(0);
