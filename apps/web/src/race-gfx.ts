@@ -362,7 +362,7 @@ function drawNitroFx(x: CanvasRenderingContext2D, v: View, now: number) {
     const a = hash(i + 300) * Math.PI * 2, sp = (t * (2.2 + hash(i + 400)) + hash(i + 500)) % 1;
     const r0 = 30 + sp * 140, r1 = r0 + 10 + sp * 34;
     x.fillStyle = Q[i % 3 ? 0 : 3];
-    for (let r = r0; r < r1; r += 1.5) { const px = Math.round(cx + Math.cos(a) * r * 1.3), py = Math.round(cy + Math.sin(a) * r * 0.8); if (px < 0 || px >= W || py < 0 || py >= H) break; if (Math.abs(px - cx) < 40 && py > H - 70) continue; x.fillRect(px, py, 1, 1); }
+    for (let r = r0; r < r1; r += 1.5) { const px = Math.round(cx + Math.cos(a) * r * 1.3), py = Math.round(cy + Math.sin(a) * r * 0.8); if (px < 0 || px >= W || py < 0 || py >= H) break; if (Math.abs(px - cx) < 40 && py > H - 70) continue; x.fillRect(px, py, 2, 1); }
   }
   // 3) 邊緣色調脈動：左右兩條抖動的亮色網點
   const bw = 6 + Math.round(pulse * 6); x.fillStyle = Q[0];
@@ -421,16 +421,20 @@ export function drawMinimap(x: CanvasRenderingContext2D, v: View, mx: number, my
   const at = (z: number) => m.pts[((Math.floor(((z % v.len) + v.len) % v.len / SEG_LEN)) % n + n) % n];
   const dot = (p: [number, number], c: number) => { x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 2, my + p[1] - 2, 5, 5); x.fillStyle = Q[c]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 3, 3); };
   // v21：每台車都畫點（名次跟 HUD 一樣：先跑完的在前）。電腦＝小暗點；真人＝大點；前 3 名和真人標名次；自己閃爍＋P名次
-  const order = raceOrder(v.cars), placed: [number, number][] = [];
+  const order = raceOrder(v.cars), placed: [number, number, number][] = [];
   const lab = (t: string, p: [number, number], col: number) => {
-    const tw = textW(t); let tx = mx + p[0] + 4, ty = my + p[1] - 3;
-    if (tx + tw > W - 1) tx = mx + p[0] - 3 - tw;
-    for (let k = 0; k < 3 && placed.some(([qx, qy]) => Math.abs(qx - tx) < tw + 2 && Math.abs(qy - ty) < 7); k++) ty += 7;
-    placed.push([tx, ty]); otext(x, t, Math.max(0, tx), ty, col);
+    const tw = textW(t), px = mx + p[0], py = my + p[1];
+    const cands: [number, number][] = [[px + 5, py - 3], [px - 5 - tw, py - 3], [px - tw / 2, py - 12], [px - tw / 2, py + 5], [px + 5, py - 12], [px - 5 - tw, py + 5], [px + 5, py + 5], [px - 5 - tw, py - 12], [px - tw / 2, py - 18], [px - tw / 2, py + 11]];
+    const cost = ([cx0, cy0]: [number, number]) => (cx0 < 0 || cx0 + tw > W - 1 ? 99 : 0) + placed.reduce((n, [qx, qy, qw]) => n + Math.max(0, Math.min(cx0 + tw, qx + qw) - Math.max(cx0, qx) + 1) * Math.max(0, Math.min(cy0 + 7, qy + 7) - Math.max(cy0, qy)), 0);
+    const [tx, ty] = cands.reduce((b, c) => (cost(c) < cost(b) ? c : b));
+    placed.push([tx, ty, tw]); otext(x, t, Math.round(tx), Math.round(ty), col);
   };
   const others = order.map((c, i) => ({ c, i })).filter(({ c }) => !(v.me && c.id === v.me.id));
   for (const { c } of others) if (c.ai) { const p = at(c.z); x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 2, 2); }
-  for (const { c, i } of others) if (!c.ai || i < 3) { const p = at(c.z); dot(p, c.ai ? 2 : 1); if (v.hud) lab(String(i + 1), p, c.ai ? 2 : 1); }
+  const tagged = others.filter(({ c, i }) => !c.ai || i < 3);
+  for (const { c } of tagged) dot(at(c.z), c.ai ? 2 : 1);
+  if (v.hud) { for (const c of [...tagged.map((q) => q.c), ...(v.me ? [v.me] : [])]) { const p = at(c.z); placed.push([mx + p[0] - 3, my + p[1] - 3, 6]); } }
+  if (v.hud) for (const { c, i } of tagged) lab(String(i + 1), at(c.z), 0);
   if (v.me) { const p = at(v.me.z), on = v.frame % 8 < 5, r = order.findIndex((c) => c.id === v.me!.id) + 1;
     x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 3, my + p[1] - 3, 7, 7); x.fillStyle = Q[on ? 0 : 1]; x.fillRect(mx + p[0] - 2, my + p[1] - 2, 5, 5); x.fillStyle = Q[on ? 1 : 0]; x.fillRect(mx + p[0], my + p[1], 1, 1);
     if (v.hud) lab(`P${r}`, p, 0); }
