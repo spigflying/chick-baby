@@ -1,6 +1,7 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
 import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, type Track } from '@chick/engine';
 import { carBodyH, carPixels, LODS, PLAYER_W, type CarLook } from './race-cars';
+import { pickupDims } from './race-pickup';
 
 /** v3：內部解析度加倍（240×200）；HUD 仍以 120×100 座標畫、放大 2 倍（像經典賽車的粗 HUD）。 */
 export const W = 240, H = 200, R = 2;
@@ -325,11 +326,13 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   role('fx');
   for (const pk of v.pickups ?? []) { // 路上氮氣道具：跟車同一套投影
     if (Math.abs(pk.z - camZ) > v.len / 2) continue;
-    const p0 = place({ z: pk.z } as ViewCar); if (!p0 || p0.py > GROUND || (p0.clip < H && p0.py > p0.clip + 2) || (t.weather === 'fog' && p0.k > 13)) continue;
-    const img = pickupCanvas(night ? NIGHT.map((c, i) => (i === 0 ? G[0] : c)) : Q), hh = Math.max(3, Math.min(19, Math.round(p0.pw * 0.38))), ww = Math.max(3, Math.round(hh * img.width / img.height));
-    if (hh < 4 && p0.k > 30) continue;
-    const bob = 0;
-    sprites.push({ k: p0.k + 0.1, draw: () => x.drawImage(img, Math.round(p0.pxc + pk.x * p0.pw - ww / 2), Math.round(p0.py - hh) - bob, ww, hh) });
+    const p0 = place({ z: pk.z } as ViewCar); if (!p0 || (p0.clip < H && p0.py > p0.clip + 2) || (t.weather === 'fog' && p0.k > 13)) continue;
+    // 跟車一樣：比底線近就貼底線那一列（用那一列的路寬），尺寸只隨那一列路寬變大，不設上限
+    const row = p0.py > GROUND ? rowAt(GROUND) : null, lat = row ? row.w : p0.pw, cxp = row ? row.x : p0.pxc, py = row ? GROUND : p0.py;
+    const img = pickupCanvas(night ? NIGHT.map((c, i) => (i === 0 ? G[0] : c)) : Q), dm = pickupDims(lat, gw, PLAYER_W);
+    if (dm.h < 2) continue;
+    const ww = Math.max(2, Math.round(dm.w)), hh = Math.max(2, Math.round(dm.h));
+    sprites.push({ k: p0.k + 0.1, draw: () => x.drawImage(img, Math.round(cxp + pk.x * lat - ww / 2), Math.round(py - hh), ww, hh) });
   }
   for (const c of v.cars) {
     const isMe = !!v.me && c.id === v.me.id, p0 = place(c); if (!p0) continue;
@@ -457,7 +460,7 @@ export function drawMinimap(x: CanvasRenderingContext2D, v: View, mx: number, my
     const [tx, ty] = cands.reduce((b, c) => (cost(c) < cost(b) ? c : b));
     placed.push([tx, ty, tw]); otext(x, t, Math.round(tx), Math.round(ty), col);
   };
-  if (v.frame % 8 < 5) for (const pk of v.pickups ?? []) { const p = at(pk.z); x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 3, 3); } // 路上氮氣道具：閃爍小方塊（無光暈）
+  for (const pk of v.pickups ?? []) { const p = at(pk.z); x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 3, 3); } // 路上氮氣道具：固定小方塊（不閃、無光暈）
   const others = order.map((c, i) => ({ c, i })).filter(({ c }) => !(v.me && c.id === v.me.id));
   for (const { c } of others) if (c.ai) { const p = at(c.z); x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 2, 2); }
   const tagged = others.filter(({ c, i }) => !c.ai || i < 3);
@@ -543,11 +546,11 @@ function drawHud(x: CanvasRenderingContext2D, v: View, now = performance.now()) 
   // 右上：計時 0'28"98
   const ms = Math.max(0, v.tick - 60) * 50, ts = `${Math.floor(ms / 60000)}'${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}"${String(Math.floor(ms / 10) % 100).padStart(2, '0')}`;
   otext(x, ts, W - 6 - textW(ts, 2), 5, 0, 2);
-  drawMinimap(x, v, W - 70, 24, 58, 40);
+  drawMinimap(x, v, W - 104, 22, 100, 68); // v23：小地圖放大約 1.7 倍（原 58×40）
   role('hud');
   const lap = Math.min(v.laps, Math.floor(Math.max(0, me.z) / v.len) + 1);
-  otext(x, 'LAP', W - 86, 76, 0); otext(x, `${lap}/${v.laps}`, W - 62, 72, 0, 2);
-  const rk = String(v.rank), rw = textW(rk, 3) + 3 + textW(SUF(v.rank)); otext(x, rk, W - 8 - rw, 93, 0, 3); otext(x, SUF(v.rank), W - 8 - textW(SUF(v.rank)), 93, 0);
+  otext(x, 'LAP', W - 86, 98, 0); otext(x, `${lap}/${v.laps}`, W - 62, 94, 0, 2);
+  const rk = String(v.rank), rw = textW(rk, 3) + 3 + textW(SUF(v.rank)); otext(x, rk, W - 8 - rw, 112, 0, 3); otext(x, SUF(v.rank), W - 8 - textW(SUF(v.rank)), 112, 0);
   // 倒數／訊息
   if (v.countdown > 0) { const s = String(Math.ceil(v.countdown / 20)); otext(x, s, W / 2 - 15, 40, 0, 6); }
   else if (v.tick - 60 < 20 && v.tick >= 60) otext(x, 'GO!', W / 2 - 34, 46, 0, 4);
