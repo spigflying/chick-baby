@@ -227,6 +227,8 @@ export function createRace(seed: number, trackId: string, entrants: Entrant[], d
   // 發車：電腦依實力排（最強在最前），玩家全部在最後（TG2 規則）
   const ai = entrants.filter((e) => e.ai).map((e) => ({ e, form: (e.skill ?? 1) * (0.94 + nextFloat(rng) * 0.12) })).sort((a, b) => b.form - a.form);
   const hum = entrants.filter((e) => !e.ai);
+  // v26：真人仍全部排在電腦後面，但真人之間用比賽種子洗牌（Fisher–Yates，同一種子結果相同）
+  for (let i = hum.length - 1; i > 0; i--) { const j = Math.floor(nextFloat(rng) * (i + 1)); [hum[i], hum[j]] = [hum[j], hum[i]]; }
   const order = [...ai.map((a) => ({ e: a.e, form: a.form })), ...hum.map((e) => ({ e, form: 1 }))].slice(0, RACE_SLOTS);
   const cars: RaceCar[] = order.map(({ e, form }, i) => {
     const st = carStats(e.parts ?? STOCK_PARTS, e.ai ? 'falcon' : e.car);
