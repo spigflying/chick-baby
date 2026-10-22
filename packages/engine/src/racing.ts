@@ -19,11 +19,11 @@ export const RACES_PER_COUNTRY = 4;
 export const RACE_ENGINE_VERSION = 2;
 
 // ---------------- 改裝店（TG2）：8 類 × 4 項（原廠標準免費＋升級 1／2／3 階） ----------------
-// 價格＝TG2 原價 ÷ PRICE_DIVISOR（保留 TG2 的價格比例），單位＝寵物金幣 ◎（錢從下樓梯來，見 docs/racing.md 經濟）。
+// 價格＝TG2 原價 ÷ PRICE_DIVISOR（v17 起 0.5，也就是 TG2 原價 ×2）（保留 TG2 的價格比例），單位＝寵物金幣 ◎（錢從下樓梯來，見 docs/racing.md 經濟）。
 // 任何一階都可以直接買；換到別的階（包括降級）舊零件直接丟掉、全額付款、不退錢。原廠標準＝免費。
 export type PartKind = 'engine' | 'gearbox' | 'nitro' | 'dry' | 'wet' | 'armorF' | 'armorR' | 'armorS';
 export interface PartTier { name: string; price: number; tg2: number }
-export const PRICE_DIVISOR = 25;
+export const PRICE_DIVISOR = 0.5; // v17：價格 ×50（TG2 原價 ×2）
 export const TIER_NAMES = ['原廠標準', '升級 1 階', '升級 2 階', '升級 3 階'];
 const tiers = (tg2: number[]): PartTier[] => [0, ...tg2].map((v, i) => ({ name: TIER_NAMES[i], price: v / PRICE_DIVISOR, tg2: v }));
 export const PARTS: Record<PartKind, { label: string; desc: string; tiers: PartTier[] }> = {
