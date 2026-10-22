@@ -55,7 +55,7 @@ function scene(kind: string) {
 async function page() {
   await import('./style.css');
   const { racePage } = await import('./race');
-  const { createRace, stepRace, setRaceInput, raceRanking, raceTimeMs, TRACKS, PARTS, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, prizeFor, pointsFor, condition, ME, newCup } = await import('@chick/engine');
+  const { snapCar, createRace, stepRace, setRaceInput, raceRanking, raceTimeMs, TRACKS, PARTS, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, prizeFor, pointsFor, condition, ME, newCup } = await import('@chick/engine');
   let coins = 3400;
   const prof: any = { points: 16, wins: 1, races: 3, season: '2026-10', paint: 0, parts: { engine: 1, gearbox: 2, dry: 3, wet: 1, nitro: 2, armorF: 1, armorS: 0, armorR: 0 }, car: 'falcon', unlocked: 1, cup: { ...newCup(0), race: 2, points: { [ME]: 16, '阿飛': 14, '雷霆': 10, '閃電': 7 } } };
   const realFetch = window.fetch.bind(window);
@@ -77,7 +77,7 @@ async function page() {
   w.__start = (track: string) => {
     sim = createRace(5, track, fillField([{ id: 'b', name: 'benson', car: 'muscle', color: 1, parts: prof.parts }, { id: 'me', name: 'racer', car: 'falcon', color: 0, parts: prof.parts as any }]));
     emit({ type: 'race.started', race_id: 'r1', track, seed: 5, cars: sim.cars.map((c: any) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color })), laps: sim.laps, len: sim.len, tick_rate: 20 });
-    const snap = () => emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: sim.countdown, cars: sim.cars.map((c: any) => [c.id, c.z, c.x, c.speed, c.damage, c.nitro, c.nitroT, c.finishedTick, c.hit]) });
+    const snap = () => emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: sim.countdown, cars: sim.cars.map(snapCar) });
     timer = window.setInterval(() => { stepRace(sim); stepRace(sim); snap(); }, 100);
   };
   w.__sim = () => sim;
@@ -85,7 +85,7 @@ async function page() {
   w.__finish = () => {
     clearInterval(timer); while (!sim.over) { const me = sim.cars.find((c: any) => c.id === 'me'); setRaceInput(sim, 'me', { gas: true, left: me.x > 0.2, right: me.x < -0.2 }); stepRace(sim); }
     const rk = raceRanking(sim); const meC = sim.cars.find((c: any) => c.id === 'me'); const pos = rk.indexOf(meC) + 1;
-    emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: 0, cars: sim.cars.map((c: any) => [c.id, c.z, c.x, c.speed, c.damage, c.nitro, c.nitroT, c.finishedTick, c.hit]) });
+    emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: 0, cars: sim.cars.map(snapCar) });
     emit({ type: 'race.ended', race_id: 'r1', track: sim.track, ranking: rk.map((c: any, i: number) => ({ id: c.id, name: c.name, ai: c.ai, rank: i + 1, time_ms: raceTimeMs(sim, c), condition: condition(c) })), me: (() => { const r = settleCup(prof.cup, 1, 'tw3', rk.map((c: any, i: number) => ({ key: c.id === 'me' ? ME : c.ai ? c.name : 'user:' + c.id, rank: i + 1 }))); return { user_id: 'me', rank: pos, prize: prizeFor(pos), points: pointsFor(pos), time_ms: raceTimeMs(sim, meC), condition: condition(meC), hits: meC.hits, unlocked: r.unlocked, qualified: r.qualified, cup_counted: r.counted, country_done: r.countryDone, champion: r.champion, cup: r.cup, standings: r.standings.slice(0, 10) }; })() });
   };
   document.body.style.background = '#1a1030';
@@ -124,10 +124,27 @@ function at() {
   const mk = (i: number, z: number, xx: number, extra: Partial<ViewCar> = {}): ViewCar => ({ id: 'c' + i, name: 'c' + i, ai: true, car: 'ai', color: 0, z, x: xx, speed: 60, damage: 0, nitro: 3, nitroT: 0, fin: null, hit: 0, ...extra });
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.style.width = W * 3 + 'px'; const x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
   let frame = 0;
-  (window as any).__draw = (z: number, xx: number) => { frame++; const me = mk(0, z, xx, { id: 'me', car: 'falcon', color: 0 }); const cars = [mk(1, z + 30, -0.4), mk(2, z + 90, 0.35), mk(3, z + 180, -0.2), mk(4, z + 300, 0.3), me];
+  (window as any).__draw = (z: number, xx: number) => { frame++; const me = mk(0, z, xx, { id: 'me', car: 'falcon', color: 0 }); const cars = [...(kind === 'scale' ? [mk(5, z, -0.55, { car: 'muscle', ai: false, color: 4 }), mk(6, z + 8, 0.6), mk(7, z + 16, -0.5)] : []), mk(1, z + 30, -0.4), mk(2, z + 90, 0.35), mk(3, z + 180, -0.2), mk(4, z + 300, 0.3), me];
     drawRace(x, { track, me, cars, tick: 400, countdown: 0, laps: track.laps, len, rank: 7, frame, hud: true, gears: 5, top: 84 }); };
   (window as any).__z0 = z0; (window as any).__draw(z0, Number(q.get('x') ?? 0.1));
   const d = document.createElement('div'); d.id = 'shots'; d.append(cv); root.append(d);
 }
-if (v === 'at') at(); else if (v === 'icons') void icons(); else if (v === 'sheet') sheet(); else if (v === 'page') void page(); else scene(v);
+// v14：真的跑模擬（玩家＋電腦），__simFrame(left,right) 前進 1/60 秒並在兩個 tick 之間內插畫面
+async function simv() {
+  const { createRace, stepRace, setRaceInput, fillField } = await import('@chick/engine'); (window as any).__simObj = () => sim;
+  const q = new URLSearchParams(location.search), track = trackById(q.get('t') ?? 'tw1')!;
+  const sim = createRace(7, track.id, fillField([{ id: 'me', name: 'me', parts: { engine: 2, gearbox: 2, dry: 1 } }]));
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
+  for (let i = 0; i < Number(q.get('skip') ?? 400); i++) { const m = sim.cars.find((c) => c.id === 'me')!; setRaceInput(sim, 'me', { gas: true, left: m.x > 0.05, right: m.x < -0.05 }); stepRace(sim); }
+  let prev = new Map(sim.cars.map((c) => [c.id, [c.z, c.x, c.flip ?? 0]])), sub = 0, frame = 0;
+  (window as any).__simFrame = (left: boolean, right: boolean) => {
+    if (sub === 0) { prev = new Map(sim.cars.map((c) => [c.id, [c.z, c.x, c.flip ?? 0]])); setRaceInput(sim, 'me', { gas: true, left, right }); stepRace(sim); }
+    sub = (sub + 1) % 3; const f = sub === 0 ? 1 : sub / 3; frame++;
+    const cars = sim.cars.map((c) => { const p = prev.get(c.id)!; return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[0] + (c.z - p[0]) * f, x: p[1] + (c.x - p[1]) * f, speed: c.speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT, fin: c.finishedTick, hit: c.hit, evT: c.evT, evK: c.evK, evS: c.evS, evSide: c.evSide, flip: c.flip ? (prev.get(c.id)![2] || c.flip) + (c.flip - (prev.get(c.id)![2] || c.flip)) * f : 0 } as ViewCar; });
+    drawRace(x, { now: frame * 1000 / 60, track, me: cars.find((c) => c.id === 'me')!, cars, tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len, rank: 1, frame: Math.floor(frame / 3), hud: true, gears: 5, top: 80 });
+    return sim.cars.find((c) => c.id === 'me')!.x;
+  };
+  const d = document.createElement('div'); d.id = 'shots'; d.append(cv); root.append(d); (window as any).__ok = 1;
+}
+if (v === 'sim') void simv(); else if (v === 'at') at(); else if (v === 'icons') void icons(); else if (v === 'sheet') sheet(); else if (v === 'page') void page(); else scene(v);
 (window as any).__ready = v !== 'page' || true;

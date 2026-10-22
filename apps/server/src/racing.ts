@@ -8,7 +8,7 @@ import { sql } from 'kysely';
 import {
   CARS, COUNTRIES, MAX_OUT_COST, ME, PAINTS, PAINT_NAMES, PRIZES, PART_KINDS, PARTS, partPrice, RACE_SLOTS, RACE_TICK_RATE, TRACKS, condition, createRace, cupTrack, fillField,
   createInvite, inviteOutcome, replyInvite, type Invite, newCup, normParts, pointsFor, prizeFor, raceRanking, raceTimeMs, seasonOf, setRaceInput, settleCup, stepRace, trackById, type PartKind, type RaceState,
-} from '@chick/engine';
+  snapCar } from '@chick/engine';
 import type { Db } from './db';
 import { audit, changeBalance, lockWallets, type ReqCtx } from './core';
 import { fail } from './errors';
@@ -236,7 +236,7 @@ export function onRacePresence(home: string) {
   const here = new Set(deps.presence.users(home).map((u) => u.id));
   for (const u of [lb.invite.from, ...lb.invite.to]) if (!here.has(u)) leaveLobby(home, u);
 }
-const snap = (r: Room) => ({ t: 'rrace.snap', tick: r.state.tick, countdown: r.state.countdown, cars: r.state.cars.map((c) => [c.id, +c.z.toFixed(2), +c.x.toFixed(3), +c.speed.toFixed(2), +c.damage.toFixed(1), c.nitro, c.nitroT, c.finishedTick, c.hit]) });
+const snap = (r: Room) => ({ t: 'rrace.snap', tick: r.state.tick, countdown: r.state.countdown, cars: r.state.cars.map(snapCar) });
 export function stepRaces(now = Date.now()) {
   if (!deps) return;
   for (const lb of [...lobbies.values()]) { if (!isAuthority(lb.home)) onRacePresence(lb.home); else resolveLobby(lb, now); }

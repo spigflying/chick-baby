@@ -56,7 +56,7 @@ function coin(x: CanvasRenderingContext2D, px: number, py: number, col: number) 
   m.forEach((r, j) => [...r].forEach((v, i) => { if (v === '1') x.fillRect(px + i, py + j, 1, 1); }));
 }
 function price(x: CanvasRenderingContext2D, n: number, cx: number, y: number, col = 0) {
-  const s = String(n), w = 9 + textW(s); coin(x, cx - w / 2, y, col); text(x, s, cx - w / 2 + 9, y, col);
+  const s = n.toLocaleString('en-US'), w = 9 + textW(s); coin(x, cx - w / 2, y, col); text(x, s, cx - w / 2 + 9, y, col);
 }
 /** 方框：外框（一般第 2 階、選中第 0 階粗框）、內底兩段色（上淺下深，像原作的藍色漸層） */
 function frame(x: CanvasRenderingContext2D, px: number, py: number, s: number, sel: boolean, blink: boolean, hh = s) {
@@ -116,7 +116,7 @@ export function drawShop(x: CanvasRenderingContext2D, ui: ShopUI, prof: any, coi
   }
   // 左下：金幣
   zh(x, '金幣', 8, 142, 3); zh(x, '金幣', 7, 141, 1);
-  coin(x, 36, 144, 0); text(x, String(coins), 46, 141, 0, 2);
+  const cs = coins.toLocaleString('en-US'); coin(x, 36, 144, 0); if (46 + textW(cs, 2) < 126) text(x, cs, 46, 141, 0, 2); else text(x, cs, 46, 145, 0, 1); // 大數字縮成 1 倍，不壓到右下格子
   // 下方訊息列
   x.fillStyle = G[2]; x.fillRect(4, 164, W - 8, 33); x.fillStyle = G[3]; x.fillRect(5, 165, W - 10, 31);
   const l1 = (s: string, c = 0) => zh(x, s, 10, 167, c), l2 = (s: string, c = 1) => zh(x, s, 10, 181, c);
@@ -125,8 +125,8 @@ export function drawShop(x: CanvasRenderingContext2D, ui: ShopUI, prof: any, coi
     const n = PAINT_NAMES[ui.cur] ?? ''; l1(`${n}${prof.paint === ui.cur ? '（使用中）' : ''}　${CARS.find((c) => c.id === prof.car)?.name ?? ''}`); l2(prof.paint === ui.cur ? '←→↑↓ 選顏色，後面的車會跟著變' : '按 A 直接換上（不用付錢）'); return;
   }
   const t = PARTS[k!].tiers[ui.cur], equipped = prof.parts[k!] === ui.cur;
-  if (ui.confirm && t) { l1(t.price ? `換成${t.name}：付 ${t.price} 金幣？` : `換回${t.name}（免費）？`, 0); l2(`舊的「${PARTS[k!].tiers[prof.parts[k!]].name}」丟掉不退錢　A 確定　B 取消`, 1); return; }
-  if (t) { l1(`${t.name}　${equipped ? '裝備中' : t.price ? `${t.price} 金幣` : '免費'}`, 0); l2(equipped ? PARTS[k!].desc : t.price > coins ? '金幣不夠：去下樓梯賺吧' : `按 A 購買（舊零件丟掉、不退錢）`); }
+  if (ui.confirm && t) { l1(t.price ? `換成${t.name}：付 ${t.price.toLocaleString('en-US')} 金幣？` : `換回${t.name}（免費）？`, 0); l2(`舊的「${PARTS[k!].tiers[prof.parts[k!]].name}」丟掉不退錢　A 確定　B 取消`, 1); return; }
+  if (t) { l1(`${t.name}　${equipped ? '裝備中' : t.price ? `${t.price.toLocaleString('en-US')} 金幣` : '免費'}`, 0); l2(equipped ? PARTS[k!].desc : t.price > coins ? '金幣不夠：去下樓梯賺吧' : `按 A 購買（舊零件丟掉、不退錢）`); }
 }
 
 /** 畫布點擊：回傳 'prev' | 'next' | 格子編號 | null */

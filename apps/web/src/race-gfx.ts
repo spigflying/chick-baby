@@ -1,5 +1,5 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
-import { SEG_LEN, trackSegs, trackById, NITRO_PER_RACE, type Track } from '@chick/engine';
+import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, type Track } from '@chick/engine';
 import { carBodyH, carPixels, LODS, PLAYER_W, type CarLook } from './race-cars';
 
 /** v3：內部解析度加倍（240×200）；HUD 仍以 120×100 座標畫、放大 2 倍（像經典賽車的粗 HUD）。 */
@@ -32,6 +32,8 @@ export function carCanvas(model: string, color: number, opts: CarLook = {}, lod 
   (c as any).bodyH = carBodyH(lod); // 車身高度（不含火焰），用來對齊地面
   carCache.set(key, c); return c;
 }
+/** v14：挑不小於目標寬度的最小 LOD（再縮到目標寬），比 48 大就用 48 放大。 */
+export function lodFor(targetW: number) { for (let i = LODS.length - 1; i >= 0; i--) if (LODS[i] >= targetW - 0.5) return i; return 0; }
 /** 依照畫面上應有的寬度挑 LOD：挑「不超過目標寬度」的最大一張，原尺寸畫，不縮放。 */
 export function pickLod(targetW: number) { for (let i = 0; i < LODS.length; i++) if (LODS[i] <= targetW + 0.5) return i; return LODS.length - 1; }
 /** 車寬（以半個路寬為 1）：玩家在 PLAYER_DZ 時剛好 24px，所以同深度的車都一樣大。 */
@@ -53,7 +55,6 @@ const PROPS: Record<string, string[]> = {
   tyres: ['.3333.', '312213', '.3333.', '312213', '.3333.', '312213', '.3333.'],
   bush: ['..333..', '.32223.', '3212223', '3222223', '.33333.'],
 };
-const SCENE_PROPS: Record<string, string[]> = { city: ['tyres', 'bush', 'pine', 'bush'], forest: ['pine', 'pine', 'rock', 'bush', 'tyres'], desert: ['cactus', 'rock', 'sign', 'tyres'], farm: ['fence', 'hay', 'pine', 'bush', 'tyres'], coast: ['palm', 'palm', 'sign', 'tyres', 'bush'], snow: ['snowpine', 'rock', 'snowpine', 'tyres'] };
 const propCache = new Map<string, HTMLCanvasElement>();
 function propCanvas(name: string, night: boolean) {
   const key = name + night + Q[1]; let c = propCache.get(key); if (c) return c;
@@ -157,14 +158,16 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
   x.fillStyle = Q[edge]; x.fillRect(px, py, w, h); x.fillStyle = Q[bg]; x.fillRect(px + 1, py + 1, w - 2, h - 2);
 }
 
-export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean }
-export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number }
+export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number }
+export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number }
 
 /** v13：彎道視覺強度（每公尺彎度係數）、攝影機橫向跟車比例。 */
 const CURVE_K = 0.0004, CAM_FOLLOW = 0.4;
 const ROAD_W = 2.4, CAM_H = 7.5, DEPTH = 0.9, DRAW = 60, HORIZON = 116; // v11：路寬照 TG2（車底那一列路寬 ≈ 0.9 畫面寬、車 ≈ 路寬 0.24）、攝影機較高，地平線 58%
 /** 玩家深度的半路寬（px）。車寬一律 = CAR_W × 半路寬 × 2 再乘同一個常數，所以只跟深度有關。 */
 const playerPw = () => ROAD_W * (DEPTH * 6 / (PLAYER_DZ + 4)) * (W / 2);
+/** v16：路面上跟 40%，衝出路面後平滑加到 85%，翻車／撞路邊物時車還在畫面裡。 */
+const camFollow = (x: number) => { const t = Math.max(0, Math.min(1, (Math.abs(x) - 0.95) / 0.4)); return CAM_FOLLOW + (0.85 - CAM_FOLLOW) * t * t * (3 - 2 * t); };
 /** 彎度前綴和（天空視差用）。 */
 const prefCache = new Map<string, number[]>();
 function curvePrefix(t: Track) { let p = prefCache.get(t.id); if (!p) { const s = trackSegs(t.id); p = [0]; for (let i = 0; i < s.length; i++) p.push(p[i] + s[i].curve); prefCache.set(t.id, p); } return p; }
@@ -191,13 +194,49 @@ export function elevAt(e: Elev, z: number) {
   if (!e.a[i]) return 0; const u = (z / SEG_LEN - e.s[i]) / e.l[i];
   return e.a[i] * (1 - Math.cos(u * Math.PI * 2)) / 2;
 }
+// ---------- v15 碰撞特效：震動、火花碎片、車身閃白、HUD 損傷圖分區閃 ----------
+interface Spark { id: string; ox: number; oy: number; vx: number; vy: number; t0: number; life: number; c: number; sz: number }
+interface HitFx { t0: number; k: number; s: number; side: number }
+const fxSeen = new Map<string, number>(), fxHit = new Map<string, HitFx>(); let sparks: Spark[] = [];
+/** 力道 0..1（伺服器的 evS：路邊 ~2-8、追撞 ~1-4、側擦 2.5） */
+const hitK = (s: number) => Math.max(0.25, Math.min(1, s / 7));
+function fxUpdate(cars: ViewCar[], now: number) {
+  for (const c of cars) {
+    const t = c.evT ?? 0, seen = fxSeen.get(c.id);
+    if (seen === undefined) { fxSeen.set(c.id, t); continue; } // 第一次看到這台：舊事件不補播
+    if (t <= seen || !c.evK) continue; fxSeen.set(c.id, t);
+    const big = c.evK === HIT_OBJECT, k = big ? 1 : hitK(c.evS ?? 2), side = c.evSide ?? 0; fxHit.set(c.id, { t0: now, k: big ? 1.6 : k, s: c.evS ?? 2, side });
+    // 碰撞點（相對車身中心，單位＝車寬；y：0 車頂 1 車底）：前＝車頂中央、後＝車尾下緣、側＝左右邊
+    const [px, py] = big ? [side * 0.3, 0.3] : c.evK === HIT_FRONT ? [0, 0.15] : c.evK === HIT_BACK ? [0, 0.85] : [side * 0.5, 0.55];
+    const n = Math.round((6 + 14 * k) * (big ? 2.2 : 1));
+    for (let i = 0; i < n; i++) { const a = big ? Math.random() * Math.PI * 2 : (c.evK === HIT_FRONT ? -Math.PI / 2 : c.evK === HIT_BACK ? Math.PI / 2 : side > 0 ? 0 : Math.PI) + (Math.random() - 0.5) * 2.2;
+      const sp = 25 + Math.random() * 70 * k * (big ? 1.6 : 1); sparks.push({ id: c.id, ox: px, oy: py, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 30 * Math.random(), t0: now, life: 180 + Math.random() * 260 * k, c: i % 3 === 0 ? 3 : i % 3 === 1 ? 0 : 1, sz: Math.random() < 0.3 * k ? 2 : 1 }); }
+    if (sparks.length > 300) sparks = sparks.slice(-300);
+  }
+}
+const HIT_FRONT = 2, HIT_BACK = 3; // 引擎 HIT_REAR_END（撞到前車＝前頭受損）、HIT_REARED（被追撞＝車尾）
+/** 目前這台車的撞擊狀態（0..1 剩餘比例），沒有就 null */
+function hitAge(id: string, now: number, ms: number) { const h = fxHit.get(id); if (!h) return null; const a = (now - h.t0) / ms; return a >= 0 && a < 1 ? { ...h, a } : null; }
+const flashCache = new Map<HTMLCanvasElement, HTMLCanvasElement>();
+/** 車的白色剪影（閃白用） */
+function flashOf(img: HTMLCanvasElement) { let f = flashCache.get(img); if (f) return f; f = document.createElement('canvas'); f.width = img.width; f.height = img.height; const c = f.getContext('2d')!; c.drawImage(img, 0, 0); c.globalCompositeOperation = 'source-in'; c.fillStyle = Q[0]; c.fillRect(0, 0, f.width, f.height); if (flashCache.size > 200) flashCache.clear(); flashCache.set(img, f); return f; }
+/** HUD 損傷圖：哪一區在閃（F 前、R 後、S 側），沒有回傳 null */
+function hudZone(me: ViewCar, now: number): { zone: 'f' | 'r' | 's'; on: boolean } | null {
+  const h = hitAge(me.id, now, 700); if (!h) return null; const k = fxHit.get(me.id)!; void k;
+  const ev = me.evK ?? 0; return { zone: ev === HIT_FRONT ? 'f' : ev === HIT_BACK ? 'r' : 's', on: Math.floor(h.a * 10) % 2 === 0 };
+}
 /** 畫一個畫面。 */
 export function drawRace(x: CanvasRenderingContext2D, v: View) {
-  const t = v.track, segs = trackSegs(t.id), n = segs.length;
+  const t = v.track, segs = trackSegs(t.id), n = segs.length, now = v.now ?? performance.now();
+  fxUpdate(v.cars, now);
+  // 震動：自己被撞時整個畫面（不含 HUD）抖 2-4px，150-250ms，越後面越小
+  const sh = v.me ? hitAge(v.me.id, now, 150 + 100 * (fxHit.get(v.me.id)?.k ?? 0)) : null;
+  x.save();
+  if (sh) { const amp = (2 + 2 * sh.k) * (1 - sh.a), ph = Math.floor(now / 33); x.translate(Math.round((ph % 2 ? 1 : -1) * amp), Math.round(((ph >> 1) % 2 ? 1 : -1) * amp * 0.6)); }
   const night = t.weather === 'night', P = night ? NIGHT : G;
   const camZ = v.camZ ?? (v.me ? v.me.z - PLAYER_DZ : 0);
   // v13：攝影機跟著車橫移一部分（世界單位：半路寬 = ROAD_W），全部用小數，不先取整
-  const camXw = v.camX !== undefined ? v.camX * ROAD_W : (v.me ? v.me.x * ROAD_W * CAM_FOLLOW : 0);
+  const camXw = v.camX !== undefined ? v.camX * ROAD_W : (v.me ? v.me.x * ROAD_W * camFollow(v.me.x) : 0);
   const base = Math.floor(camZ / SEG_LEN), frac = (camZ % SEG_LEN + SEG_LEN) % SEG_LEN / SEG_LEN;
   const el = elevTable(t), camY = elevAt(el, camZ + PLAYER_DZ) + CAM_H;
   // 天空與遠景（隨彎道視差移動）：累積彎度＋本段小數部分，連續不跳格
@@ -242,16 +281,16 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   }
   // 路邊物與其他車（遠到近）
   const sprites: { k: number; draw: () => void }[] = [];
-  const names = SCENE_PROPS[t.scenery];
-  for (let k = Math.min(DRAW - 1, 26); k > 1; k--) {
+  // v16：路邊物位置來自引擎 roadside()（伺服器用同一份做碰撞）；pts[k] 正好在第 base+k 段的起點
+  const side = roadside(t.id), bySeg = new Map<number, typeof side>(); for (const o of side) { const l = bySeg.get(o.seg); if (l) l.push(o); else bySeg.set(o.seg, [o]); }
+  for (let k = Math.min(DRAW - 1, 26); k >= 1; k--) {
     const p = pts[k]; if (!p.scale || p.w < 4) continue;
-    const segIdx = ((p.i % n) + n) % n;
-    if (segIdx % 4 === 0) for (const side of [-1, 1]) {
-      const h = hash(segIdx * 2 + (side > 0 ? 1 : 0)); if (h < 0.25) continue;
-      const name = names[Math.floor(h * 97) % names.length]; role('prop'); const img = propCanvas(name, night);
-      const wx = p.x + side * p.w * (1.25 + h * 0.4), sc = p.w / ROAD_W * 0.75 / 14 * (name === 'tower' ? 2.2 : 1.6);
+    const segIdx = (((base + k) % n) + n) % n, os = bySeg.get(segIdx); if (!os) continue;
+    if (p.y > pts[k].clip + 1) continue;
+    for (const o of os) {
+      role('prop'); const img = propCanvas(o.name, night);
+      const wx = p.x + o.x * p.w, sc = p.w / ROAD_W * 0.75 / 14 * (o.name === 'tower' ? 2.2 : 1.6);
       const ww = img.width * sc, hh = img.height * sc;
-      if (p.y > pts[k].clip + 1) continue;
       sprites.push({ k, draw: () => { x.drawImage(img, Math.round(wx - ww / 2), Math.round(p.y - hh), Math.max(1, Math.round(ww)), Math.max(1, Math.round(hh))); } });
     }
   }
@@ -262,33 +301,52 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     let k = 0; while (k + 1 < pts.length && pts[k + 1].d <= dz) k++;
     const a = pts[k]; if (!a || !pts[k + 1]) return null;
     const u = dz - a.d, wx = a.wx + a.h * u + a.c * u * u / 2, wy = elevAt(el, camZ + dz), p = proj(dz, wx, wy);
-    return { k: k + 1, py: p.py, pxc: p.pxc, pw: ROAD_W * p.scale * (W / 2), clip: pts[k + 1].clip };
+    return { k: k + 1, py: p.py, pxc: p.pxc, pw: ROAD_W * p.scale * (W / 2), clip: a.clip };
   };
+  // v14：近處的車（含自己）真實深度會投影到畫面外，畫的時候抬到底線 GROUND；橫向位置也要用「那一列」的路寬，
+  // 否則車左右移動比路面快 ~1.8 倍（這正是轉向看起來很衝的原因之一），並排的電腦車也會被甩到畫面邊。
+  const GROUND = H - 6;
+  const rowAt = (y: number) => { for (let k = 1; k < pts.length; k++) { const a = pts[k - 1], b = pts[k]; if (b.y <= y && a.y >= y && a.y > b.y) { const f = (y - b.y) / (a.y - b.y); return { x: b.x + (a.x - b.x) * f, w: b.w + (a.w - b.w) * f }; } } return null; };
+  const gw = rowAt(GROUND)?.w ?? playerPw(); // 底線那一列的半路寬：玩家車寬 PLAYER_W 對應這個路寬
   for (const c of v.cars) {
-    const isMe = !!v.me && c.id === v.me.id, p = place(c); if (!p) continue;
-    if (!isMe && p.py > p.clip + 2) continue; // 被坡頂擋住
+    const isMe = !!v.me && c.id === v.me.id, p0 = place(c); if (!p0) continue;
+    const row = p0.py > GROUND ? rowAt(GROUND) : null, p = row ? { ...p0, pxc: row.x, lat: row.w } : { ...p0, lat: p0.pw };
+    if (!isMe && p.clip < H && p.py > p.clip + 2) continue; // 被坡頂擋住
     if (!isMe && t.weather === 'fog' && p.k > 13) continue; // 霧裡看不到遠方的車
-    const target = PLAYER_W * p.pw / playerPw(); if (!isMe && target < 5) continue; const lod = isMe ? -1 : pickLod(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
+    const target = PLAYER_W * p.lat / gw; /* v14：車寬跟畫在那一列的路寬成正比 */ if (!isMe && target < 5) continue; const lod = isMe ? -1 : lodFor(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
     const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 60 && v.frame % 20 < 2), frame: v.frame }, lod);
     const bh = (img as any).bodyH as number;
     const bob = isMe && c.speed > 5 && v.frame % 4 < 2 ? 1 : 0, shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
     // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
-    const scale = !isMe && target > 50 ? target / 48 : 1;
+    // v14：AI 與玩家同比例 —— 挑「不小於目標寬度」的 LOD 再縮到剛好目標寬（以前挑較小的 LOD 不放大，遠一點就小一截）
+    const scale = isMe ? 1 : target / LODS[lod];
     const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
-    const sx = Math.round(p.pxc + c.x * p.pw - dw / 2 + shake), sy = (isMe ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.round(p.py - bh * scale)) - bob;
+    const sx = Math.round(p.pxc + c.x * p.lat - dw / 2 + shake), sy = (isMe ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.min(H - 6 - Math.round(bh * scale), Math.round(p.py - bh * scale))) - bob; // v14：和玩家並排的車也貼同一條底線，不會掉出畫面
     sprites.push({ k: p.k + (isMe ? -0.5 : 0), draw: () => {
-      x.drawImage(img, sx, sy, dw, dh);
+      const fp = c.flip ? 1 - c.flip / FLIP_TICKS : 0;
+      if (fp > 0) { // v16 翻車：拋起來翻滾兩圈半、往外側飄，落地前壓扁（像 TG2 撞樹翻車）
+        const dir = c.x >= 0 ? 1 : -1, lift = Math.sin(Math.PI * Math.min(1, fp * 1.15)) * dh * 1.6, ang = dir * fp * Math.PI * 5;
+        const squash = fp > 0.85 ? 1 - (fp - 0.85) * 2 : 1;
+        x.save(); x.translate(Math.round(sx + dw / 2 + dir * fp * dw * 0.35), Math.round(sy + dh / 2 - lift)); x.rotate(Math.round(ang / (Math.PI / 8)) * (Math.PI / 8)); x.scale(1, squash);
+        x.drawImage(img, -dw / 2, -dh / 2, dw, dh); if (fp < 0.08) x.drawImage(flashOf(img), -dw / 2, -dh / 2, dw, dh); x.restore();
+        x.fillStyle = Q[3]; const shw = Math.round(dw * (0.5 + 0.5 * (1 - lift / (dh * 1.6)))); x.fillRect(Math.round(sx + dw / 2 - shw / 2 + dir * fp * dw * 0.35), sy + dh - 2, shw, 2); // 地上影子
+      } else x.drawImage(img, sx, sy, dw, dh);
+      const fl = hitAge(c.id, now, 90 + 90 * (fxHit.get(c.id)?.k ?? 0)); if (fl && Math.floor(fl.a * 4) % 2 === 0) x.drawImage(flashOf(img), sx, sy, dw, dh); // 閃白
+      for (const p of sparks) { if (p.id !== c.id) continue; const age = now - p.t0; if (age < 0 || age > p.life) continue; const ts = age / 1000;
+        const sc = dw / 48; x.fillStyle = Q[p.c]; x.fillRect(Math.round(sx + dw / 2 + p.ox * dw + p.vx * ts * sc), Math.round(sy + p.oy * dh + (p.vy * ts + 160 * ts * ts) * sc), p.sz, p.sz); }
       if (isMe && c.damage > 50) for (let i = 0; i < 3; i++) { x.fillStyle = Q[i % 2 ? 1 : 2]; x.fillRect(sx + 6 + ((v.frame * 3 + i * 7) % 12), sy - 3 - ((v.frame + i * 3) % 6), 2, 2); }
       if (isMe && Math.abs(c.x) > 1 && c.speed > 5) for (let i = 0; i < 4; i++) { x.fillStyle = Q[1]; x.fillRect(sx + (i % 2 ? dw - 2 : 0) + (v.frame % 3), sy + bh - 2 - (i >> 1) * 2, 2, 1); }
     } });
   }
   sprites.sort((p, q) => q.k - p.k).forEach((s) => s.draw());
+  if (sparks.length && now - sparks[0].t0 > 1500) sparks = sparks.filter((p) => now - p.t0 < 1000);
   // 天氣
   role('fx');
   if (t.weather === 'rain') { x.fillStyle = Q[1]; for (let i = 0; i < 90; i++) { const rx = Math.floor((hash(i) * W + v.frame * 6 + i * 7) % W), ry = Math.floor((hash(i + 99) * H + v.frame * 18) % H); x.fillRect(rx, ry, 1, 5); x.fillRect(rx - 1, ry + 5, 1, 2); } }
   if (t.weather === 'snow') { x.fillStyle = Q[0]; for (let i = 0; i < 90; i++) { const sx = Math.floor((hash(i) * W + Math.sin((v.frame + i * 13) / 9) * 3 - (v.me?.x ?? 0) * 10 + W) % W), sy = Math.floor((hash(i + 7) * H + v.frame * (1 + (i % 3))) % H); x.fillRect(sx, sy, i % 4 ? 1 : 2, 1); } }
   if (t.weather === 'fog') { const fc = txCache(`fog${Q[1]}|${v.frame & 1}`, W, HORIZON + 30, (cx) => { cx.fillStyle = Q[1]; for (let yy = 0; yy < HORIZON + 30; yy++) for (let xx = (yy + v.frame) & 1; xx < W; xx += yy < HORIZON ? 2 : 4 + ((yy - HORIZON) >> 3)) if (yy < HORIZON || hash(xx * 7 + yy) < 0.5) cx.fillRect(xx, yy, 1, 1); }); if (fc) x.drawImage(fc, 0, 0); }
-  role('hud'); if (v.hud) drawHud(x, v);
+  x.restore();
+  role('hud'); if (v.hud) drawHud(x, v, now);
   Q = G;
 }
 function drawSkyline(x: CanvasRenderingContext2D, scene: string, bend: number, P: string[]) {
@@ -359,7 +417,7 @@ function otext(x: CanvasRenderingContext2D, s: string, px: number, py: number, c
 }
 const SUF = (n: number) => (n % 100 >= 11 && n % 100 <= 13) ? 'TH' : ['TH', 'ST', 'ND', 'RD'][n % 10] ?? 'TH';
 /** v9 HUD（TG2 版面）：左上 轉速弧＋大速度、氮氣列、AUTO＋檔位、車體損傷圖、完美度 E…F；右上 計時、地圖、LAP、名次。 */
-function drawHud(x: CanvasRenderingContext2D, v: View) {
+function drawHud(x: CanvasRenderingContext2D, v: View, now = performance.now()) {
   const me = v.me; if (!me) return;
   const top = v.top ?? 80, gears = Math.max(4, Math.min(6, v.gears ?? 5)), frac = Math.max(0, Math.min(1, me.speed / top));
   const gear = Math.min(gears, 1 + Math.floor(frac * gears * 0.999));
@@ -404,6 +462,7 @@ function drawHud(x: CanvasRenderingContext2D, v: View) {
     '....oooooooooooooooooooooooooooooooo........',
   ];
   const zc: Record<string, number> = { o: 3, w: 3, f: me.hit > 0 && v.frame % 2 ? 3 : dmg(2), r: dmg(1), s: dmg(0), c: low ? 2 : dmg(-1) };
+  const hz = hudZone(me, now); if (hz) zc[hz.zone] = hz.on ? 3 : 0; // v15：被撞的那一區快閃（最暗↔最亮）
   CARMAP.forEach((row, j) => [...row].forEach((ch, i) => { if (ch === '.') return; x.fillStyle = Q[zc[ch]]; x.fillRect(DX + i, DY + j, 1, 1); }));
   x.fillStyle = Q[3]; for (const [i, j] of [[-1, 2], [-1, 12], [44, 4], [44, 10]]) x.fillRect(DX + i, DY + j, 1, 1);
   // 完美度條（像油表 E…F）
