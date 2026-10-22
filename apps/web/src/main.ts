@@ -1,4 +1,4 @@
-import { mountStairsRoom } from './stairs-room';
+import { stairsRoomPage } from './stairs-room';
 import { trackById } from '@chick/engine';
 import { blip, presenceDiff } from './visitors';
 import './style.css';
@@ -248,6 +248,7 @@ async function route() {
   pageOff?.(); pageOff = null;
   let m: RegExpMatchArray | null;
   if (p === '/race') { pageOff = racePage(app, live, me, toast); return; }
+  if (p === '/stairs-room') { pageOff = stairsRoomPage(app, live, me.user.id, () => nav('/'), toast); return; }
   if (p === '/') return homePage(me.home.id);
   if ((m = p.match(/^\/home\/([0-9a-f-]{36})$/))) return homePage(m[1]);
   if ((m = p.match(/^\/h\/([^/]+)$/))) return shareLink(decodeURIComponent(m[1]));
@@ -275,16 +276,16 @@ function showRoomInvite(m: any) {
   const el = document.createElement('div'); el.className = 'room-pop';
   el.innerHTML = `<div class="room-pop-txt">${m.game === 'stairs' ? `<b>「${escHtml(m.from_name)}」的下樓梯房</b><span>一起下樓梯・前三名 ◎150／100／50</span>` : `<b>「${escHtml(m.from_name)}」的賽車房</b><span>${escHtml(trackName(m.track))}・${Number(m.laps) || 3} 圈</span>`}</div><button class="room-pop-go">加入</button><button class="room-pop-x" aria-label="關閉">✕</button>`;
   const close = () => { el.remove(); if (roomPop === el) roomPop = null; clearTimeout(roomPopT); };
-  (el.querySelector('.room-pop-go') as HTMLElement).onclick = () => { if (!live?.send({ type: 'room.join', room: m.room, inst: m.inst })) { toast('連線中，請稍候'); return; } close(); if (m.game !== 'stairs' && location.pathname !== '/race') nav('/race'); };
+  (el.querySelector('.room-pop-go') as HTMLElement).onclick = () => { if (!live?.send({ type: 'room.join', room: m.room, inst: m.inst })) { toast('連線中，請稍候'); return; } close(); const to = m.game === 'stairs' ? '/stairs-room' : '/race'; if (location.pathname !== to) nav(to); };
   (el.querySelector('.room-pop-x') as HTMLElement).onclick = close;
   document.body.append(el); roomPop = el; roomPopT = window.setTimeout(close, 60_000);
 }
 const trackName = (id: string) => trackById(id)?.name ?? id;
 const escHtml = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+let lastStairsRoom: string | null = null;
 function startLive() {
   live?.stop();
   live = new Live();
-  mountStairsRoom(live, () => me?.user?.id ?? null, () => nav('/'), toast);
   live.onStatus = (s) => {
     if (s === 'unauthorized') { me = null; void route(); }
     else if (s === 'closed') void goSleep();
@@ -303,6 +304,7 @@ function startLive() {
     else if (m.type === 'home.kicked' && device?.home?.id === m.home_id) { toast('主人變更了存取設定，你被請出去了'); nav('/'); }
     else if (m.type === 'wallet.updated') setWallet(m.balance);
     // 一起賽車開跑（在家裡接受邀請的）：帶到賽車頁，頁面接手這場比賽
+    else if (m.type === 'room.state' && m.room?.game === 'stairs' && m.room.id !== lastStairsRoom) { lastStairsRoom = m.room.id; if (location.pathname !== '/stairs-room' && m.room.countdown_ms === null) nav('/stairs-room'); }
     else if (m.type === 'race.started' && location.pathname !== '/race') { (window as any).__pendingRace = m; live!.inLobby = false; nav('/race'); }
     else if (m.type === 'room.invite') showRoomInvite(m);
     else if (m.type === 'game.closing') toast('小雞 5 分鐘後要睡覺囉～');
