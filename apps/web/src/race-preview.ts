@@ -1,5 +1,5 @@
 // 開發用：賽車美術設計稿與畫面模擬（不進正式頁面）。/race-preview.html?v=sheet|grid|pack|nitro|rain|night（v3：240×200）
-import { drawRace, carCanvas, G, W, H, text, setColorMode, type ViewCar } from './race-gfx';
+import { drawRace, elevTable, elevAt, carCanvas, G, W, H, text, setColorMode, type ViewCar } from './race-gfx';
 import { CAR_MODELS, LODS, LIVERIES, LIVERY_NAMES } from './race-cars';
 import { trackById, trackSegs, SEG_LEN, CARS } from '@chick/engine';
 
@@ -104,5 +104,30 @@ async function icons() {
   PAINT_NAMES.forEach((n, i) => { const y = 20 + (PART_KINDS.length + (i >> 2)) * rh; if (i % 4 === 0) zh(x, '塗裝', 4, y + 12, 3); tile(paintIcon(i), 50 + (i % 4) * cw, y, n, ''); });
   const d = document.createElement('div'); d.id = 'sheet'; d.append(c); root.append(d);
 }
-if (v === 'icons') void icons(); else if (v === 'sheet') sheet(); else if (v === 'page') void page(); else scene(v);
+// v13 彎道/坡道預覽：?v=at&kind=straight|left|right|crest|dip|downup[&t=jp1]，window.__draw(z, x) 可逐格畫
+function at() {
+  const q = new URLSearchParams(location.search), kind = q.get('kind') ?? 'straight';
+  const track = trackById(q.get('t') ?? 'jp1')!, segs = trackSegs(track.id), n = segs.length, len = n * SEG_LEN, el = elevTable(track);
+  const e = (i: number) => elevAt(el, i * SEG_LEN);
+  let best = 0, bs = -1e9;
+  for (let i = 0; i < n; i++) {
+    const ahead = (a: number, b: number, f: (j: number) => number) => { let t = 0; for (let j = a; j < b; j++) t += f((i + j) % n); return t; };
+    const sc = kind === 'straight' ? -ahead(0, 14, (j) => Math.abs(segs[j].curve) + Math.abs(e(j)) * 0.3)
+      : kind === 'left' ? -ahead(2, 10, (j) => segs[j].curve) - ahead(0, 10, (j) => Math.abs(e(j))) * 0.2
+      : kind === 'right' ? ahead(2, 10, (j) => segs[j].curve) - ahead(0, 10, (j) => Math.abs(e(j))) * 0.2
+      : kind === 'crest' ? e(i + 5) - e(i) * 2 - Math.abs(segs[(i + 3) % n].curve) * 2
+      : kind === 'dip' ? -e(i + 6) - Math.abs(e(i)) * 2 - Math.abs(segs[(i + 3) % n].curve) * 2
+      : /* downup */ -e(i + 3) * 1 - Math.abs(e(i)) * 3 - ahead(0, 12, (j) => Math.abs(segs[j].curve)) * 0.5;
+    if (sc > bs) { bs = sc; best = i; }
+  }
+  const z0 = Number(q.get('z') ?? best * SEG_LEN + 10);
+  const mk = (i: number, z: number, xx: number, extra: Partial<ViewCar> = {}): ViewCar => ({ id: 'c' + i, name: 'c' + i, ai: true, car: 'ai', color: 0, z, x: xx, speed: 60, damage: 0, nitro: 3, nitroT: 0, fin: null, hit: 0, ...extra });
+  const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.style.width = W * 3 + 'px'; const x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
+  let frame = 0;
+  (window as any).__draw = (z: number, xx: number) => { frame++; const me = mk(0, z, xx, { id: 'me', car: 'falcon', color: 0 }); const cars = [mk(1, z + 30, -0.4), mk(2, z + 90, 0.35), mk(3, z + 180, -0.2), mk(4, z + 300, 0.3), me];
+    drawRace(x, { track, me, cars, tick: 400, countdown: 0, laps: track.laps, len, rank: 7, frame, hud: true, gears: 5, top: 84 }); };
+  (window as any).__z0 = z0; (window as any).__draw(z0, Number(q.get('x') ?? 0.1));
+  const d = document.createElement('div'); d.id = 'shots'; d.append(cv); root.append(d);
+}
+if (v === 'at') at(); else if (v === 'icons') void icons(); else if (v === 'sheet') sheet(); else if (v === 'page') void page(); else scene(v);
 (window as any).__ready = v !== 'page' || true;
