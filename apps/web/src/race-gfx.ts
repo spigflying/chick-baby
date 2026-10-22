@@ -441,10 +441,18 @@ function drawFlameBack(x: CanvasRenderingContext2D, model: string, sx: number, s
   const xs = exhaustsOf(model).map((e) => sx + e * k), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = sy + Math.round(EXHAUST_Y * k);
   const rx = dw * (0.5 + 0.28 * f) + (xs.length > 1 ? (Math.max(...xs) - Math.min(...xs)) / 2 : 0), ry = bh * 0.75 * f, bins = 16;
   const tl: number[] = []; for (let b = 0; b < bins; b++) tl.push(0.68 + 0.32 * n1(b * 17 + frame * 3));
-  for (let py = Math.max(0, Math.floor(cy - ry)); py < Math.min(H, cy + ry * 0.4); py++) for (let px = Math.floor(cx - rx); px <= cx + rx; px++) {
-    const dx = (px - cx) / rx, dy = (py - cy) / ry, a = Math.atan2(dy, dx), bi = Math.floor((a + Math.PI) / (2 * Math.PI) * bins) % bins;
-    const s = Math.hypot(dx, dy) / tl[bi]; if (s >= 1) continue;
-    const ci = s < 0.62 ? 0 : s < 0.84 ? 1 : 2; if (((px + py + frame) & 1) && s > 0.62 && s < 0.7) continue; x.fillStyle = Q[ci]; x.fillRect(px, py, 1, 1);
+  // 逐列掃描、同色連續段一次 fillRect（避免逐像素繪製）
+  const x0 = Math.floor(cx - rx), x1 = Math.floor(cx + rx), y1 = Math.min(H, cy + ry * 0.4);
+  for (let py = Math.max(0, Math.floor(cy - ry)); py < y1; py++) {
+    const dy = (py - cy) / ry; let run = -1, rs = 0;
+    for (let px = x0; px <= x1 + 1; px++) {
+      let ci = -1;
+      if (px <= x1) {
+        const dx = (px - cx) / rx, bi = Math.floor((Math.atan2(dy, dx) + Math.PI) / (2 * Math.PI) * bins) % bins, s = Math.hypot(dx, dy) / tl[bi];
+        if (s < 1 && !(((px + py + frame) & 1) && s > 0.62 && s < 0.7)) ci = s < 0.62 ? 0 : s < 0.84 ? 1 : 2;
+      }
+      if (ci !== run) { if (run >= 0) { x.fillStyle = Q[run]; x.fillRect(rs, py, px - rs, 1); } run = ci; rs = px; }
+    }
   }
 }
 /** Bayer 4×4 有序抖動遮罩：中間（消失點附近）完全透明，越往邊緣越密 → 疊上放大的畫面＝放射狀拖影，但仍只有 4 種綠 */

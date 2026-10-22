@@ -248,10 +248,10 @@ export function racePetKey(row: { species: string; status: string; bao?: any; ou
   if (row.status === 'egg') return 'egg';
   return spriteKey({ species: row.species, look: petLook(row) });
 }
-async function racePets(db: Db, users: string[]): Promise<Map<string, string | null>> {
+export async function racePets(db: Db, users: string[]): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>(); if (!users.length) return out;
   try {
-    const rows = await (db as any).selectFrom('pets').select(['owner_id', 'species', 'status', 'bao', 'outfits', 'born_at']).where('owner_id', 'in', users).orderBy('born_at', 'desc').execute();
+    const rows = await (db as any).selectFrom('pets').select(['owner_id', 'species_id as species', 'status', 'bao', 'outfits', 'born_at']).where('owner_id', 'in', users).orderBy('born_at', 'desc').execute();
     for (const u of users) { const mine = rows.filter((r: any) => r.owner_id === u); out.set(u, racePetKey(mine.find((r: any) => r.status !== 'dead') ?? mine[0])); }
   } catch (err) { console.error('race pets failed', err); }
   return out;
