@@ -11,7 +11,7 @@ import { savePetCache } from './sleep';
 import type { Live } from './ws';
 import { StairsClient } from './stairs';
 import { boardHtml, stairsResultHtml, type Board } from './board';
-import { inviteHtml, multiResultHtml, raceNotice, rankText, stairsNotice, type StairsInvite } from './mstairs';
+import { inviteHtml, inviterHtml, multiResultHtml, raceNotice, rankText, stairsNotice, type StairsInvite } from './mstairs';
 import { trackById } from '@chick/engine';
 import { fightBlocker, inviteSecs, resultInput, lockSecs, coinStr, hintFor, padPress, controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
 
@@ -589,7 +589,10 @@ export class Device {
     this.off.push(() => document.removeEventListener('pointerdown', this.onStatDocDown));
     this.$('.fightres').addEventListener('click', () => this.tryDismissResult());
     this.$('.invite').addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('[data-acc]') as HTMLElement | null; if (b) this.answerInvite(b.dataset.acc === '1'); });
-    this.$('.sinv').addEventListener('click', (e) => { const b = (e.target as HTMLElement).closest('[data-sacc]') as HTMLElement | null; if (b) this.answerSInvite(b.dataset.sacc === '1'); });
+    this.$('.sinv').addEventListener('click', (e) => {
+      const t = e.target as HTMLElement, b = t.closest('[data-sacc]') as HTMLElement | null; if (b) return this.answerSInvite(b.dataset.sacc === '1');
+      if (t.closest('[data-scancel]')) this.cancelSInvite();
+    });
     // fightbar 的 touchstart 有 preventDefault（擋長按選字），手機不會產生 click → 用 pointerup
     this.$('.fightgo').addEventListener('pointerup', (e) => { if (e.button > 0) return; this.startInvite(); });
     this.el.querySelectorAll<HTMLElement>('.gamebar [data-dir]').forEach((b) => {
@@ -839,7 +842,7 @@ export class Device {
     } else if (m.kind === 'reply') {
       const v = this.sinvite; if (!v || v.id !== m.invite) return;
       v.count = m.count ?? v.count;
-      if (v.from === me) this.say(race ? `${v.count} 人要一起賽車…` : `${v.count} 隻要一起下樓梯…`);
+      if (v.from === me) { this.say(race ? `${v.count} 人要一起賽車…` : `${v.count} 隻要一起下樓梯…`); this.showSInvite(); }
     } else if (m.kind === 'invite_cancel') {
       const v = this.sinvite, same = !!v && v.id === m.invite, mine = m.from === me || (same && this.ctx.live.inLobby); // 發起人或已參加的人才提示
       if (same) { this.sinvite = null; this.showSInvite(); }
@@ -853,6 +856,11 @@ export class Device {
   private showSInvite() {
     const el = this.$('.sinv'), v = this.sinvite;
     clearInterval(this.sinviteTimer);
+    if (v && v.from === this.ctx.me.id && !this.stairs) { // 發起人：等回覆，可以取消
+      el.hidden = false; el.innerHTML = inviterHtml(v, Date.now());
+      this.sinviteTimer = window.setInterval(() => { const c = el.querySelector('.ic'), w = this.sinvite; if (!w) return this.showSInvite(); if (c) c.textContent = `${Math.max(0, Math.ceil((w.until - Date.now()) / 1000))} 秒後截止回覆`; }, 250);
+      return;
+    }
     if (!v || v.answered || !v.to.includes(this.ctx.me.id) || this.stairs) { el.hidden = true; return; }
     el.hidden = false; el.innerHTML = inviteHtml(v, Date.now());
     this.sinviteTimer = window.setInterval(() => {
@@ -860,6 +868,11 @@ export class Device {
       if (c) c.textContent = `${Math.max(0, Math.ceil((w.until - Date.now()) / 1000))} 秒後自動不參加`;
       if (Date.now() > w.until) this.answerSInvite(false, true);
     }, 250);
+  }
+  /** 發起人取消邀請（伺服器回 invite_cancel 才把框收起來） */
+  cancelSInvite() {
+    const v = this.sinvite; if (!v || v.from !== this.ctx.me.id) return;
+    if (!this.ctx.live.send({ type: v.game === 'race' ? 'race.cancel' : 'stairs.cancel', invite: v.id })) this.say('連線中斷，稍後再試');
   }
   answerSInvite(accept: boolean, silent = false) {
     const v = this.sinvite; if (!v || v.answered) return;

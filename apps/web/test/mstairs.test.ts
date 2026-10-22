@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { inviteHtml, lerpPos, multiResultHtml, multiStatus, rankText, stairsNotice } from '../src/mstairs';
+import { inviteHtml, inviterHtml, lerpPos, multiResultHtml, multiStatus, rankText, stairsNotice } from '../src/mstairs';
 import { boardHtml } from '../src/board';
 
 describe('M2 一起下樓梯 (web helpers)', () => {
   it('invite shows who invited, accept/decline buttons and the countdown', () => {
     const h = inviteHtml({ id: 'i', from: 'u1', from_name: '小黃（<b>）', to: ['u2'], until: 15_000, answered: false, count: 1 }, 2_100);
     expect(h).toContain('小黃（&#60;b&#62;）'); expect(h).toContain('data-sacc="1"'); expect(h).toContain('data-sacc="0"'); expect(h).toContain('13 秒後自動不參加');
+  });
+  it('inviter sees how many joined, the countdown and a cancel button (stairs + race wording)', () => {
+    const v = { id: 'i', from: 'u1', from_name: 'x', to: ['u2'], until: 15_000, answered: false, count: 2 };
+    const h = inviterHtml(v, 2_100); expect(h).toContain('data-scancel="1"'); expect(h).toContain('13 秒後截止回覆'); expect(h).toContain('2 隻要一起下樓梯');
+    expect(inviterHtml({ ...v, game: 'race' }, 0)).toContain('2 人要一起賽車');
   });
   it('result lists every pet with rank, floors, coins, how it went out; highlights me', () => {
     const players = [

@@ -125,7 +125,7 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
       }
       a.get('/homes/:id/visitors', async (req) => g.homeVisitors(db, (req.params as any).id, req.user!.id));
       // ---- v1.5 道具 ----
-      // ---- 賽車模式（獨立的賽車獎金，不動金幣）----
+      // ---- 賽車模式（零件用寵物金幣買、獎金直接發寵物金幣）----
       a.get('/race/profile', async (req) => ({ catalog: raceCatalog(), profile: await getRaceProfile(db, req.user!.id) }));
       a.post('/race/buy', async (req) => { const b = (req.body ?? {}) as any; return b.car !== undefined || b.paint !== undefined ? buyCar(db, ctx(req), b.car, b.paint) : buyPart(db, ctx(req), b.kind, b.tier); });
       a.get('/race/leaderboard/:track', async (req) => raceLeaderboard(db, (req.params as any).track));

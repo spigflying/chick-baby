@@ -7,6 +7,7 @@ import { createRace, stepRace, trackSegs, SEG_LEN, raceRanking, trackById, CARS,
 import { drawShop, newShop, shopHit, shopMove, isPaint, SHOP_SCREENS } from './race-shop';
 import { drawRace, carCanvas, text, textW, zh, zhW, panel, drawMinimap, W, H, G, type ViewCar } from './race-gfx';
 import { SnapClock, bracket } from './race-interp';
+import { cupSel, saveRace, savedRace, type SavedRace } from './race-nav';
 
 const segAt = (id: string, z: number) => { const s = trackSegs(id); return s[((Math.floor(z / SEG_LEN) % s.length) + s.length) % s.length].curve; };
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -29,7 +30,7 @@ const money = (n: number) => '◎' + Math.round(n).toLocaleString('en-US');
 const coinTxt = (n: number) => `${Math.round(n)} 金幣`;
 const fmtMs = (ms: number | null) => ms === null ? '—' : `${Math.floor(ms / 60000)}'${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}"${String(Math.floor(ms / 10) % 100).padStart(2, '0')}`;
 const WEATHER: Record<string, string> = { clear: '晴', rain: '雨', night: '夜', snow: '雪', fog: '霧' };
-const ERR: Record<string, string> = { TRACK_LOCKED: '這個國家還沒解鎖（拿下前一國的國家冠軍）', INSUFFICIENT_COINS: '金幣不夠（去下樓梯賺吧）', ALREADY_OWNED: '已經裝著這個了', ALREADY_IN_MATCH: '你正在另一場比賽中', RACE_CLOSING: '快關門了，關門前 8 分鐘不開新比賽', GAME_CLOSING: '快關門了', GAME_CLOSED: '現在沒有開放', INTERNAL: '伺服器出錯了，稍後再試' };
+const ERR: Record<string, string> = { TRACK_LOCKED: '這個國家還沒解鎖（拿下前一國的國家冠軍）', INSUFFICIENT_COINS: '金幣不夠（去下樓梯賺吧）', ALREADY_OWNED: '已經裝著這個了', ALREADY_IN_MATCH: '你正在另一場比賽中', RACE_CLOSING: '快關門了，關門前 8 分鐘不開新比賽', GAME_CLOSING: '快關門了', GAME_CLOSED: '現在沒有開放', INTERNAL: '伺服器出錯了，稍後再試', BAD_REQUEST: '請求有誤，重新整理頁面再試一次' };
 
 interface Snap { at: number; tick: number; countdown: number; cars: Map<string, any[]>; pk?: number[] }
 export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (s: string) => void): () => void {
@@ -56,13 +57,18 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   const shop = newShop();
   let mode: 'menu' | 'lobby' | 'race' | 'results' = 'menu';
   let attract: RaceState | null = null, frame = 0, raf = 0, dead = false;
-  let race: { id: string; track: string; laps: number; len: number; cars: any[]; snaps: Snap[]; ended: any | null; pickups: [number, number, number][] } | null = null;
+  let race: { id: string; inst: string; track: string; laps: number; len: number; cars: any[]; snaps: Snap[]; ended: any | null; pickups: [number, number, number][] } | null = null;
   const keys = { gas: false, brake: false, left: false, right: false, nitro: false };
   let seq = 0, lastSent = '', sendTimer = 0; let lobbyPlayers: string[] = [], lobbyStarts = 0;
+  /** 單人出發的賽道跟著目前錦標賽站（手動點了別條賽道就不跟） */
+  let followCup = true;
+  /** 斷線重連中：要接回的比賽（等伺服器回 race.started(resumed)／race.ended／race.gone） */
+  let resuming: SavedRace | null = null, resumeT = 0;
 
   const setMatch = (on: boolean) => { if (live) live.inMatch = on; };
   async function load() {
     try { const [r, m] = await Promise.all([api('GET', '/race/profile'), api('GET', '/me')]); prof = r.profile; cat = r.catalog; coins = m.wallet?.balance ?? 0; } catch (e) { toast(errText(e)); }
+    if (prof) sel = cupSel(sel, followCup, prof.cup_track ?? null, prof.unlocked, (id) => trackById(id)?.countryIdx ?? null);
     renderPanel();
   }
   function setAttract() { attract = createRace(7, sel, fillField([])); attract.countdown = 0; }
@@ -87,7 +93,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
         `<p class="muted">從最後一名起跑，共 ${RACE_SLOTS} 台。前 ${QUALIFY_RANK} 名晉級下一站；前 6 名有獎金 ${PRIZES.map(money).join('/')} 和積分 ${POINTS.join('/')}。每個國家 ${RACES_PER_COUNTRY} 站，國家積分第一解鎖下一國。</p>
         ${st.length ? `<h3>${esc(COUNTRIES[prof.cup.country]?.name)} 國家積分（第 ${prof.cup.race + 1} 站）</h3>${standingsHtml(st)}` : ''}
         <p class="muted">想和朋友一起跑？到家裡按「玩 → 一起賽車」，在場的人會收到邀請（跟一起下樓梯一樣）；空位由灰色電腦車補滿 ${RACE_SLOTS} 台。</p>`;
-      body.querySelectorAll('li[data-tr]').forEach((li) => (li as HTMLElement).onclick = () => { const id = (li as HTMLElement).dataset.tr!; if (trackById(id)!.countryIdx >= prof.unlocked) return toast(ERR.TRACK_LOCKED); sel = id; setAttract(); renderPanel(); });
+      body.querySelectorAll('li[data-tr]').forEach((li) => (li as HTMLElement).onclick = () => { const id = (li as HTMLElement).dataset.tr!; if (trackById(id)!.countryIdx >= prof.unlocked) return toast(ERR.TRACK_LOCKED); sel = id; followCup = id === cupTrack(prof.cup)?.id; setAttract(); renderPanel(); });
       (body.querySelector('#rgo') as HTMLElement).onclick = () => join();
     } else if (tab === 'garage') {
       const st = carStats(prof.parts, prof.car);
@@ -129,12 +135,34 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
 
   // ---------- 連線 ----------
   function join() {
+    if (mode !== 'menu') return; // 已經在準備／比賽中：不重複開
     if (!live?.send({ type: 'race.solo', track: sel })) return toast('連線中，請稍候');
-    mode = 'lobby'; setMatch(true); lobbyPlayers = [me.user.display_name]; lobbyStarts = Date.now() + 1000; msg.textContent = '準備發車…'; renderPanel();
+    mode = 'lobby'; setMatch(true); lobbyPlayers = [me.user.display_name]; lobbyStarts = live.serverNow() + 1000; msg.textContent = '準備發車…'; renderPanel(); // 倒數跟 drawWait 一樣用伺服器時間
   }
-  function leave() { live?.send({ type: 'race.leave' }); race = null; mode = 'menu'; setMatch(false); msg.textContent = '已離開比賽'; renderPanel(); }
-  function onStarted(m: any) { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null, pickups: Array.isArray(m.pickups) ? m.pickups : [] }; clock.reset(); lastHitT = -1; mode = 'race'; setMatch(true); const hum = m.cars.filter((c: any) => !c.ai).length; msg.textContent = `${trackById(m.track)!.name}・${hum > 1 ? `${hum} 位玩家＋` : ''}電腦 ${m.cars.length - hum} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
+  /** 離開：連著就用目前這場；重連中還沒接回，就帶上比賽 id 讓伺服器知道是哪一場 */
+  const leaveMsg = () => { const r = race ? { id: race.id, inst: race.inst } : resuming; return r ? { type: 'race.leave', race_id: r.id, inst: r.inst } : { type: 'race.leave' }; };
+  function leave() { live?.send(leaveMsg()); stopResume(); saveRace(null); race = null; mode = 'menu'; setMatch(false); msg.textContent = '已離開比賽'; renderPanel(); }
+  function onStarted(m: any) {
+    stopResume(); race = { id: m.race_id, inst: m.inst, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null, pickups: Array.isArray(m.pickups) ? m.pickups : [] }; saveRace({ id: m.race_id, inst: m.inst });
+    clock.reset(); lastHitT = -1; mode = 'race'; setMatch(true); const hum = m.cars.filter((c: any) => !c.ai).length;
+    lobbyPlayers = m.cars.filter((c: any) => !c.ai).map((c: any) => c.name); // 第一張快照到之前的資訊卡（從家裡來的也有名單）
+    msg.textContent = m.resumed ? '接回比賽了！' : `${trackById(m.track)!.name}・${hum > 1 ? `${hum} 位玩家＋` : ''}電腦 ${m.cars.length - hum} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel();
+  }
+  // ---------- 斷線重連：接回同一場（伺服器等 30 秒，超過才算棄賽） ----------
+  function stopResume() { resuming = null; clearTimeout(resumeT); }
+  function tryResume() {
+    if (!resuming || !live?.send({ type: 'race.resume', race_id: resuming.id, inst: resuming.inst })) return; // 還沒連上：等 hello 再送
+    clearTimeout(resumeT); resumeT = window.setTimeout(() => { if (resuming) gone('連不回剛才的比賽'); }, 8000); // 開賽的伺服器不在了就不會回
+  }
+  function gone(text: string) { stopResume(); saveRace(null); race = null; mode = 'menu'; setMatch(false); msg.textContent = text; toast(text); renderPanel(); void load(); }
   const off = live?.on((m) => {
+    if (m.type === 'hello') { // 重新連上（新連線還沒接上比賽）
+      const r = resuming ?? (race && mode === 'race' ? { id: race.id, inst: race.inst } : null);
+      if (r) { resuming = r; msg.textContent = '重新連線，接回比賽中…'; tryResume(); }
+    }
+    if (m.type === 'race.gone' && resuming && m.race_id === resuming.id) return gone('斷線太久，這場比賽算棄賽了');
+    if (m.type === 'race.ended' && !race && resuming && m.race_id === resuming.id) // 重新整理後才收到結果：沒有畫面資料，只顯示結果
+      race = { id: m.race_id, inst: resuming.inst, track: m.track ?? sel, laps: 0, len: 1, cars: [], snaps: [], ended: null, pickups: [] };
     if (m.type === 'wallet.updated') { coins = m.balance; if (tab === 'garage' && mode === 'menu') renderPanel(); }
     if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('race.')) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; toast(ERR[m.code] ?? m.code); renderPanel(); }
     else if (m.type === 'race.notice' && !m.home_id) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; renderPanel(); }
@@ -143,8 +171,8 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       clock.onSnap(m.tick, performance.now()); race.snaps.push({ at: performance.now(), tick: m.tick, countdown: m.countdown, cars: new Map(m.cars.map((c: any[]) => [c[0], c])), pk: Array.isArray(m.pk) ? m.pk : [] }); if (race.snaps.length > 8) race.snaps.shift();
     }
     else if (m.type === 'race.ended' && race && m.race_id === race.id) {
-      race.ended = m; mode = 'results'; setMatch(false);
-      if (m.aborted) { msg.textContent = '比賽中止（伺服器重啟）'; return; }
+      race.ended = m; mode = 'results'; setMatch(false); stopResume(); saveRace(null);
+      if (m.aborted) { msg.textContent = '比賽中止，這場不算（伺服器重啟或關門）'; renderPanel(); return; }
       const r = m.me; msg.textContent = r ? `第 ${r.rank} 名！獎金 ${money(r.prize)}・${r.qualified ? '晉級' : '未晉級'}${r.champion ? '・國家冠軍！' : ''}` : '比賽結束';
       if (r) prof = { ...prof, unlocked: r.unlocked, cup: r.cup };
       showResults(m); void load();
@@ -205,7 +233,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     frame = Math.floor((now - T0) / 50);
     const t = trackById(race?.track ?? sel)!;
     if (race && (mode === 'race' || mode === 'results')) {
-      const cars = view(); if (!cars) return drawWait();
+      const cars = view(); if (!cars) { drawWait(); if (mode === 'results') drawResultsOverlay(); return; }
       const meCar = cars.find((c) => c.id === me.user.id) ?? null;
       const last = race.snaps[race.snaps.length - 1];
       const ranked = raceOrder(cars);
@@ -261,5 +289,6 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   }
   setAttract(); loop(); void load();
   const pend = (window as any).__pendingRace; if (pend) { (window as any).__pendingRace = null; onStarted(pend); } // 在家裡接受邀請後被帶過來
-  return () => { dead = true; cancelAnimationFrame(raf); clearInterval(sendTimer); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); off?.(); if (mode === 'lobby' || mode === 'race') live?.send({ type: 'race.leave' }); setMatch(false); };
+  else { const sv = savedRace(); if (sv) { resuming = sv; mode = 'lobby'; setMatch(true); msg.textContent = '接回剛才的比賽…'; tryResume(); renderPanel(); } } // 比賽中重新整理頁面
+  return () => { dead = true; cancelAnimationFrame(raf); clearInterval(sendTimer); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); off?.(); if (mode === 'lobby' || mode === 'race') live?.send(leaveMsg()); stopResume(); saveRace(null); setMatch(false); };
 }

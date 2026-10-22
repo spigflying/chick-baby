@@ -34,6 +34,11 @@ export function inviteHtml(v: StairsInvite, now: number): string {
   const s = Math.max(0, Math.ceil((v.until - now) / 1000));
   return `<div class="it">${esc(v.from_name)} ${v.game === 'race' ? `邀大家一起賽車！${v.track_name ? `（${esc(v.track_name)}）` : ''}` : '邀大家一起下樓梯！'}</div><div class="ib"><button data-sacc="1">參加</button><button data-sacc="0">不要</button></div><div class="ic">${s} 秒後自動不參加</div>`;
 }
+/** 發起人看到的：等回覆（幾人參加、倒數），可以取消邀請。 */
+export function inviterHtml(v: StairsInvite, now: number): string {
+  const s = Math.max(0, Math.ceil((v.until - now) / 1000)), race = v.game === 'race';
+  return `<div class="it">等大家回覆：${v.count} ${race ? '人要一起賽車' : '隻要一起下樓梯'}</div><div class="ib"><button data-scancel="1">取消邀請</button></div><div class="ic">${s} 秒後截止回覆</div>`;
+}
 
 /** 名次的中文說法。 */
 export const rankText = (r: number) => `第 ${r} 名`;

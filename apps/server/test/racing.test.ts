@@ -7,7 +7,8 @@ import { Bus } from '../src/bus';
 import { fastForwardRace, inRace, raceBusy, raceLabel, startRaceLoop } from '../src/racing';
 import { randomUUID } from 'node:crypto';
 import { partPrice, prizeFor, RACE_SLOTS, seasonOf, setRaceInput, TRACKS } from '@chick/engine';
-import { CLOSING_GUARD_MS } from '../src/racing';
+import { CLOSING_GUARD_MS, RACE_DROP_MS, capRaceTicks, stepRaces } from '../src/racing';
+import { handleClosed } from '../src/closing';
 
 const { db } = createDb();
 const bus = new Bus();
@@ -211,4 +212,137 @@ describe('racing (server) v5', () => {
     wa.ws.close(); wb.ws.close();
   });
   it('closing guard constant is 8 minutes', () => { expect(CLOSING_GUARD_MS).toBe(480000); });
+});
+
+describe('racing: disconnects, bus outage, closing', () => {
+  const results = async (id: string) => Number((await sql<any>`SELECT count(*)::int AS n FROM race_results WHERE user_id=${id}`.execute(db)).rows[0].n);
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const until = async (f: () => boolean | Promise<boolean>) => { for (let i = 0; i < 100; i++) { if (await f()) return; await sleep(20); } throw new Error('until timeout'); };
+  async function soloStarted(name: string) {
+    const a = await login(name), w = await openWs(a.cookie);
+    w.ws.send(JSON.stringify({ type: 'race.solo' }));
+    const st = await w.wait((m) => m.type === 'race.started');
+    return { a, w, st };
+  }
+  it('disconnect is not a forfeit: a new socket resumes the same race and gets snaps + the result', async () => {
+    const { a, w: w1, st } = await soloStarted('resume1');
+    w1.ws.send(JSON.stringify({ type: 'race.input', seq: 1, gas: true })); await sleep(150);
+    w1.ws.terminate(); await sleep(100);
+    expect(inRace(a.id)).toBe(true); // 斷線不會馬上棄賽
+    const w2 = await openWs(a.cookie);
+    w2.ws.send(JSON.stringify({ type: 'race.resume', race_id: st.race_id, inst: st.inst }));
+    const rs = await w2.wait((m) => m.type === 'race.started');
+    expect(rs.resumed).toBe(true); expect(rs.race_id).toBe(st.race_id); expect(rs.cars.length).toBe(RACE_SLOTS);
+    await w2.wait((m) => m.type === 'race.snap' && m.race_id === st.race_id);
+    await fastForwardRace(st.race_id, drive(a.id));
+    const end = await w2.wait((m) => m.type === 'race.ended');
+    expect(end.race_id).toBe(st.race_id); expect(end.me.user_id).toBe(a.id); expect(end.me.time_ms).not.toBeNull();
+    // 剛好在結束時斷線、之後才重連：還拿得到結果
+    const w3 = await openWs(a.cookie);
+    w3.ws.send(JSON.stringify({ type: 'race.resume', race_id: st.race_id, inst: st.inst }));
+    expect((await w3.wait((m) => m.type === 'race.ended')).me.rank).toBe(end.me.rank);
+    w3.ws.send(JSON.stringify({ type: 'race.resume', race_id: randomUUID(), inst: st.inst }));
+    await w3.wait((m) => m.type === 'race.gone');
+    w2.ws.close(); w3.ws.close();
+  });
+  it('no reconnect within the grace period = forfeit (frees the user, settles as not finished)', async () => {
+    const { a, w, st } = await soloStarted('resume2');
+    w.ws.send(JSON.stringify({ type: 'race.input', seq: 1, gas: true })); await sleep(150);
+    w.ws.terminate(); await sleep(100);
+    stepRaces(Date.now() + RACE_DROP_MS - 5000); expect(inRace(a.id)).toBe(true);
+    stepRaces(Date.now() + RACE_DROP_MS + 2000); expect(inRace(a.id)).toBe(false);
+    await until(async () => (await results(a.id)) === 1);
+    const w2 = await openWs(a.cookie);
+    w2.ws.send(JSON.stringify({ type: 'race.resume', race_id: st.race_id, inst: st.inst }));
+    const end = await w2.wait((m) => m.type === 'race.ended');
+    expect(end.me.time_ms).toBeNull(); expect(end.me.prize).toBe(0);
+    w2.ws.close();
+  });
+  it('a seat that never connected to its race (race.started lost) is voided: no result, no cup change', async () => {
+    const { a, w } = await soloStarted('void1');
+    stepRaces(Date.now() + RACE_DROP_MS + 2000); // 一次操作都沒收到
+    expect(inRace(a.id)).toBe(false);
+    const end = await w.wait((m) => m.type === 'race.ended'); expect(end.me).toBeNull();
+    expect(await results(a.id)).toBe(0);
+    const prof = (await a.call('GET', '/race/profile')).json.profile; expect(prof.races).toBe(0); expect(prof.cup.race).toBe(0);
+    w.ws.close();
+  });
+  it('LISTEN/NOTIFY down: a home race on this instance still reaches its local players', async () => {
+    const a = await login('busA'), b = await login('busB');
+    const home = (await a.call('GET', '/me')).json.home.id;
+    const wa = await openWs(a.cookie), wb = await openWs(b.cookie);
+    for (const x of [wa, wb]) x.ws.send(JSON.stringify({ type: 'home.join', home_id: home }));
+    await wb.wait((m) => m.type === 'home.presence' && m.users.length === 2);
+    const orig = bus.publish; (bus as any).publish = async () => {}; // 模擬 LISTEN 連線斷掉（publish 什麼都沒送出去）
+    try {
+      wa.ws.send(JSON.stringify({ type: 'race.invite' }));
+      const inv = await wb.wait((m) => m.type === 'race.event' && m.kind === 'invite');
+      wb.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: true }));
+      const st = await wa.wait((m) => m.type === 'race.started'); await wb.wait((m) => m.type === 'race.started');
+      await wa.wait((m) => m.type === 'race.snap' && m.race_id === st.race_id); await wb.wait((m) => m.type === 'race.snap' && m.race_id === st.race_id);
+      await fastForwardRace(st.race_id, (s) => { drive(a.id)(s); drive(b.id)(s); });
+      expect((await wa.wait((m) => m.type === 'race.ended')).me.user_id).toBe(a.id); expect((await wb.wait((m) => m.type === 'race.ended')).me.user_id).toBe(b.id);
+      expect(wa.msgs.filter((m) => m.type === 'race.started').length).toBe(1); // 本機只送一次（不會跟 NOTIFY 回音重複）
+    } finally { (bus as any).publish = orig; }
+    wa.ws.close(); wb.ws.close();
+  });
+  it('a home race is delivered once per socket when NOTIFY works (local send + echo skipped)', async () => {
+    const a = await login('echoA'), b = await login('echoB');
+    const home = (await a.call('GET', '/me')).json.home.id;
+    const wa = await openWs(a.cookie), wb = await openWs(b.cookie);
+    for (const x of [wa, wb]) x.ws.send(JSON.stringify({ type: 'home.join', home_id: home }));
+    await wb.wait((m) => m.type === 'home.presence' && m.users.length === 2);
+    wa.ws.send(JSON.stringify({ type: 'race.invite' }));
+    const inv = await wb.wait((m) => m.type === 'race.event' && m.kind === 'invite');
+    wb.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: true }));
+    const st = await wa.wait((m) => m.type === 'race.started');
+    await fastForwardRace(st.race_id, (s) => { drive(a.id)(s); drive(b.id)(s); });
+    await wa.wait((m) => m.type === 'race.ended'); await sleep(200); // 等 NOTIFY 回音
+    expect(wa.msgs.filter((m) => m.type === 'race.started').length).toBe(1);
+    expect(wa.msgs.filter((m) => m.type === 'race.ended').length).toBe(1);
+    const ticks = wa.msgs.filter((m) => m.type === 'race.snap').map((m) => m.tick); expect(new Set(ticks).size).toBe(ticks.length);
+    wa.ws.close(); wb.ws.close();
+  });
+  it('closing (20:00) aborts a running race without settling it (no cup reset)', async () => {
+    const { a, w } = await soloStarted('close1');
+    w.ws.send(JSON.stringify({ type: 'race.input', seq: 1, gas: true })); await sleep(150);
+    await handleClosed({ db, hub: { closeAll() {} }, gate: { release: async () => {} } }, null);
+    expect((await w.wait((m) => m.type === 'race.ended')).aborted).toBe(true);
+    expect(inRace(a.id)).toBe(false);
+    await sleep(100); expect(await results(a.id)).toBe(0);
+    w.ws.close();
+  });
+  it('leave while a solo race is still being set up → it never opens; double tap opens only one race', async () => {
+    const a = await login('soloCancel'), w = await openWs(a.cookie);
+    w.ws.send(JSON.stringify({ type: 'race.solo' })); w.ws.send(JSON.stringify({ type: 'race.leave' }));
+    await sleep(400);
+    expect(w.msgs.some((m) => m.type === 'race.started')).toBe(false); expect(inRace(a.id)).toBe(false);
+    w.ws.send(JSON.stringify({ type: 'race.solo' })); w.ws.send(JSON.stringify({ type: 'race.solo' }));
+    const st = await w.wait((m) => m.type === 'race.started');
+    expect((await w.wait((m) => m.type === 'error')).code).toBe('ALREADY_IN_MATCH');
+    await sleep(200); expect(w.msgs.filter((m) => m.type === 'race.started').length).toBe(1);
+    await fastForwardRace(st.race_id, drive(a.id)); await w.wait((m) => m.type === 'race.ended');
+    w.ws.close();
+  });
+  it('leaderboard: same display name = separate rows, named pet（user） like on the track', async () => {
+    const a = await login('lbA'), b = await login('lbB');
+    expect((await a.call('POST', '/pets', { species: 'chicken', name: '咪咪', request_id: randomUUID() })).status).toBe(200);
+    await sql`UPDATE users SET display_name = '同名' WHERE id IN (${a.id}, ${b.id})`.execute(db);
+    const season = seasonOf(Date.now());
+    await a.call('GET', '/race/profile'); await b.call('GET', '/race/profile'); // 建檔（錦標賽積分榜）
+    for (const [u, ms] of [[a.id, 90_000], [b.id, 95_000]] as const) {
+      await sql`INSERT INTO race_results (race_id, season, track, user_id, rank, time_ms, prize, points, condition, humans, private) VALUES (${randomUUID()}, ${season}, 'tw1', ${u}, 1, ${ms}, 0, 0, 100, 1, false)`.execute(db);
+    }
+    const lb = (await a.call('GET', '/race/leaderboard/tw1')).json;
+    expect(lb.best.map((r: any) => [r.name, r.time_ms])).toEqual([['咪咪（同名）', 90_000], ['同名', 95_000]]);
+    expect(lb.best[0].id).toBeUndefined();
+    expect(lb.championship.map((r: any) => r.name).sort()).toEqual(['同名', '咪咪（同名）'].sort());
+  });
+  it('races started near closing are capped to end 10 s before closing', () => {
+    const now = 1_000_000, max = 20 * 60 * 9, cd = 60;
+    expect(capRaceTicks(max, cd, null, now)).toBe(max);
+    expect(capRaceTicks(max, cd, now + 60 * 60_000, now)).toBe(max);
+    expect(capRaceTicks(max, cd, now + 8 * 60_000, now)).toBe(Math.floor((8 * 60_000 - 10_000) / 50));
+    expect(capRaceTicks(max, cd, now + 5_000, now)).toBe(cd);
+  });
 });

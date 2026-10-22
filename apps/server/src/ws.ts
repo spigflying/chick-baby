@@ -1,4 +1,4 @@
-import { initRacing, onRaceBus, onRacePresence, raceBusy, startSolo, toRaceAuthority } from './racing';
+import { initRacing, onRaceBus, onRacePresence, raceBusy, raceEcho, startSolo, toRaceAuthority } from './racing';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { Db } from './db';
@@ -22,7 +22,9 @@ interface Conn { presenceUser?: PresenceUser; id: number; ws: WebSocket; user: {
   /** M2：這條連線正在玩的多人局（在哪個家、哪一局） */
   mm: { home: string; id: string } | null;
   /** 賽車：這條連線正在跑的比賽（哪一場、哪個執行個體在模擬） */
-  rr?: { id: string; inst: string } | null }
+  rr?: { id: string; inst: string } | null;
+  /** 單人賽開賽中（還沒送出 race.started）；cancelled＝這段時間按了離開 */
+  soloReq?: { cancelled: boolean } | null }
 const conns = new Set<Conn>();
 // 在場名單：home → (instance:conn) → user；透過 NOTIFY 在所有執行個體間同步
 const presence = new PresenceStore();
@@ -61,7 +63,16 @@ function forwardMStairs(m: any) {
 
 /** 賽車：負責的執行個體送出的訊息 → 轉給這個執行個體上的連線（同多人下樓梯）。 */
 function forwardRace(m: any) {
-  const { t, home, ...rest } = m;
+  const { t, home, src: _src, via, cid, ...rest } = m;
+  // race.resume 的回覆：只給發出重連的那一條連線
+  if (via !== undefined) {
+    if (via !== env.instanceId) return;
+    const c = [...conns].find((x) => x.id === cid && x.user.id === m.user); if (!c) return;
+    if (t === 'rrace.resumed') { c.rr = { id: m.race_id, inst: m.inst }; const { user: _u, ...r } = rest; send(c, { type: 'race.started', home_id: home, resumed: true, ...r }); }
+    else if (t === 'rrace.ended') send(c, { type: 'race.ended', race_id: m.race_id, track: m.track, ranking: m.ranking, aborted: !!m.aborted, me: (m.results ?? []).find((p: any) => p.user_id === c.user.id) ?? null });
+    else if (t === 'rrace.gone') send(c, { type: 'race.gone', race_id: m.race_id });
+    return;
+  }
   if (t === 'rrace.event') { if (home) for (const c of inHome(home)) send(c, { type: 'race.event', home_id: home, ...rest }); }
   else if (t === 'rrace.notice') { for (const c of home ? inHome(home) : conns) if (c.user.id === m.user) send(c, { type: 'race.notice', home_id: home, code: m.code }); }
   else if (t === 'rrace.started') {
@@ -82,7 +93,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
   bus.on(async (m) => {
     try {
       if (typeof m.t === 'string' && m.t.startsWith('mstairs.')) { onMStairsBus(m); forwardMStairs(m); return; }
-      if (typeof m.t === 'string' && m.t.startsWith('rrace.')) { onRaceBus(m); forwardRace(m); return; }
+      if (typeof m.t === 'string' && m.t.startsWith('rrace.')) { onRaceBus(m); if (!raceEcho(m)) forwardRace(m); return; }
       if (typeof m.t === 'string' && m.t.startsWith('arena.')) {
         onArenaBus(m);
         const { t, home, ...rest } = m;
@@ -233,8 +244,9 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             break;
           }
           case 'race.solo': {
-            if ((c.match && !c.match.ended) || c.mm || c.rr) throw new AppError('ALREADY_IN_MATCH');
-            await startSolo(c.user.id, msg.track);
+            if ((c.match && !c.match.ended) || c.mm || c.rr || c.soloReq) throw new AppError('ALREADY_IN_MATCH'); // soloReq：連按兩次只開一場
+            const req = c.soloReq = { cancelled: false };
+            try { await startSolo(c.user.id, msg.track, () => req.cancelled); } finally { if (c.soloReq === req) c.soloReq = null; }
             break;
           }
           case 'race.input':
@@ -242,7 +254,14 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             break;
           case 'race.leave':
             if (c.rr) { toRaceAuthority({ t: 'rrace.quit', inst: c.rr.inst, race: c.rr.id, user: c.user.id }); c.rr = null; }
+            else if (c.soloReq) c.soloReq.cancelled = true; // 「準備發車…」時按離開：還沒開好的單人賽就不開了
+            else if (typeof msg.race_id === 'string' && typeof msg.inst === 'string') toRaceAuthority({ t: 'rrace.quit', inst: msg.inst.slice(0, 80), race: msg.race_id.slice(0, 40), user: c.user.id }); // 重連中還沒接回就按離開
             else if (c.homeId) toRaceAuthority({ t: 'rrace.leave', home: c.homeId, user: c.user.id });
+            break;
+          // 斷線重連：接回原本那場（開賽的執行個體決定接回、給結果，或回 race.gone）
+          case 'race.resume':
+            if (c.rr || typeof msg.race_id !== 'string' || typeof msg.inst !== 'string') break;
+            toRaceAuthority({ t: 'rrace.resume', inst: msg.inst.slice(0, 80), race: msg.race_id.slice(0, 40), user: c.user.id, via: env.instanceId, cid: c.id });
             break;
           default: send(c, { type: 'error', code: 'BAD_REQUEST', message: 'unknown type' });
         }
@@ -254,7 +273,9 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
     });
     socket.on('close', () => {
       if (c.mm) toAuthority({ t: 'mstairs.leave', home: c.mm.home, user: c.user.id });
-      if (c.rr) toRaceAuthority({ t: 'rrace.quit', inst: c.rr.inst, race: c.rr.id, user: c.user.id });
+      // 斷線不等於棄賽：先放開油門，RACE_DROP_MS 內重連（race.resume）可以接回
+      if (c.rr) toRaceAuthority({ t: 'rrace.drop', inst: c.rr.inst, race: c.rr.id, user: c.user.id });
+      if (c.soloReq) c.soloReq.cancelled = true;
       leaveHome(c); conns.delete(c);
       if (c.match && !c.match.ended) void finish(c.match, 'quit');
     });
