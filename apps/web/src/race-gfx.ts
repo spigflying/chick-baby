@@ -1,5 +1,5 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
-import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, type Track } from '@chick/engine';
+import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, type Track } from '@chick/engine';
 import { carBodyH, carPixels, LODS, PLAYER_W, exhaustsOf, DESIGN_W, EXHAUST_Y, type CarLook } from './race-cars';
 import { pickupDims } from './race-pickup';
 import { frontSprite, ensureComposite, S as PET_S } from './sprites';
@@ -376,7 +376,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     const target = PLAYER_W * p.lat / gw; /* v14：車寬跟畫在那一列的路寬成正比 */ if (!isMe && target < 5) continue; const lod = isMe ? -1 : lodFor(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
     const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 60 && v.frame % 20 < 2), frame: v.frame }, lod);
     const bh = (img as any).bodyH as number;
-    const bob = isMe && c.speed > 5 && c.speed < 60 && Math.floor(now / 160) % 2 ? 1 : 0, /* v24：只在低速輕輕晃（依毫秒），高速不晃 */ shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
+    const bob = isMe && c.speed > 5 && c.speed < 15 * SPEED_X && Math.floor(now / 160) % 2 ? 1 : 0, /* v24：只在低速輕輕晃（依毫秒），高速不晃 */ shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
     // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
     // v14：AI 與玩家同比例 —— 挑「不小於目標寬度」的 LOD 再縮到剛好目標寬（以前挑較小的 LOD 不放大，遠一點就小一截）
     const scale = isMe ? 1 : target / LODS[lod];

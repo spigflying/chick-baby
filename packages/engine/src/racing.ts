@@ -10,7 +10,7 @@ import { createRng, nextFloat, type Rng } from './rng';
 
 export const RACE_TICK_RATE = 20;
 /** v20：整體速度倍率（極速、加速、煞車、碰撞門檻都乘這個；操控用「速度／(70×SPEED_X)」正規化） */
-export const SPEED_X = 4;
+export const SPEED_X = 3; // v25：4 → 3（玩家覺得太快）；操控、碰撞、AI 都依此等比例
 /** 每 tick 物理子步數（速度變快後避免碰撞穿過去） */
 export const SUBSTEPS = 4;
 export const SEG_LEN = 20;
@@ -34,11 +34,11 @@ export const TIER_NAMES = ['原廠標準', '升級 1 階', '升級 2 階', '升�
 /** price 可指定明確售價（覆蓋 TG2 ÷ PRICE_DIVISOR），tg2 欄位仍保留原價 */
 const tiers = (tg2: number[], price?: number[]): PartTier[] => [0, ...tg2].map((v, i) => ({ name: TIER_NAMES[i], price: i ? (price?.[i - 1] ?? v / PRICE_DIVISOR) : 0, tg2: v }));
 export const PARTS: Record<PartKind, { label: string; desc: string; tiers: PartTier[] }> = {
-  engine: { label: '引擎', desc: '加速＋極速（每階 +2.5 加速、+10 km/h）', tiers: tiers([30000, 50000, 80000], [2000, 5000, 7000]) },
-  gearbox: { label: '變速箱', desc: '極速（每階 +14 km/h，跟引擎各自相加）', tiers: tiers([10000, 30000, 50000], [2000, 4000, 6000]) },
+  engine: { label: '引擎', desc: '加速＋極速（每階 +2.5 加速、+7 km/h）', tiers: tiers([30000, 50000, 80000], [2000, 5000, 7000]) },
+  gearbox: { label: '變速箱', desc: '極速（每階 +11 km/h，跟引擎各自相加）', tiers: tiers([10000, 30000, 50000], [2000, 4000, 6000]) },
   nitro: { label: '氮氣', desc: '噴更久：原廠 5 秒，每階 +2 秒（7／9／11 秒）；推力不變，每場一律 3 次', tiers: tiers([5000, 15000, 30000]) },
-  dry: { label: '乾地胎', desc: '晴天、夜晚、霧天的抓地與過彎；每階極速 +5 km/h', tiers: tiers([1000, 2000, 4000]) },
-  wet: { label: '雨胎', desc: '下雨、下雪時自動換上；每階極速 +5 km/h（雨雪天）', tiers: tiers([1000, 2000, 3000]) },
+  dry: { label: '乾地胎', desc: '晴天、夜晚、霧天的抓地與過彎；每階極速 +4 km/h', tiers: tiers([1000, 2000, 4000]) },
+  wet: { label: '雨胎', desc: '下雨、下雪時自動換上；每階極速 +4 km/h（雨雪天）', tiers: tiers([1000, 2000, 3000]) },
   armorF: { label: '前裝甲', desc: '追撞前車時少掉完美度', tiers: tiers([5000, 10000, 20000]) },
   armorR: { label: '後裝甲', desc: '被後車撞時少掉完美度', tiers: tiers([5000, 10000, 20000]) },
   armorS: { label: '側裝甲', desc: '擦撞路邊與側面碰撞少掉完美度', tiers: tiers([5000, 10000, 20000]) },
@@ -311,7 +311,7 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
  */
 /** v13（curves）：過彎外甩整體減半（所有胎、乾濕地一律 ×0.5，相對差異不變）。 */
 /** v14（steer）：固定速率轉向（每秒最多橫移幾個半路寬），從 1.6 降到 0.75：點一下只動一點、按住穩定平移。AI 也用同一個值。 */
-export const STEER_RATE = 0.75;
+export const STEER_RATE = 0.75 * SPEED_X / 4; // v25：轉向、外甩都依 SPEED_X/4 縮放 → 每公尺路的操控跟 4 倍時一樣
 /** 外甩跟著轉向一起縮放（v13 的 0.5 × 0.75/1.6），過彎守線難度與 v13 相同，只是整體橫向動作變慢。 */
 export const CORNER_PULL = 0.5 * STEER_RATE / 1.6 * 1.4; // v21：速度 ×4（相對 v19），彎道時間再減半，外甩 ×1.4 讓原廠胎仍偶爾衝出、3 階胎守住
 export const slideFactor = (grip: number) => Math.min(1.4, 0.35 * Math.pow(1.4 / Math.max(0.3, grip), 2.5));
