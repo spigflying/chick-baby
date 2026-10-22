@@ -158,7 +158,7 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
   x.fillStyle = Q[edge]; x.fillRect(px, py, w, h); x.fillStyle = Q[bg]; x.fillRect(px + 1, py + 1, w - 2, h - 2);
 }
 
-export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number }
+export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number; /** 前／側／後 分區損傷 0–100 */ zd?: number[] }
 export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number }
 
 /** v13：彎道視覺強度（每公尺彎度係數）、攝影機橫向跟車比例。 */
@@ -452,6 +452,34 @@ function otext(x: CanvasRenderingContext2D, s: string, px: number, py: number, c
 }
 const SUF = (n: number) => (n % 100 >= 11 && n % 100 <= 13) ? 'TH' : ['TH', 'ST', 'ND', 'RD'][n % 10] ?? 'TH';
 /** v9 HUD（TG2 版面）：左上 轉速弧＋大速度、氮氣列、AUTO＋檔位、車體損傷圖、完美度 E…F；右上 計時、地圖、LAP、名次。 */
+/** HUD 俯視車（44×15）：r 後段、s 兩側、f 車頭、c 座艙、k 座艙線條、w 輪胎、o 外框（自動描邊） */
+export const HUD_CAR_W = 42;
+let hudCarCache: [number, number, string][] | null = null;
+export function hudCarPixels(): [number, number, string][] {
+  if (hudCarCache) return hudCarCache;
+  const W0 = HUD_CAR_W, H0 = 17, g: string[][] = Array.from({ length: H0 }, () => Array(W0).fill('.'));
+  const set = (i: number, j: number, ch: string) => { if (i >= 0 && i < W0 && j >= 0 && j < H0) g[j][i] = ch; };
+  // 輪胎（上下各兩顆，凸出車身）
+  for (const wx of [6, 25]) for (let i = wx; i < wx + 7; i++) for (const j of [2, 14]) set(i, j, 'w');
+  // 車身：x 2..30 方形，30..39 圓弧車頭（TG2 那種圓鼻子）
+  for (let j = 3; j <= 13; j++) for (let i = 2; i <= 39; i++) {
+    const dy = Math.abs(j - 8), nose = i > 30 ? ((i - 30) / 9.5) ** 2.6 + (dy / 5.6) ** 2.6 <= 1 : true; if (!nose) continue;
+    set(i, j, i <= 8 ? 'r' : i >= 31 ? 'f' : (j <= 4 || j >= 12) ? 's' : 'c');
+  }
+  // 座艙：框線＋前後擋風玻璃線、尾翼
+  for (let i = 11; i <= 28; i++) { set(i, 5, 'k'); set(i, 11, 'k'); }
+  for (let j = 5; j <= 11; j++) { set(11, j, 'k'); set(28, j, 'k'); set(16, j, 'k'); set(23, j, 'k'); }
+  for (let j = 4; j <= 12; j++) set(4, j, 'k');
+  // 外框兩圈：裡圈最亮（o）、外圈最暗（d），在淺色背景上也看得清楚
+  const solid = (i: number, j: number) => !!g[j]?.[i] && g[j][i] !== '.';
+  const ring = (want: (i: number, j: number) => boolean, ch: string) => { const add: [number, number][] = [];
+    for (let j = 0; j < H0; j++) for (let i = 0; i < W0; i++) if (g[j][i] === '.' && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([a, b]) => want(i + a, j + b))) add.push([i, j]);
+    for (const [i, j] of add) g[j][i] = ch; };
+  ring(solid, 'o'); ring((i, j) => g[j]?.[i] === 'o', 'd');
+  const out: [number, number, string][] = [];
+  for (let j = 0; j < H0; j++) for (let i = 0; i < W0; i++) if (g[j][i] !== '.') out.push([i, j, g[j][i]]);
+  return (hudCarCache = out);
+}
 function drawHud(x: CanvasRenderingContext2D, v: View, now = performance.now()) {
   const me = v.me; if (!me) return;
   const top = v.top ?? 80, gears = Math.max(4, Math.min(6, v.gears ?? 5)), frac = Math.max(0, Math.min(1, me.speed / top));
@@ -484,30 +512,15 @@ function drawHud(x: CanvasRenderingContext2D, v: View, now = performance.now()) 
   otext(x, 'AUTO', 26, 57, 0);
   // 檔位 R 1..n，目前檔位亮＋放大
   let gx = 22; ['R', ...Array.from({ length: gears }, (_, i) => String(i + 1))].forEach((g, i) => { const cur = me.speed > 1 && i === gear; if (cur) { otext(x, g, gx, 64, 1, 2); gx += 12; } else { otext(x, g, gx, 68, 2); gx += 7; } });
-  // 車體損傷圖（俯視）：前／後／左右／座艙 5 區，完美度越低越暗；剛撞到時前區閃
-  const cond = Math.max(0, Math.round(100 - me.damage)), dmg = (z: number) => { const c = cond - z * 8; return c > 70 ? 0 : c > 40 ? 1 : 2; };
-  const DX = 24, DY = 79, low = cond < 40 && v.frame % 6 < 3;
-  const CARMAP = [
-    '....oooooooooooooooooooooooooooooooo........',
-    '..oorrrrsssssssssssssssssssssssssssffffoo...',
-    '.orrrrrssssssssssssssssssssssssssssfffffoo..',
-    'orrrroooooooooooooooooooooooooooooofffffffo.',
-    'orrrrocccccccwwwwwwwccccwwwwwwwwwoffffffffo',
-    'orrrrocccccccwwwwwwwccccwwwwwwwwwofffffffffo',
-    'orrrrocccccccwwwwwwwccccwwwwwwwwwofffffffffo',
-    'orrrrocccccccwwwwwwwccccwwwwwwwwwofffffffffo',
-    'orrrrocccccccwwwwwwwccccwwwwwwwwwofffffffffo',
-    'orrrrocccccccwwwwwwwccccwwwwwwwwwofffffffffo',
-    'orrrrocccccccwwwwwwwccccwwwwwwwwwoffffffffo',
-    'orrrroooooooooooooooooooooooooooooofffffffo.',
-    '.orrrrrssssssssssssssssssssssssssssfffffoo..',
-    '..oorrrrsssssssssssssssssssssssssssffffoo...',
-    '....oooooooooooooooooooooooooooooooo........',
-  ];
-  const zc: Record<string, number> = { o: 3, w: 3, f: me.hit > 0 && v.frame % 2 ? 3 : dmg(2), r: dmg(1), s: dmg(0), c: low ? 2 : dmg(-1) };
-  const hz = hudZone(me, now); if (hz) zc[hz.zone] = hz.on ? 3 : 0; // v15：被撞的那一區快閃（最暗↔最亮）
-  CARMAP.forEach((row, j) => [...row].forEach((ch, i) => { if (ch === '.') return; x.fillStyle = Q[zc[ch]]; x.fillRect(DX + i, DY + j, 1, 1); }));
-  x.fillStyle = Q[3]; for (const [i, j] of [[-1, 2], [-1, 12], [44, 4], [44, 10]]) x.fillRect(DX + i, DY + j, 1, 1);
+  // v23：車體損傷圖（照 TG2：俯視、橫放、車頭圓弧朝右；黑色車身＋座艙／輪胎細節，外圈最亮色描邊）
+  // 前／側／後三區各自依分區損傷變色（黑→深綠→淺綠閃爍），剛撞到的那一區快閃；旁邊顯示完美度 NN%（＝condition，跟極速懲罰同一個數）
+  const cond = Math.max(0, Math.round(100 - me.damage));
+  const zd = me.zd ?? [0, 0, 0], zcol = (d: number) => d < 34 ? 3 : d < 67 ? 2 : (v.frame % 8 < 5 ? 1 : 3);
+  const zc: Record<string, number> = { o: 0, d: 3, w: 3, k: 2, c: 3, f: zcol(zd[0]), s: zcol(zd[1]), r: zcol(zd[2]) };
+  const hz = hudZone(me, now); if (hz) zc[hz.zone] = hz.on ? 0 : 3; // 被撞的那一區快閃
+  const DX = 20, DY = 79;
+  for (const [i, j, ch] of hudCarPixels()) { x.fillStyle = Q[zc[ch]]; x.fillRect(DX + i, DY + j, 1, 1); }
+  const pct = `${cond}%`; otext(x, pct, DX + HUD_CAR_W + 3, DY + 5, cond < 40 && v.frame % 6 < 3 ? 2 : 0);
   // 完美度條（像油表 E…F）
   otext(x, 'E', 8, 97, 2); otext(x, 'F', 90, 97, 0);
   for (let i = 0; i < 14; i++) { const on = i < Math.round(cond / 100 * 14); x.fillStyle = Q[3]; x.fillRect(16 + i * 5, 96, 5, 9); x.fillStyle = Q[on ? (i < 4 ? 1 : 0) : 2]; x.fillRect(17 + i * 5, 97, 3, 7); }
