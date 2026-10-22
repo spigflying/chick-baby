@@ -267,6 +267,23 @@ describe('racing: disconnects, bus outage, closing', () => {
     const prof = (await a.call('GET', '/race/profile')).json.profile; expect(prof.races).toBe(0); expect(prof.cup.race).toBe(0);
     w.ws.close();
   });
+  it('a voided seat is not counted in the race_results humans of the others', async () => {
+    const a = await login('voidHost'), b = await login('voidGuest');
+    const home = (await a.call('GET', '/me')).json.home.id;
+    const wa = await openWs(a.cookie), wb = await openWs(b.cookie);
+    for (const x of [wa, wb]) x.ws.send(JSON.stringify({ type: 'home.join', home_id: home }));
+    await wb.wait((m) => m.type === 'home.presence' && m.users.length === 2);
+    wa.ws.send(JSON.stringify({ type: 'race.invite' }));
+    const inv = await wb.wait((m) => m.type === 'race.event' && m.kind === 'invite');
+    wb.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: true }));
+    await wa.wait((m) => m.type === 'race.started');
+    wa.ws.send(JSON.stringify({ type: 'race.input', seq: 1, gas: true })); await sleep(150); // 只有 a 連上，b 一次操作都沒送
+    stepRaces(Date.now() + RACE_DROP_MS + 2000);
+    await wa.wait((m) => m.type === 'race.ended');
+    const rows = (await sql<any>`SELECT user_id, humans FROM race_results`.execute(db)).rows;
+    expect(rows).toEqual([{ user_id: a.id, humans: 1 }]);
+    wa.ws.close(); wb.ws.close();
+  });
   it('LISTEN/NOTIFY down: a home race on this instance still reaches its local players', async () => {
     const a = await login('busA'), b = await login('busB');
     const home = (await a.call('GET', '/me')).json.home.id;
