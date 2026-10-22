@@ -17,6 +17,7 @@ import { clock } from './hours';
 import type { Bus } from './bus';
 import type { PresenceStore } from './presence';
 import { env } from './env';
+import { petLook, spriteKey } from './pets';
 
 export const CLOSING_GUARD_MS = 8 * 60_000; // 關門前 8 分鐘不開新比賽（最長比賽＋等待時間）
 export const RACE_INVITE_MS = 15_000;
@@ -100,7 +101,7 @@ export async function raceLeaderboard(db: Db, track: string) {
  */
 export const RACE_IDLE_MS = 1500;
 export const RACE_DROP_MS = 30_000;
-interface Seat { userId: string; name: string; car: string; paint: number; parts: any; left: boolean; seenAt: number | null; idle: boolean; void: boolean }
+interface Seat { userId: string; name: string; car: string; paint: number; parts: any; /** 坐在車上的寵物精靈鍵（null＝沒有寵物） */ pet: string | null; left: boolean; seenAt: number | null; idle: boolean; void: boolean }
 interface Room { id: string; home: string | null; host: string; inst: string; track: string; seats: Seat[]; state: RaceState; startAt: number; ended: boolean; seq: Map<string, number>;
   /** 有人從別的執行個體接回這場（單人賽也要走 NOTIFY） */
   remote: boolean;
@@ -240,6 +241,21 @@ export async function startSolo(userId: string, track: unknown, cancelled?: () =
   if (cancelled?.()) return null;
   return start(null, userId, [userId], tr.id, null, cancelled);
 }
+/** 坐在車上的寵物：目前活著（蛋／長大）的寵物，沒有就用最近一隻（死掉＝幽靈）；精靈鍵：'egg'／'ghost'／'物種|配件' */
+export function racePetKey(row: { species: string; status: string; bao?: any; outfits?: any } | null | undefined): string | null {
+  if (!row) return null;
+  if (row.status === 'dead') return 'ghost';
+  if (row.status === 'egg') return 'egg';
+  return spriteKey({ species: row.species, look: petLook(row) });
+}
+async function racePets(db: Db, users: string[]): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>(); if (!users.length) return out;
+  try {
+    const rows = await (db as any).selectFrom('pets').select(['owner_id', 'species', 'status', 'bao', 'outfits', 'born_at']).where('owner_id', 'in', users).orderBy('born_at', 'desc').execute();
+    for (const u of users) { const mine = rows.filter((r: any) => r.owner_id === u); out.set(u, racePetKey(mine.find((r: any) => r.status !== 'dead') ?? mine[0])); }
+  } catch (err) { console.error('race pets failed', err); }
+  return out;
+}
 async function start(home: string | null, host: string, users: string[], track: string, inviteId: string | null, cancelled?: () => boolean) {
   const { db, presence } = deps!;
   if (home) starting.add(home);
@@ -254,7 +270,8 @@ async function start(home: string | null, host: string, users: string[], track: 
     const petOf = new Map(pets.map((x: any) => [x.owner_id, x.name]));
     for (const r of rows) if (!names.has(r.id)) names.set(r.id, raceLabel(petOf.get(r.id) as any, r.display_name));
     const seats: Seat[] = [];
-    for (const u of users) { const p = await getProfile(db, u); seats.push({ userId: u, name: String(names.get(u) ?? '玩家'), car: p.car, paint: p.paint, parts: p.parts, left: false, seenAt: null, idle: false, void: false }); }
+    const petKeys = await racePets(db, users);
+    for (const u of users) { const p = await getProfile(db, u); seats.push({ userId: u, name: String(names.get(u) ?? '玩家'), car: p.car, paint: p.paint, parts: p.parts, pet: petKeys.get(u) ?? null, left: false, seenAt: null, idle: false, void: false }); }
     const seed = randomSeed();
     const state = createRace(seed, track, fillField(seats.map((s) => ({ id: s.userId, name: s.name, car: s.car, parts: s.parts, color: s.paint }))));
     state.maxTicks = capRaceTicks(state.maxTicks, state.countdown, clock().status(Date.now()).closes_at, Date.now());
@@ -276,7 +293,7 @@ export function capRaceTicks(maxTicks: number, countdown: number, closesAt: numb
   return Math.max(countdown, Math.min(maxTicks, Math.floor(((closesAt - now - 10_000) * RACE_TICK_RATE) / 1000)));
 }
 const startedMsg = (r: Room) => ({ t: 'rrace.started', inst: r.inst, track: r.track, seed: r.state.seed, laps: r.state.laps, len: r.state.len, tick_rate: RACE_TICK_RATE, users: r.seats.map((s) => s.userId), solo: !r.home, pickups: r.state.pickups.map((p) => [p.id, p.z, p.x]),
-  cars: r.state.cars.map((c) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color })) });
+  cars: r.state.cars.map((c) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, pet: c.ai ? null : r.seats.find((x) => x.userId === c.id)?.pet ?? null })) });
 function raceInput(r: Room, userId: string, msg: any) {
   const s = r.seats.find((x) => x.userId === userId); if (!s || s.left) return;
   s.seenAt = Date.now(); s.idle = false; // 亂序的舊封包也代表人還在

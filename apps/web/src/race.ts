@@ -224,7 +224,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     if (!race || race.snaps.length === 0) return null;
     const [a, b, f] = bracket(race.snaps, clock.renderTick(performance.now()));
     return race.cars.map((c) => { const p = a.cars.get(c.id), q = b.cars.get(c.id) ?? p; if (!p || !q) return null;
-      return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[1] + (q[1] - p[1]) * f, x: p[2] + (q[2] - p[2]) * f, speed: p[3] + (q[3] - p[3]) * f, damage: q[4], nitro: q[5], nitroT: q[6], fin: q[7], hit: q[8], evT: q[9] ?? 0, evK: q[10] ?? 0, evS: q[11] ?? 0, evSide: q[12] ?? 0, zd: [q[14] ?? 0, q[15] ?? 0, q[16] ?? 0], pkT: q[17] ?? 0, flip: (q[13] ?? 0) && (p[13] ?? 0) ? p[13] + (q[13] - p[13]) * f : q[13] ?? 0, brake: c.id === me.user.id ? keys.brake : q[3] < p[3] - 0.5 } as ViewCar; }).filter(Boolean) as ViewCar[];
+      return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, pet: c.ai ? null : c.pet ?? null, z: p[1] + (q[1] - p[1]) * f, x: p[2] + (q[2] - p[2]) * f, speed: p[3] + (q[3] - p[3]) * f, damage: q[4], nitro: q[5], nitroT: q[6], fin: q[7], hit: q[8], evT: q[9] ?? 0, evK: q[10] ?? 0, evS: q[11] ?? 0, evSide: q[12] ?? 0, zd: [q[14] ?? 0, q[15] ?? 0, q[16] ?? 0], pkT: q[17] ?? 0, flip: (q[13] ?? 0) && (p[13] ?? 0) ? p[13] + (q[13] - p[13]) * f : q[13] ?? 0, brake: c.id === me.user.id ? keys.brake : q[3] < p[3] - 0.5 } as ViewCar; }).filter(Boolean) as ViewCar[];
   }
   // 每個 rAF 都重畫（60fps）；位置依時間內插。動畫用的 frame 仍是 20Hz 計數（閃爍等節奏不變）。
   function loop() {
