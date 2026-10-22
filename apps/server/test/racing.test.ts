@@ -43,19 +43,19 @@ describe('racing (server) v5', () => {
     const a = await login('racer1');
     const p = await a.call('GET', '/race/profile');
     expect(p.status).toBe(200); expect(p.json.profile.cash).toBeUndefined(); expect(p.json.profile.season).toBe(seasonOf(Date.now()));
-    expect(p.json.catalog.tracks.length).toBe(TRACKS.length); expect(p.json.catalog.slots).toBe(20); expect(p.json.catalog.max_out_cost).toBe(454000);
+    expect(p.json.catalog.tracks.length).toBe(TRACKS.length); expect(p.json.catalog.slots).toBe(20); expect(p.json.catalog.max_out_cost).toBe(324000);
     const b0 = await bal(a.id);
     expect((await a.call('POST', '/race/buy', { kind: 'engine', tier: 3 })).json.error).toBe('INSUFFICIENT_COINS');
     await sql`UPDATE wallets SET balance = 250000 WHERE user_id = ${a.id}`.execute(db);
     const e3 = await a.call('POST', '/race/buy', { kind: 'engine', tier: 3 }); // 直接買 3 階
-    expect(e3.status).toBe(200); expect(e3.json.parts.engine).toBe(3); expect(e3.json.balance).toBe(250000 - 160000);
+    expect(e3.status).toBe(200); expect(e3.json.parts.engine).toBe(3); expect(e3.json.balance).toBe(250000 - 70000);
     expect((await a.call('POST', '/race/buy', { kind: 'engine', tier: 3 })).json.error).toBe('ALREADY_OWNED');
     const e1 = await a.call('POST', '/race/buy', { kind: 'engine', tier: 1 }); // 降級：全額、不退錢
-    expect(e1.json.parts.engine).toBe(1); expect(e1.json.balance).toBe(250000 - 160000 - partPrice('engine', 1)!);
+    expect(e1.json.parts.engine).toBe(1); expect(e1.json.balance).toBe(250000 - 70000 - partPrice('engine', 1)!);
     const e0 = await a.call('POST', '/race/buy', { kind: 'engine', tier: 0 }); // 原廠標準免費
     expect(e0.json.parts.engine).toBe(0); expect(e0.json.balance).toBe(e1.json.balance);
     const led = await sql<any>`SELECT reason, delta FROM coin_ledger WHERE user_id=${a.id} AND reason='race_part' ORDER BY created_at`.execute(db);
-    expect(led.rows.map((r: any) => Number(r.delta))).toEqual([-160000, -60000]);
+    expect(led.rows.map((r: any) => Number(r.delta))).toEqual([-70000, -20000]);
     const c = await a.call('POST', '/race/buy', { car: 'f1', paint: 7 }); expect(c.json.car).toBe('f1'); expect(c.json.paint).toBe(7);
     expect((await a.call('POST', '/race/buy', { paint: 8 })).status).toBe(400);
     expect((await a.call('POST', '/race/exchange', { dir: 'in', coins: 1 })).status).toBe(404);

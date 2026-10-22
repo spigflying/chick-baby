@@ -25,10 +25,11 @@ export type PartKind = 'engine' | 'gearbox' | 'nitro' | 'dry' | 'wet' | 'armorF'
 export interface PartTier { name: string; price: number; tg2: number }
 export const PRICE_DIVISOR = 0.5; // v17：價格 ×50（TG2 原價 ×2）
 export const TIER_NAMES = ['原廠標準', '升級 1 階', '升級 2 階', '升級 3 階'];
-const tiers = (tg2: number[]): PartTier[] => [0, ...tg2].map((v, i) => ({ name: TIER_NAMES[i], price: v / PRICE_DIVISOR, tg2: v }));
+/** price 可指定明確售價（覆蓋 TG2 ÷ PRICE_DIVISOR），tg2 欄位仍保留原價 */
+const tiers = (tg2: number[], price?: number[]): PartTier[] => [0, ...tg2].map((v, i) => ({ name: TIER_NAMES[i], price: i ? (price?.[i - 1] ?? v / PRICE_DIVISOR) : 0, tg2: v }));
 export const PARTS: Record<PartKind, { label: string; desc: string; tiers: PartTier[] }> = {
-  engine: { label: '引擎', desc: '加速＋極速（每階 +2.5 加速、+7 km/h）', tiers: tiers([30000, 50000, 80000]) },
-  gearbox: { label: '變速箱', desc: '極速（每階 +11 km/h，跟引擎各自相加）', tiers: tiers([10000, 30000, 50000]) },
+  engine: { label: '引擎', desc: '加速＋極速（每階 +2.5 加速、+7 km/h）', tiers: tiers([30000, 50000, 80000], [20000, 50000, 70000]) },
+  gearbox: { label: '變速箱', desc: '極速（每階 +11 km/h，跟引擎各自相加）', tiers: tiers([10000, 30000, 50000], [20000, 40000, 60000]) },
   nitro: { label: '氮氣', desc: '氮氣更猛、噴更久（每場一律 3 次）', tiers: tiers([5000, 15000, 30000]) },
   dry: { label: '乾地胎', desc: '晴天、夜晚、霧天的抓地與過彎', tiers: tiers([1000, 2000, 4000]) },
   wet: { label: '雨胎', desc: '下雨、下雪時自動換上', tiers: tiers([1000, 2000, 3000]) },
