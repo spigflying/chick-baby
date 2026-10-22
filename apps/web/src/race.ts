@@ -132,7 +132,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     mode = 'lobby'; setMatch(true); lobbyPlayers = [me.user.display_name]; lobbyStarts = Date.now() + 1000; msg.textContent = '準備發車…'; renderPanel();
   }
   function leave() { live?.send({ type: 'race.leave' }); race = null; mode = 'menu'; setMatch(false); msg.textContent = '已離開比賽'; renderPanel(); }
-  function onStarted(m: any) { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null }; clock.reset(); mode = 'race'; setMatch(true); const hum = m.cars.filter((c: any) => !c.ai).length; msg.textContent = `${trackById(m.track)!.name}・${hum > 1 ? `${hum} 位玩家＋` : ''}電腦 ${m.cars.length - hum} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
+  function onStarted(m: any) { race = { id: m.race_id, track: m.track, laps: m.laps, len: m.len, cars: m.cars, snaps: [], ended: null }; clock.reset(); lastHitT = -1; mode = 'race'; setMatch(true); const hum = m.cars.filter((c: any) => !c.ai).length; msg.textContent = `${trackById(m.track)!.name}・${hum > 1 ? `${hum} 位玩家＋` : ''}電腦 ${m.cars.length - hum} 台・${m.laps} 圈・氮氣 ${NITRO_PER_RACE} 次`; renderPanel(); }
   const off = live?.on((m) => {
     if (m.type === 'wallet.updated') { coins = m.balance; if (tab === 'garage' && mode === 'menu') renderPanel(); }
     if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('race.')) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; toast(ERR[m.code] ?? m.code); renderPanel(); }

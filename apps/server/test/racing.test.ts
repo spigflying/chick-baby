@@ -4,7 +4,7 @@ import { createDb } from '../src/db';
 import { migrateToLatest } from '../src/migrations';
 import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
-import { fastForwardRace, inRace, startRaceLoop } from '../src/racing';
+import { fastForwardRace, inRace, raceBusy, startRaceLoop } from '../src/racing';
 import { partPrice, prizeFor, RACE_SLOTS, seasonOf, setRaceInput, TRACKS } from '@chick/engine';
 import { CLOSING_GUARD_MS } from '../src/racing';
 
@@ -92,6 +92,19 @@ describe('racing (server) v5', () => {
     const lb = (await a.call('GET', '/race/leaderboard/tw1')).json; expect(lb.best.length).toBe(end.me.time_ms === null ? 0 : 1); expect(lb.championship.length).toBe(1);
     expect(inRace(a.id)).toBe(false); w.ws.close();
   });
+  it('can race again after a race ends (solo twice in a row)', async () => {
+    const a = await login('again1');
+    const w = await openWs(a.cookie);
+    for (let i = 0; i < 2; i++) {
+      w.ws.send(JSON.stringify({ type: 'race.solo' }));
+      const st = await w.wait((m) => m.type === 'race.started' && !(m as any).__seen);
+      (st as any).__seen = true;
+      await fastForwardRace(st.race_id, drive(a.id));
+      const end = await w.wait((m) => m.type === 'race.ended' && m.race_id === st.race_id);
+      expect(end.aborted).toBe(false); expect(inRace(a.id)).toBe(false);
+    }
+    w.ws.close();
+  });
   it('home invite (same flow as multi stairs): accept / decline; accepted race together, AI fill to 20; alone = solo', async () => {
     const a = await login('host'), b = await login('friend'), c = await login('shy');
     const home = (await a.call('GET', '/me')).json.home.id;
@@ -124,6 +137,53 @@ describe('racing (server) v5', () => {
     const solo = await wa.wait((m) => m.type === 'race.started'); expect(solo.cars.filter((x: any) => !x.ai).length).toBe(1);
     await fastForwardRace(solo.race_id); await wa.wait((m) => m.type === 'race.ended');
     wa.ws.close();
+  });
+  it('regression: leaving mid-race frees you right away (solo leave → solo again; duo leave → solo; duo twice)', async () => {
+    const a = await login('again2'), b = await login('again3');
+    const w = await openWs(a.cookie);
+    w.ws.send(JSON.stringify({ type: 'race.solo' }));
+    const s1 = await w.wait((m) => m.type === 'race.started');
+    w.msgs.length = 0; w.ws.send(JSON.stringify({ type: 'race.leave' }));
+    for (let i = 0; i < 50 && inRace(a.id); i++) await new Promise((r) => setTimeout(r, 20));
+    expect(inRace(a.id)).toBe(false);
+    w.ws.send(JSON.stringify({ type: 'race.solo' }));
+    const s2 = await w.wait((m) => m.type === 'race.started' || m.type === 'race.notice' || m.type === 'error');
+    expect(s2.type).toBe('race.started'); expect(s2.race_id).not.toBe(s1.race_id);
+    await fastForwardRace(s2.race_id, drive(a.id)); expect((await w.wait((m) => m.type === 'race.ended')).race_id).toBe(s2.race_id);
+    w.ws.close();
+    // 兩人同場：連跑兩場，第二場其中一人中途離開還能馬上單人
+    const home = (await a.call('GET', '/me')).json.home.id;
+    const wa = await openWs(a.cookie), wb = await openWs(b.cookie);
+    for (const x of [wa, wb]) x.ws.send(JSON.stringify({ type: 'home.join', home_id: home }));
+    await wb.wait((m) => m.type === 'home.presence' && m.users.length === 2);
+    for (let i = 0; i < 2; i++) {
+      wa.msgs.length = 0; wb.msgs.length = 0;
+      wa.ws.send(JSON.stringify({ type: 'race.invite' }));
+      const inv = await wb.wait((m) => m.type === 'race.event' && m.kind === 'invite');
+      wb.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: true }));
+      const st = await wa.wait((m) => m.type === 'race.started'); await wb.wait((m) => m.type === 'race.started');
+      expect(st.cars.filter((x: any) => !x.ai).length).toBe(2);
+      if (i === 0) { await fastForwardRace(st.race_id, (s) => { drive(a.id)(s); drive(b.id)(s); }); await wa.wait((m) => m.type === 'race.ended'); await wb.wait((m) => m.type === 'race.ended'); continue; }
+      wa.msgs.length = 0; wa.ws.send(JSON.stringify({ type: 'race.leave' }));
+      wa.ws.send(JSON.stringify({ type: 'race.solo' }));
+      const so = await wa.wait((m) => m.type === 'race.started' || m.type === 'race.notice' || m.type === 'error');
+      expect(so.type).toBe('race.started'); expect(inRace(b.id)).toBe(true);
+      wb.ws.send(JSON.stringify({ type: 'race.leave' }));
+      await fastForwardRace(so.race_id, drive(a.id)); await wa.wait((m) => m.type === 'race.ended' && m.race_id === so.race_id);
+      expect(inRace(a.id)).toBe(false); expect(inRace(b.id)).toBe(false);
+    }
+    // 兩人都離開後，同一個家馬上能再邀請（不會卡「已經有人發起或正在一起賽車」）
+    expect(raceBusy(home)).toBe(false);
+    wa.msgs.length = 0; wb.msgs.length = 0; wa.ws.send(JSON.stringify({ type: 'race.invite' }));
+    const inv3 = await wb.wait((m) => (m.type === 'race.event' && m.kind === 'invite') || m.type === 'race.notice');
+    expect(inv3.type).toBe('race.event');
+    wb.ws.send(JSON.stringify({ type: 'race.reply', invite: inv3.invite, accept: true }));
+    const st3 = await wa.wait((m) => m.type === 'race.started'); await wb.wait((m) => m.type === 'race.started');
+    // 一人跑完、另一人離開 → 立刻結算並解鎖
+    wb.ws.send(JSON.stringify({ type: 'race.leave' }));
+    await fastForwardRace(st3.race_id, drive(a.id)); await wa.wait((m) => m.type === 'race.ended');
+    expect(raceBusy(home)).toBe(false);
+    wa.ws.close(); wb.ws.close();
   });
   it('closing guard constant is 8 minutes', () => { expect(CLOSING_GUARD_MS).toBe(480000); });
 });
