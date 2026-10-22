@@ -10,9 +10,9 @@ import { createRng, nextFloat, type Rng } from './rng';
 
 export const RACE_TICK_RATE = 20;
 /** v20：整體速度倍率（極速、加速、煞車、碰撞門檻都乘這個；操控用「速度／(70×SPEED_X)」正規化） */
-export const SPEED_X = 2;
+export const SPEED_X = 4;
 /** 每 tick 物理子步數（速度變快後避免碰撞穿過去） */
-export const SUBSTEPS = 2;
+export const SUBSTEPS = 4;
 export const SEG_LEN = 20;
 export const RACE_SLOTS = 20;
 export const NITRO_PER_RACE = 3;
@@ -25,20 +25,20 @@ export const RACE_ENGINE_VERSION = 2;
 export const AI_COUNTRY = 0.03;
 
 // ---------------- 改裝店（TG2）：8 類 × 4 項（原廠標準免費＋升級 1／2／3 階） ----------------
-// 價格＝TG2 原價 ÷ PRICE_DIVISOR（v17 起 0.5，也就是 TG2 原價 ×2）（保留 TG2 的價格比例），單位＝寵物金幣 ◎（錢從下樓梯來，見 docs/racing.md 經濟）。
+// 價格＝TG2 原價 ÷ PRICE_DIVISOR（v21 起 5，也就是 TG2 原價 ÷5）（保留 TG2 的價格比例），單位＝寵物金幣 ◎（錢從下樓梯來，見 docs/racing.md 經濟）。
 // 任何一階都可以直接買；換到別的階（包括降級）舊零件直接丟掉、全額付款、不退錢。原廠標準＝免費。
 export type PartKind = 'engine' | 'gearbox' | 'nitro' | 'dry' | 'wet' | 'armorF' | 'armorR' | 'armorS';
 export interface PartTier { name: string; price: number; tg2: number }
-export const PRICE_DIVISOR = 0.5; // v17：價格 ×50（TG2 原價 ×2）
+export const PRICE_DIVISOR = 5; // v21：全部零件價格 ÷10（TG2 原價 ÷5）
 export const TIER_NAMES = ['原廠標準', '升級 1 階', '升級 2 階', '升級 3 階'];
 /** price 可指定明確售價（覆蓋 TG2 ÷ PRICE_DIVISOR），tg2 欄位仍保留原價 */
 const tiers = (tg2: number[], price?: number[]): PartTier[] => [0, ...tg2].map((v, i) => ({ name: TIER_NAMES[i], price: i ? (price?.[i - 1] ?? v / PRICE_DIVISOR) : 0, tg2: v }));
 export const PARTS: Record<PartKind, { label: string; desc: string; tiers: PartTier[] }> = {
-  engine: { label: '引擎', desc: '加速＋極速（每階 +2.5 加速、+7 km/h）', tiers: tiers([30000, 50000, 80000], [20000, 50000, 70000]) },
-  gearbox: { label: '變速箱', desc: '極速（每階 +11 km/h，跟引擎各自相加）', tiers: tiers([10000, 30000, 50000], [20000, 40000, 60000]) },
+  engine: { label: '引擎', desc: '加速＋極速（每階 +2.5 加速、+10 km/h）', tiers: tiers([30000, 50000, 80000], [2000, 5000, 7000]) },
+  gearbox: { label: '變速箱', desc: '極速（每階 +14 km/h，跟引擎各自相加）', tiers: tiers([10000, 30000, 50000], [2000, 4000, 6000]) },
   nitro: { label: '氮氣', desc: '噴更久：原廠 5 秒，每階 +2 秒（7／9／11 秒）；推力不變，每場一律 3 次', tiers: tiers([5000, 15000, 30000]) },
-  dry: { label: '乾地胎', desc: '晴天、夜晚、霧天的抓地與過彎', tiers: tiers([1000, 2000, 4000]) },
-  wet: { label: '雨胎', desc: '下雨、下雪時自動換上', tiers: tiers([1000, 2000, 3000]) },
+  dry: { label: '乾地胎', desc: '晴天、夜晚、霧天的抓地與過彎；每階極速 +5 km/h', tiers: tiers([1000, 2000, 4000]) },
+  wet: { label: '雨胎', desc: '下雨、下雪時自動換上；每階極速 +5 km/h（雨雪天）', tiers: tiers([1000, 2000, 3000]) },
   armorF: { label: '前裝甲', desc: '追撞前車時少掉完美度', tiers: tiers([5000, 10000, 20000]) },
   armorR: { label: '後裝甲', desc: '被後車撞時少掉完美度', tiers: tiers([5000, 10000, 20000]) },
   armorS: { label: '側裝甲', desc: '擦撞路邊與側面碰撞少掉完美度', tiers: tiers([5000, 10000, 20000]) },
@@ -66,13 +66,16 @@ export const PAINTS = PAINT_NAMES.length;
 
 /** 雨胎各階抓地（v12b 調整：原廠胎約 12% 時間被甩出路面、1 階約 9%、3 階約 2%；都不碰 slideFactor 上限 1.4） */
 export const WET_GRIP = [0.845, 0.925, 1.03, 1.14];
-export interface CarStats { topSpeed: number; accel: number; grip: number; wetGrip: number; nitroBoost: number; nitroTicks: number; armor: { F: number; S: number; R: number } }
+export interface CarStats { topSpeed: number; /** v21：輪胎加極速（m/s，乾地胎／雨胎各自，依天氣用哪一組） */ tireTopDry: number; tireTopWet: number; accel: number; grip: number; wetGrip: number; nitroBoost: number; nitroTicks: number; armor: { F: number; S: number; R: number } }
+/** v21：輪胎每階極速 +1（原廠 64 的約 1.5%；變速箱 +3、引擎 +2） */
+export const TIRE_TOP = 1;
 export function carStats(partsIn: Partial<Parts>, carId = 'falcon'): CarStats {
   const p = normParts(partsIn), c = carById(carId);
   const tough = (c.tough - 1) * 0.4;
   const arm = (lv: number) => Math.max(0, Math.min(0.75, lv * 0.2 + tough));
   return {
     topSpeed: (64 + p.engine * 2 + p.gearbox * 3) * c.top * SPEED_X,   // 引擎、變速箱各自加極速、直接相加（不互相卡）；全滿 79 m/s ≈ 284 km/h
+    tireTopDry: p.dry * TIRE_TOP * c.top * SPEED_X, tireTopWet: p.wet * TIRE_TOP * c.top * SPEED_X,
     accel: (13 + p.engine * 2.5 + (p.gearbox >= 2 ? 1 : 0)) * c.accel * SPEED_X,
     grip: (1 + p.dry * 0.18) * c.grip,
     wetGrip: WET_GRIP[Math.max(0, Math.min(3, p.wet | 0))] * c.grip,
@@ -224,7 +227,7 @@ export function createRace(seed: number, trackId: string, entrants: Entrant[], d
   const cars: RaceCar[] = order.map(({ e, form }, i) => {
     const st = carStats(e.parts ?? STOCK_PARTS, e.ai ? 'falcon' : e.car);
     const skill = t.ai * difficulty * form;
-    if (e.ai) { st.topSpeed = AI_TOP * SPEED_X * skill; st.accel = AI_ACCEL * SPEED_X * skill; st.grip = 1.15 + 0.1 * form; st.wetGrip = 1.0 + 0.1 * form; st.nitroBoost = 1.3; st.armor = { F: 0.3, S: 0.3, R: 0.3 }; }
+    if (e.ai) { st.topSpeed = AI_TOP * SPEED_X * skill; st.accel = AI_ACCEL * SPEED_X * skill; st.grip = 1.15 + 0.1 * form; st.wetGrip = 1.0 + 0.1 * form; st.nitroBoost = 1.3; st.tireTopDry = 0; st.tireTopWet = 0; st.armor = { F: 0.3, S: 0.3, R: 0.3 }; }
     return { id: e.id, name: e.name, ai: !!e.ai, car: e.ai ? 'ai' : (e.car ?? 'falcon'), color: e.color ?? i % PAINTS,
       z: -(Math.floor(i / 2) * 10) - 6, x: i % 2 ? 0.45 : -0.45, speed: 0, damage: 0, nitro: NITRO_PER_RACE, nitroT: 0, lap: 0,
       finishedTick: null, stats: st, input: { ...NO_INPUT }, prevNitro: false, nitroQ: false,
@@ -269,7 +272,7 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
   const safe = Math.min(slideSafe, c.stats.topSpeed * Math.min(1, 1.05 - Math.max(0, Math.abs(curve) - 2) * 0.09 / grip));
   const tooFast = c.speed > safe;
   const straight = Math.abs(near.curve) < 1.2 && Math.abs(far.curve) < 1.8;
-  const nitro = c.nitro > 0 && c.nitroT === 0 && straight && c.z >= c.aiNitroAt[NITRO_PER_RACE - c.nitro] && !blocked;
+  const nitro = false; // v21：電腦車不能用氮氣
   // v14：AI 用比例式方向盤（偏多少轉多少，最大仍是 STEER_RATE），不再「全左／全右」來回修 → 不會左右抖
   const steerAmt = Math.max(-1, Math.min(1, dx / 0.18));
   return { gas: !tooFast && !follow && c.aiRecover < 14, brake: tooFast && c.speed > safe + 4 * X, left: steerAmt < 0, right: steerAmt > 0, nitro, steer: steerAmt };
@@ -282,7 +285,7 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
 /** v14（steer）：固定速率轉向（每秒最多橫移幾個半路寬），從 1.6 降到 0.75：點一下只動一點、按住穩定平移。AI 也用同一個值。 */
 export const STEER_RATE = 0.75;
 /** 外甩跟著轉向一起縮放（v13 的 0.5 × 0.75/1.6），過彎守線難度與 v13 相同，只是整體橫向動作變慢。 */
-export const CORNER_PULL = 0.5 * STEER_RATE / 1.6 * 1.2; // v20：速度 ×2 後彎道時間減半，外甩 ×1.2 讓出路面比例和 1 倍速時差不多
+export const CORNER_PULL = 0.5 * STEER_RATE / 1.6 * 1.4; // v21：速度 ×4（相對 v19），彎道時間再減半，外甩 ×1.4 讓原廠胎仍偶爾衝出、3 階胎守住
 export const slideFactor = (grip: number) => Math.min(1.4, 0.35 * Math.pow(1.4 / Math.max(0.3, grip), 2.5));
 export function gripOf(c: RaceCar, w: Weather) { return w === 'rain' ? c.stats.wetGrip : w === 'snow' ? c.stats.wetGrip * 0.85 : w === 'fog' ? c.stats.grip * 0.95 : c.stats.grip; }
 /** 碰撞：依部位扣完美度（裝甲減免）。每次撞擊都算。 */
@@ -314,11 +317,11 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
     const seg = segAt(s, c.z), grip = gripOf(c, t.weather);
     let inp = inputs.get(c); if (!inp) { inp = c.ai ? aiInput(s, c, grip) : c.input; inputs.set(c, inp); }
     if (first) {
-      if (c.ai && inp.nitro) c.nitroQ = true;
+      if (c.ai) c.nitroQ = false; // v21：電腦車不能用氮氣（就算輸入也不理）
       if (c.nitroQ) { if (c.nitro > 0 && c.nitroT === 0) { c.nitro--; c.nitroT = Math.round(c.stats.nitroTicks); } c.nitroQ = false; }
     }
     const off = Math.abs(c.x) > 1;
-    let vmax = c.stats.topSpeed * condFactor(c.damage) * (off ? 0.45 : 1);
+    let vmax = (c.stats.topSpeed + ((t.weather === 'rain' || t.weather === 'snow') ? c.stats.tireTopWet : c.stats.tireTopDry)) * condFactor(c.damage) * (off ? 0.45 : 1);
     let acc = c.stats.accel;
     if (c.nitroT > 0) { if (first) c.nitroT--; vmax *= c.stats.nitroBoost; acc *= 2; }
     if (inp.gas) c.speed += acc * Math.max(0.1, 1 - c.speed / vmax) * dt * (c.speed > vmax ? -2 : 1);

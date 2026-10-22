@@ -345,9 +345,28 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   if (t.weather === 'rain') { x.fillStyle = Q[1]; for (let i = 0; i < 90; i++) { const rx = Math.floor((hash(i) * W + v.frame * 6 + i * 7) % W), ry = Math.floor((hash(i + 99) * H + v.frame * 18) % H); x.fillRect(rx, ry, 1, 5); x.fillRect(rx - 1, ry + 5, 1, 2); } }
   if (t.weather === 'snow') { x.fillStyle = Q[0]; for (let i = 0; i < 90; i++) { const sx = Math.floor((hash(i) * W + Math.sin((v.frame + i * 13) / 9) * 3 - (v.me?.x ?? 0) * 10 + W) % W), sy = Math.floor((hash(i + 7) * H + v.frame * (1 + (i % 3))) % H); x.fillRect(sx, sy, i % 4 ? 1 : 2, 1); } }
   if (t.weather === 'fog') { const fc = txCache(`fog${Q[1]}|${v.frame & 1}`, W, HORIZON + 30, (cx) => { cx.fillStyle = Q[1]; for (let yy = 0; yy < HORIZON + 30; yy++) for (let xx = (yy + v.frame) & 1; xx < W; xx += yy < HORIZON ? 2 : 4 + ((yy - HORIZON) >> 3)) if (yy < HORIZON || hash(xx * 7 + yy) < 0.5) cx.fillRect(xx, yy, 1, 1); }); if (fc) x.drawImage(fc, 0, 0); }
+  if (v.hud && v.me && v.me.nitroT > 0 && !v.me.fin) drawNitroFx(x, v, now);
   x.restore();
   role('hud'); if (v.hud) drawHud(x, v, now);
   Q = G;
+}
+/** 氮氣：不出字，用畫面本身表現——下半部微微拉寬（FOV 感）、從消失點往外的速度線、左右邊緣一閃一閃的亮色描邊。 */
+function drawNitroFx(x: CanvasRenderingContext2D, v: View, now: number) {
+  role('fx');
+  const t = now / 1000, pulse = 0.5 + 0.5 * Math.sin(t * 18), cx = W / 2, cy = HORIZON + 6;
+  // 1) 拉伸：地平線以下左右各外擴 3~5%
+  const st = 0.03 + 0.02 * pulse, sy = HORIZON, sh = H - HORIZON;
+  if (x.canvas && (x.canvas as any).width) x.drawImage(x.canvas, 0, sy, W, sh, -W * st / 2, sy, W * (1 + st), sh);
+  // 2) 速度線：從消失點往外，越外面越長，最亮／最暗交錯
+  for (let i = 0; i < 26; i++) {
+    const a = hash(i + 300) * Math.PI * 2, sp = (t * (2.2 + hash(i + 400)) + hash(i + 500)) % 1;
+    const r0 = 30 + sp * 140, r1 = r0 + 10 + sp * 34;
+    x.fillStyle = Q[i % 3 ? 0 : 3];
+    for (let r = r0; r < r1; r += 1.5) { const px = Math.round(cx + Math.cos(a) * r * 1.3), py = Math.round(cy + Math.sin(a) * r * 0.8); if (px < 0 || px >= W || py < 0 || py >= H) break; if (Math.abs(px - cx) < 40 && py > H - 70) continue; x.fillRect(px, py, 1, 1); }
+  }
+  // 3) 邊緣色調脈動：左右兩條抖動的亮色網點
+  const bw = 6 + Math.round(pulse * 6); x.fillStyle = Q[0];
+  for (let yy = 0; yy < H; yy += 2) for (let xx = 0; xx < bw; xx += 2) { const o = (yy >> 1) & 1; if ((xx + o + v.frame) & 2) { x.fillRect(xx + o, yy, 1, 1); x.fillRect(W - 1 - xx - o, yy, 1, 1); } }
 }
 function drawSkyline(x: CanvasRenderingContext2D, scene: string, bend: number, P: string[]) {
   const off = ((-bend) % 240 + 240) % 240;
@@ -389,6 +408,10 @@ function line(x: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y
   const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1; let e = dx + dy;
   for (let i = 0; i < 400; i++) { x.fillRect(x0, y0, 1, 1); if (x0 === x1 && y0 === y1) break; const e2 = 2 * e; if (e2 >= dy) { e += dy; x0 += sx; } if (e2 <= dx) { e += dx; y0 += sy; } }
 }
+/** 名次：跑完的照完賽順序排前面，其餘照距離（跟 HUD 名次一致；修「1ST」選到還沒跑完但 z 比較大的車）。 */
+/** 速度表顯示＝真實 km/h ÷ 3（v21：速度再 ×2 後數字不要太誇張） */
+export const kmhShown = (ms: number) => ms * 3.6 / 3;
+export function raceOrder<T extends { z: number; fin: number | null }>(cars: T[]): T[] { return [...cars].sort((p, q) => (p.fin ?? 1e12) - (q.fin ?? 1e12) || q.z - p.z); }
 export function drawMinimap(x: CanvasRenderingContext2D, v: View, mx: number, my: number, bw = 64, bh = 52) {
   const m = trackMap(v.track.id, bw, bh), n = m.pts.length;
   role('hud');
@@ -397,12 +420,20 @@ export function drawMinimap(x: CanvasRenderingContext2D, v: View, mx: number, my
   for (const [c, wd] of [[3, 2], [0, 1]] as const) { x.fillStyle = Q[c]; for (let i = 0; i < n; i++) { const a = m.pts[i], b = m.pts[(i + 1) % n]; for (let oy = -wd + 1; oy < wd; oy++) for (let ox = -wd + 1; ox < wd; ox++) line(x, mx + a[0] + ox, my + a[1] + oy, mx + b[0] + ox, my + b[1] + oy); } }
   const at = (z: number) => m.pts[((Math.floor(((z % v.len) + v.len) % v.len / SEG_LEN)) % n + n) % n];
   const dot = (p: [number, number], c: number) => { x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 2, my + p[1] - 2, 5, 5); x.fillStyle = Q[c]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 3, 3); };
-  if (!v.hud) { for (const c of v.cars) { if (v.me && c.id === v.me.id) continue; const p = at(c.z); x.fillStyle = Q[1]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 2, 2); } }
-  // 標籤放在點的外側（離地圖中心遠的那邊），1ST 在上、1P 在下，避免互相重疊
-  const lab = (t: string, p: [number, number], vy: number, col: number) => { const left = p[0] < bw / 2, tx = left ? mx + p[0] - 4 - textW(t) : mx + p[0] + 5; otext(x, t, Math.max(W - bw - 30, Math.min(W - 2 - textW(t), tx)), my + p[1] + (vy < 0 ? -9 : 3), col); };
-  const leader = [...v.cars].sort((a, b) => b.z - a.z)[0];
-  if (leader && (!v.me || leader.id !== v.me.id)) { const p = at(leader.z); dot(p, 2); if (v.hud) lab('1ST', p, -1, 0); }
-  if (v.me) { const p = at(v.me.z); dot(p, v.frame % 10 < 6 ? 1 : 0); if (v.hud) lab('1P', p, 1, 1); }
+  // v21：每台車都畫點（名次跟 HUD 一樣：先跑完的在前）。電腦＝小暗點；真人＝大點；前 3 名和真人標名次；自己閃爍＋P名次
+  const order = raceOrder(v.cars), placed: [number, number][] = [];
+  const lab = (t: string, p: [number, number], col: number) => {
+    const tw = textW(t); let tx = mx + p[0] + 4, ty = my + p[1] - 3;
+    if (tx + tw > W - 1) tx = mx + p[0] - 3 - tw;
+    for (let k = 0; k < 3 && placed.some(([qx, qy]) => Math.abs(qx - tx) < tw + 2 && Math.abs(qy - ty) < 7); k++) ty += 7;
+    placed.push([tx, ty]); otext(x, t, Math.max(0, tx), ty, col);
+  };
+  const others = order.map((c, i) => ({ c, i })).filter(({ c }) => !(v.me && c.id === v.me.id));
+  for (const { c } of others) if (c.ai) { const p = at(c.z); x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 2, 2); }
+  for (const { c, i } of others) if (!c.ai || i < 3) { const p = at(c.z); dot(p, c.ai ? 2 : 1); if (v.hud) lab(String(i + 1), p, c.ai ? 2 : 1); }
+  if (v.me) { const p = at(v.me.z), on = v.frame % 8 < 5, r = order.findIndex((c) => c.id === v.me!.id) + 1;
+    x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 3, my + p[1] - 3, 7, 7); x.fillStyle = Q[on ? 0 : 1]; x.fillRect(mx + p[0] - 2, my + p[1] - 2, 5, 5); x.fillStyle = Q[on ? 1 : 0]; x.fillRect(mx + p[0], my + p[1], 1, 1);
+    if (v.hud) lab(`P${r}`, p, 0); }
 }
 /** 外框字：先畫 8 方向最暗色，再填色（HUD 疊在天空上也看得清楚） */
 function otext(x: CanvasRenderingContext2D, s: string, px: number, py: number, col: number, scale = 1) {
@@ -434,7 +465,7 @@ function drawHud(x: CanvasRenderingContext2D, v: View, now = performance.now()) 
     }
   }
   role('hud');
-  const sp = String(Math.round(me.speed * 3.6)); otext(x, sp, 104 - textW(sp, 3), 16, me.nitroT > 0 && v.frame % 4 < 2 ? 1 : 0, 3); otext(x, 'KM/H', 104 - textW('KM/H'), 39, 1);
+  const sp = String(Math.round(kmhShown(me.speed))); otext(x, sp, 104 - textW(sp, 3), 16, me.nitroT > 0 && v.frame % 4 < 2 ? 1 : 0, 3); otext(x, 'KM/H', 104 - textW('KM/H'), 39, 1);
   // 氮氣列：斜體 N＋斜條（每瓶 2 條），用掉的變暗
   otext(x, 'N', 16, 47, 1);
   // v20：剩餘氮氣次數 —— 3 支小鋼瓶（剩的實心、用掉的空心、正在噴的閃）＋「×N」
