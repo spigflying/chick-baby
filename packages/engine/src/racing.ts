@@ -119,6 +119,26 @@ export function buildTrack(t: Track): Segment[] {
   const dy = segs[segs.length - 1].y; segs.forEach((s, i) => { s.y -= (dy * (i + 1)) / segs.length; });
   return segs;
 }
+// ---------------- v16 路邊物（樹、輪胎堆、招牌…）：位置固定（由賽道決定），伺服器與畫面共用 ----------------
+export const SCENE_PROPS: Record<Scenery, string[]> = { city: ['tyres', 'bush', 'pine', 'bush'], forest: ['pine', 'pine', 'rock', 'bush', 'tyres'], desert: ['cactus', 'rock', 'sign', 'tyres'], farm: ['fence', 'hay', 'pine', 'bush', 'tyres'], coast: ['palm', 'palm', 'sign', 'tyres', 'bush'], snow: ['snowpine', 'rock', 'snowpine', 'tyres'] };
+/** 撞到會翻車的硬物（矮樹叢不算） */
+export const SOLID_PROPS = new Set(['pine', 'snowpine', 'cactus', 'palm', 'tyres', 'sign', 'rock', 'fence', 'hay', 'lamp', 'tower']);
+export const propHash = (n: number) => { let x = (n * 2654435761) >>> 0; x ^= x >>> 13; x = Math.imul(x, 1274126177) >>> 0; return x / 4294967296; };
+export interface Roadside { seg: number; z: number; side: number; x: number; name: string; solid: boolean }
+const sideCache = new Map<string, Roadside[]>();
+/** 每 4 段一組、左右各一個（約 1/4 空著）；x（半路寬）在 1.2–1.5 之間，在路邊護欄（1.55）以內，衝出路面就可能撞上。 */
+export function roadside(trackId: string): Roadside[] {
+  let r = sideCache.get(trackId); if (r) return r; r = [];
+  const t = trackById(trackId)!, n = trackSegs(trackId).length, names = SCENE_PROPS[t.scenery];
+  for (let seg = 0; seg < n; seg += 4) for (const side of [-1, 1]) {
+    const h = propHash(seg * 2 + (side > 0 ? 1 : 0)); if (h < 0.25) continue;
+    const name = names[Math.floor(h * 97) % names.length];
+    r.push({ seg, z: seg * SEG_LEN, side, x: side * (1.2 + (h - 0.25) / 0.75 * 0.3), name, solid: SOLID_PROPS.has(name) });
+  }
+  sideCache.set(trackId, r); return r;
+}
+export const FLIP_TICKS = 26; // 翻車約 1.3 秒
+export const PROP_HIT_DX = 0.2;
 export const trackLength = (segs: Segment[]) => segs.length * SEG_LEN;
 
 // ---------------- 獎金、積分、晉級（同一張表，每條賽道一樣） ----------------
@@ -168,7 +188,9 @@ export interface RaceCar {
   finishedTick: number | null; stats: CarStats; input: RaceInput; prevNitro: boolean; nitroQ: boolean;
   aiLane: number; aiT?: number;
   /** v15 碰撞事件（給畫面特效）：evT＝最後一次被撞的 tick、evK＝種類 1 撞路邊 2 追撞前車 3 被追撞 4 側擦、evS＝力道（扣裝甲前的傷害）、evSide＝-1 左 / 0 前後 / 1 右 */
-  evT?: number; evK?: number; evS?: number; evSide?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; hit: number; hits: number;
+  evT?: number; evK?: number; evS?: number; evSide?: number;
+  /** v16 翻車剩餘 tick（0＝沒在翻） */
+  flip?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; hit: number; hits: number;
 }
 /** 完美度（%）＝ 100 − damage */
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
@@ -253,7 +275,7 @@ export const CORNER_PULL = 0.5 * STEER_RATE / 1.6;
 export const slideFactor = (grip: number) => Math.min(1.4, 0.35 * Math.pow(1.4 / Math.max(0.3, grip), 2.5));
 export function gripOf(c: RaceCar, w: Weather) { return w === 'rain' ? c.stats.wetGrip : w === 'snow' ? c.stats.wetGrip * 0.85 : w === 'fog' ? c.stats.grip * 0.95 : c.stats.grip; }
 /** 碰撞：依部位扣完美度（裝甲減免）。每次撞擊都算。 */
-export const HIT_WALL = 1, HIT_REAR_END = 2, HIT_REARED = 3, HIT_SWIPE = 4;
+export const HIT_WALL = 1, HIT_REAR_END = 2, HIT_REARED = 3, HIT_SWIPE = 4, HIT_OBJECT = 5;
 function hurt(c: RaceCar, amount: number, zone: 'F' | 'S' | 'R', tick = 0, kind = 0, side = 0) {
   if (kind) { c.evT = tick; c.evK = kind; c.evS = +amount.toFixed(2); c.evSide = side; }
   c.damage = Math.min(100, c.damage + amount * (1 - c.stats.armor[zone])); c.hits++;
@@ -266,6 +288,11 @@ export function stepRace(s: RaceState) {
   const t = trackById(s.track)!, dt = 1 / RACE_TICK_RATE, total = s.len * s.laps;
   for (const c of s.cars) {
     if (c.finishedTick !== null) { c.speed = Math.max(0, c.speed - 20 * dt); c.z += c.speed * dt; continue; }
+    if (c.flip) { // 翻車中：不能操作，快速減速；翻完放回路邊、低速
+      c.flip--; c.speed = Math.max(0, c.speed - 60 * dt); c.z += c.speed * dt;
+      if (c.flip === 0) { c.x = Math.sign(c.x || 1) * 0.85; c.speed = 10; c.hit = 10; }
+      c.lap = Math.max(0, Math.floor(c.z / s.len)); continue;
+    }
     const seg = segAt(s, c.z), grip = gripOf(c, t.weather);
     const inp = c.ai ? aiInput(s, c, grip) : c.input;
     if (c.ai && inp.nitro) c.nitroQ = true;
@@ -288,12 +315,22 @@ export function stepRace(s: RaceState) {
       c.x = Math.sign(c.x) * 1.15;
     }
     if (c.hit > 0) c.hit--;
+    const z0 = c.z;
     c.z += c.speed * dt;
+    if (Math.abs(c.x) > 1.05 && c.speed > 8) { // v16：衝出路面撞到路邊硬物 → 翻車
+      const L = s.len, a = ((z0 % L) + L) % L, b = a + (c.z - z0);
+      for (const o of roadside(s.track)) {
+        if (!o.solid || Math.abs(c.x - o.x) > PROP_HIT_DX) continue;
+        if (!((o.z > a && o.z <= b) || (o.z + L > a && o.z + L <= b))) continue;
+        const sp2 = c.speed / 70; hurt(c, 10 * (0.4 + sp2), 'F', s.tick, HIT_OBJECT, Math.sign(c.x));
+        c.flip = FLIP_TICKS; c.nitroT = 0; break;
+      }
+    }
     c.lap = Math.max(0, Math.floor(c.z / s.len));
     if (c.z >= total) c.finishedTick = s.tick;
   }
   // 車與車：追撞（前／後裝甲）與並排擦撞（側裝甲）
-  const live = s.cars.filter((c) => c.finishedTick === null).sort((a, b) => a.z - b.z);
+  const live = s.cars.filter((c) => c.finishedTick === null && !c.flip).sort((a, b) => a.z - b.z);
   for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
     const a = live[i], b = live[j], dz = b.z - a.z; if (dz > 5) break;
     const dx = Math.abs(a.x - b.x); if (dx >= COLLIDE_DX) continue;
@@ -316,8 +353,8 @@ export function raceRanking(s: RaceState): RaceCar[] {
   return [...s.cars].sort((a, b) => (a.finishedTick ?? Infinity) - (b.finishedTick ?? Infinity) || b.z - a.z);
 }
 export const raceTimeMs = (s: RaceState, c: RaceCar) => c.finishedTick === null ? null : Math.round(((c.finishedTick - RACE_TICK_RATE * 3) * 1000) / RACE_TICK_RATE);
-/** 快照每台車的陣列（伺服器／預覽共用）：[id, z, x, speed, damage, nitro, nitroT, finishedTick, hit, evT, evK, evS, evSide] */
-export const snapCar = (c: RaceCar) => [c.id, +c.z.toFixed(2), +c.x.toFixed(3), +c.speed.toFixed(2), +c.damage.toFixed(1), c.nitro, c.nitroT, c.finishedTick, c.hit, c.evT ?? 0, c.evK ?? 0, c.evS ?? 0, c.evSide ?? 0];
+/** 快照每台車的陣列（伺服器／預覽共用）：[id, z, x, speed, damage, nitro, nitroT, finishedTick, hit, evT, evK, evS, evSide, flip] */
+export const snapCar = (c: RaceCar) => [c.id, +c.z.toFixed(2), +c.x.toFixed(3), +c.speed.toFixed(2), +c.damage.toFixed(1), c.nitro, c.nitroT, c.finishedTick, c.hit, c.evT ?? 0, c.evK ?? 0, c.evS ?? 0, c.evSide ?? 0, c.flip ?? 0];
 export const kmh = (v: number) => Math.round(v * 3.6);
 /** 賽季：一個日曆月（台北時間），例如 '2026-10'。 */
 export function seasonOf(ms: number) { const d = new Date(ms + 8 * 3600_000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; }

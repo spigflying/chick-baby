@@ -193,7 +193,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     if (!race || race.snaps.length === 0) return null;
     const [a, b, f] = bracket(race.snaps, clock.renderTick(performance.now()));
     return race.cars.map((c) => { const p = a.cars.get(c.id), q = b.cars.get(c.id) ?? p; if (!p || !q) return null;
-      return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[1] + (q[1] - p[1]) * f, x: p[2] + (q[2] - p[2]) * f, speed: p[3] + (q[3] - p[3]) * f, damage: q[4], nitro: q[5], nitroT: q[6], fin: q[7], hit: q[8], evT: q[9] ?? 0, evK: q[10] ?? 0, evS: q[11] ?? 0, evSide: q[12] ?? 0, brake: c.id === me.user.id ? keys.brake : q[3] < p[3] - 0.5 } as ViewCar; }).filter(Boolean) as ViewCar[];
+      return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[1] + (q[1] - p[1]) * f, x: p[2] + (q[2] - p[2]) * f, speed: p[3] + (q[3] - p[3]) * f, damage: q[4], nitro: q[5], nitroT: q[6], fin: q[7], hit: q[8], evT: q[9] ?? 0, evK: q[10] ?? 0, evS: q[11] ?? 0, evSide: q[12] ?? 0, flip: (q[13] ?? 0) && (p[13] ?? 0) ? p[13] + (q[13] - p[13]) * f : q[13] ?? 0, brake: c.id === me.user.id ? keys.brake : q[3] < p[3] - 0.5 } as ViewCar; }).filter(Boolean) as ViewCar[];
   }
   // 每個 rAF 都重畫（60fps）；位置依時間內插。動畫用的 frame 仍是 20Hz 計數（閃爍等節奏不變）。
   function loop() {
@@ -208,7 +208,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       const fk = (c: ViewCar) => c.fin ?? 1e12; const ranked = [...cars].sort((p, q) => fk(p) - fk(q) || q.z - p.z);
       if (import.meta.env.DEV && meCar) (window as any).__race = { x: meCar.x, z: meCar.z, curve: segAt(trackById(race.track)!.id, meCar.z + 40) };
       const flash = meCar?.fin != null ? 'FINISH!' : meCar && meCar.hit > 0 ? 'CRASH!' : meCar && meCar.nitroT > 0 ? 'NITRO!' : meCar && Math.abs(meCar.x) > 1 ? 'OFF ROAD' : undefined;
-      if (meCar && (meCar.evT ?? 0) > lastHitT) { if (lastHitT >= 0) hitSound(meCar.evS ?? 2); lastHitT = meCar.evT!; }
+      if (meCar && (meCar.evT ?? 0) > lastHitT) { if (lastHitT >= 0) hitSound(meCar.evK === 5 ? 12 : meCar.evS ?? 2); lastHitT = meCar.evT!; }
       const stt = prof ? carStats(prof.parts, prof.car) : null;
       drawRace(x, { gears: [4, 5, 5, 6][prof?.parts?.gearbox ?? 0], top: stt?.topSpeed, track: t, me: meCar, cars, tick: last.tick, countdown: last.countdown, laps: race.laps, len: race.len, rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash });
       if (mode === 'results') drawResultsOverlay(); return;

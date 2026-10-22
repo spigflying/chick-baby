@@ -136,11 +136,11 @@ async function simv() {
   const sim = createRace(7, track.id, fillField([{ id: 'me', name: 'me', parts: { engine: 2, gearbox: 2, dry: 1 } }]));
   const cv = document.createElement('canvas'); cv.width = W; cv.height = H; const x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
   for (let i = 0; i < Number(q.get('skip') ?? 400); i++) { const m = sim.cars.find((c) => c.id === 'me')!; setRaceInput(sim, 'me', { gas: true, left: m.x > 0.05, right: m.x < -0.05 }); stepRace(sim); }
-  let prev = new Map(sim.cars.map((c) => [c.id, [c.z, c.x]])), sub = 0, frame = 0;
+  let prev = new Map(sim.cars.map((c) => [c.id, [c.z, c.x, c.flip ?? 0]])), sub = 0, frame = 0;
   (window as any).__simFrame = (left: boolean, right: boolean) => {
-    if (sub === 0) { prev = new Map(sim.cars.map((c) => [c.id, [c.z, c.x]])); setRaceInput(sim, 'me', { gas: true, left, right }); stepRace(sim); }
+    if (sub === 0) { prev = new Map(sim.cars.map((c) => [c.id, [c.z, c.x, c.flip ?? 0]])); setRaceInput(sim, 'me', { gas: true, left, right }); stepRace(sim); }
     sub = (sub + 1) % 3; const f = sub === 0 ? 1 : sub / 3; frame++;
-    const cars = sim.cars.map((c) => { const p = prev.get(c.id)!; return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[0] + (c.z - p[0]) * f, x: p[1] + (c.x - p[1]) * f, speed: c.speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT, fin: c.finishedTick, hit: c.hit, evT: c.evT, evK: c.evK, evS: c.evS, evSide: c.evSide } as ViewCar; });
+    const cars = sim.cars.map((c) => { const p = prev.get(c.id)!; return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[0] + (c.z - p[0]) * f, x: p[1] + (c.x - p[1]) * f, speed: c.speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT, fin: c.finishedTick, hit: c.hit, evT: c.evT, evK: c.evK, evS: c.evS, evSide: c.evSide, flip: c.flip ? (prev.get(c.id)![2] || c.flip) + (c.flip - (prev.get(c.id)![2] || c.flip)) * f : 0 } as ViewCar; });
     drawRace(x, { now: frame * 1000 / 60, track, me: cars.find((c) => c.id === 'me')!, cars, tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len, rank: 1, frame: Math.floor(frame / 3), hud: true, gears: 5, top: 80 });
     return sim.cars.find((c) => c.id === 'me')!.x;
   };
