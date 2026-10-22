@@ -141,7 +141,7 @@ async function simv() {
     if (sub === 0) { prev = new Map(sim.cars.map((c) => [c.id, [c.z, c.x, c.flip ?? 0]])); setRaceInput(sim, 'me', { gas: true, left, right }); stepRace(sim); }
     sub = (sub + 1) % 3; const f = sub === 0 ? 1 : sub / 3; frame++;
     const cars = sim.cars.map((c) => { const p = prev.get(c.id)!; return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[0] + (c.z - p[0]) * f, x: p[1] + (c.x - p[1]) * f, speed: c.speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT, fin: c.finishedTick, hit: c.hit, evT: c.evT, evK: c.evK, evS: c.evS, evSide: c.evSide, zd: c.zd, pkT: c.pkT ?? 0, flip: c.flip ? (prev.get(c.id)![2] || c.flip) + (c.flip - (prev.get(c.id)![2] || c.flip)) * f : 0 } as ViewCar; });
-    drawRace(x, { pickups: sim.pickups.filter((p) => p.taken === null).map((p) => ({ z: p.z, x: p.x })), now: frame * 1000 / 60, track, me: cars.find((c) => c.id === 'me')!, cars, tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len, rank: 1, frame: Math.floor(frame / 3), hud: true, gears: 5, top: 160 });
+    drawRace(x, { pet: q.get('pet') ? { key: q.get('pet')!, ride: q.get('ride') === '1', hud: q.get('hud') === '1' } : undefined, pickups: sim.pickups.filter((p) => p.taken === null).map((p) => ({ z: p.z, x: p.x })), now: frame * 1000 / 60, track, me: cars.find((c) => c.id === 'me')!, cars, tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len, rank: 1, frame: Math.floor(frame / 3), hud: true, gears: 5, top: 160 });
     return sim.cars.find((c) => c.id === 'me')!.x;
   };
   const d = document.createElement('div'); d.id = 'shots'; d.append(cv); root.append(d); (window as any).__ok = 1;

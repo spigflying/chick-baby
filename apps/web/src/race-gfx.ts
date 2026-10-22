@@ -2,6 +2,7 @@
 import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, type Track } from '@chick/engine';
 import { carBodyH, carPixels, LODS, PLAYER_W, type CarLook } from './race-cars';
 import { pickupDims } from './race-pickup';
+import { spriteCanvas, frontSprite, S as PET_S } from './sprites';
 
 /** v3：內部解析度加倍（240×200）；HUD 仍以 120×100 座標畫、放大 2 倍（像經典賽車的粗 HUD）。 */
 export const W = 240, H = 200, R = 2;
@@ -160,7 +161,7 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
 }
 
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number; /** 前／側／後 分區損傷 0–100 */ zd?: number[]; /** 最後吃到路上氮氣道具的 tick */ pkT?: number }
-export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[] }
+export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[]; /** 設計稿：玩家自己的寵物（精靈鍵，例如 'chicken|bow'、'chick'、'egg'）；ride＝坐在車上、hud＝左上頭像 */ pet?: { key: string; ride?: boolean; hud?: boolean } }
 
 /** v13：彎道視覺強度（每公尺彎度係數）、攝影機橫向跟車比例。 */
 const CURVE_K = 0.0004, CAM_FOLLOW = 0.4;
@@ -241,6 +242,33 @@ function hudZone(me: ViewCar, now: number): { zone: 'f' | 'r' | 's'; on: boolean
   const ev = me.evK ?? 0; return { zone: ev === HIT_FRONT ? 'f' : ev === HIT_BACK ? 'r' : 's', on: Math.floor(h.a * 10) % 2 === 0 };
 }
 /** 畫一個畫面。 */
+// ---------------- 設計稿：寵物上車 ----------------
+/** 寵物精靈：蛋／小雞直接用 S 的圖；長大後用物種正面圖（含配件） */
+export function petSpriteName(key: string) { return key === 'egg' || key === 'chick' ? key : frontSprite(key); }
+const petCache = new Map<string, HTMLCanvasElement>();
+function petImg(key: string) { let c = petCache.get(key); if (!c) { c = spriteCanvas(petSpriteName(key)); petCache.set(key, c); } return c; }
+type Mood = 'normal' | 'crash' | 'nitro';
+function petMood(me: ViewCar, now: number): Mood { return (me.flip ?? 0) > 0 || me.hit > 0 || hitAge(me.id, now, 600) ? 'crash' : me.nitroT > 0 ? 'nitro' : 'normal'; }
+/** 眼睛／表情：在圖上改幾個像素（暈＝×眼＋頭上轉圈星星；興奮＝^ 眼＋兩側閃光） */
+function drawMoodFx(x: CanvasRenderingContext2D, m: Mood, cx: number, top: number, w: number, frame: number, big: boolean) {
+  if (m === 'crash') { for (let i = 0; i < 3; i++) { const a = frame * 0.6 + i * 2.1, px = Math.round(cx + Math.cos(a) * (w * 0.45)), py = Math.round(top + (big ? 3 : -2) + Math.sin(a) * 2); x.fillStyle = Q[3]; x.fillRect(px - 2, py - 1, 5, 3); x.fillRect(px - 1, py - 2, 3, 5); x.fillStyle = Q[0]; x.fillRect(px - 1, py, 3, 1); x.fillRect(px, py - 1, 1, 3); } }
+  if (m === 'nitro') { const o = frame % 2; x.fillStyle = Q[0]; for (const sd of [-1, 1]) { const px = Math.round(cx + sd * (w / 2 + 2 + o)); x.fillRect(px - 1, top + 3, 3, 1); x.fillRect(px, top + 2, 1, 3); x.fillRect(px + sd * 2, top + 8, 2, 1); } }
+}
+function drawPetRider(x: CanvasRenderingContext2D, key: string, m: Mood, cx: number, bottom: number, frame: number, moving: boolean) {
+  const img = petImg(key), bob = m === 'nitro' ? (frame % 2 ? -2 : 0) : moving && frame % 4 < 2 ? -1 : 0, jit = m === 'crash' ? (frame % 2 ? 1 : -1) : 0;
+  // 只露出上半身（下半身在座艙裡）：畫圖的上 60%，底緣貼在車頂
+  const sh = Math.ceil(img.height * 0.6), top = Math.round(bottom - sh + bob); x.drawImage(img, 0, 0, img.width, sh, Math.round(cx - img.width / 2) + jit, top, img.width, sh);
+  drawMoodFx(x, m, cx + jit, top, img.width, frame, false);
+}
+function drawPetPortrait(x: CanvasRenderingContext2D, key: string, m: Mood, px: number, py: number, frame: number) {
+  const img = petImg(key), sc = img.height > 16 ? 1 : 2 * 0 + 1, bw = 24, bh = 24; panel(x, px, py, bw, bh, m === "nitro" && frame % 4 < 2 ? 2 : 3, 0);
+  const bob = m === 'nitro' ? (frame % 2 ? -1 : 0) : 0, jit = m === 'crash' ? (frame % 2 ? 1 : -1) : 0;
+  const cx = px + bw / 2, top = py + bh - 2 - img.height * sc + bob;
+  x.save(); x.beginPath(); x.rect(px + 1, py + 1, bw - 2, bh - 2); x.clip();
+  x.drawImage(img, Math.round(cx - img.width * sc / 2) + jit, Math.round(top), img.width * sc, img.height * sc);
+  drawMoodFx(x, m, cx + jit, Math.max(py + 4, top), img.width * sc, frame, true); x.restore();
+}
+void PET_S;
 export function drawRace(x: CanvasRenderingContext2D, v: View) {
   const t = v.track, segs = trackSegs(t.id), n = segs.length, now = v.now ?? performance.now();
   fxUpdate(v.cars, now);
@@ -356,7 +384,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
         x.save(); x.translate(Math.round(sx + dw / 2 + dir * fp * dw * 0.35), Math.round(sy + dh / 2 - lift)); x.rotate(Math.round(ang / (Math.PI / 8)) * (Math.PI / 8)); x.scale(1, squash);
         x.drawImage(img, -dw / 2, -dh / 2, dw, dh); if (fp < 0.08) x.drawImage(flashOf(img), -dw / 2, -dh / 2, dw, dh); x.restore();
         x.fillStyle = Q[3]; const shw = Math.round(dw * (0.5 + 0.5 * (1 - lift / (dh * 1.6)))); x.fillRect(Math.round(sx + dw / 2 - shw / 2 + dir * fp * dw * 0.35), sy + dh - 2, shw, 2); // 地上影子
-      } else x.drawImage(img, sx, sy, dw, dh);
+      } else { x.drawImage(img, sx, sy, dw, dh); if (isMe && v.pet?.ride && !c.fin) drawPetRider(x, v.pet.key, petMood(c, now), sx + dw / 2, sy + Math.round(bh * 0.55), v.frame, c.speed > 5); }
       const fl = hitAge(c.id, now, 90 + 90 * (fxHit.get(c.id)?.k ?? 0)); if (fl && Math.floor(fl.a * 4) % 2 === 0) x.drawImage(flashOf(img), sx, sy, dw, dh); // 閃白
       for (const p of sparks) { if (p.id !== c.id) continue; const age = now - p.t0; if (age < 0 || age > p.life) continue; const ts = age / 1000;
         const sc = dw / 48; x.fillStyle = Q[p.c]; x.fillRect(Math.round(sx + dw / 2 + p.ox * dw + p.vx * ts * sc), Math.round(sy + p.oy * dh + (p.vy * ts + 160 * ts * ts) * sc), p.sz, p.sz); }
@@ -553,6 +581,7 @@ function drawHud(x: CanvasRenderingContext2D, v: View, now = performance.now()) 
   const DX = 20, DY = 79;
   for (const [i, j, ch] of hudCarPixels()) { x.fillStyle = Q[zc[ch]]; x.fillRect(DX + i, DY + j, 1, 1); }
   const pct = `${cond}%`; otext(x, pct, DX + HUD_CAR_W + 3, DY + 5, cond < 40 && v.frame % 6 < 3 ? 2 : 0);
+  if (v.pet?.hud) drawPetPortrait(x, v.pet.key, petMood(me, now), DX + HUD_CAR_W + 26, DY - 6, v.frame);
   // 完美度條（像油表 E…F）
   otext(x, 'E', 8, 97, 2); otext(x, 'F', 90, 97, 0);
   for (let i = 0; i < 14; i++) { const on = i < Math.round(cond / 100 * 14); x.fillStyle = Q[3]; x.fillRect(16 + i * 5, 96, 5, 9); x.fillStyle = Q[on ? (i < 4 ? 1 : 0) : 2]; x.fillRect(17 + i * 5, 97, 3, 7); }
