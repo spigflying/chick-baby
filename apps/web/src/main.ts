@@ -1,3 +1,4 @@
+import { trackById } from '@chick/engine';
 import { blip, presenceDiff } from './visitors';
 import './style.css';
 import { api, act, errText, ApiError } from './api';
@@ -265,6 +266,20 @@ const updater = createUpdater({
 document.addEventListener('visibilitychange', () => { if (!document.hidden) void updater.check(); });
 window.addEventListener('focus', () => void updater.check());
 setInterval(() => { if (!document.hidden) void updater.check(); }, 3 * 60_000);
+/** v27 好友開賽車房：任何頁面上方跳出橫幅，一鍵加入（60 秒後自動收起；同時只顯示最新一則） */
+let roomPop: HTMLElement | null = null, roomPopT = 0;
+function showRoomInvite(m: any) {
+  if (live?.room || live?.inMatch) return;
+  roomPop?.remove(); clearTimeout(roomPopT);
+  const el = document.createElement('div'); el.className = 'room-pop';
+  el.innerHTML = `<div class="room-pop-txt"><b>「${escHtml(m.from_name)}」的賽車房</b><span>${escHtml(trackName(m.track))}・${Number(m.laps) || 3} 圈</span></div><button class="room-pop-go">加入</button><button class="room-pop-x" aria-label="關閉">✕</button>`;
+  const close = () => { el.remove(); if (roomPop === el) roomPop = null; clearTimeout(roomPopT); };
+  (el.querySelector('.room-pop-go') as HTMLElement).onclick = () => { if (!live?.send({ type: 'room.join', room: m.room, inst: m.inst })) { toast('連線中，請稍候'); return; } close(); if (location.pathname !== '/race') nav('/race'); };
+  (el.querySelector('.room-pop-x') as HTMLElement).onclick = close;
+  document.body.append(el); roomPop = el; roomPopT = window.setTimeout(close, 60_000);
+}
+const trackName = (id: string) => trackById(id)?.name ?? id;
+const escHtml = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 function startLive() {
   live?.stop();
   live = new Live();
@@ -287,6 +302,7 @@ function startLive() {
     else if (m.type === 'wallet.updated') setWallet(m.balance);
     // 一起賽車開跑（在家裡接受邀請的）：帶到賽車頁，頁面接手這場比賽
     else if (m.type === 'race.started' && location.pathname !== '/race') { (window as any).__pendingRace = m; live!.inLobby = false; nav('/race'); }
+    else if (m.type === 'room.invite') showRoomInvite(m);
     else if (m.type === 'game.closing') toast('小雞 5 分鐘後要睡覺囉～');
   });
   live.start();

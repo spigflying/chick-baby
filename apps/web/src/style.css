@@ -238,3 +238,23 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .rs-parts li{display:flex;gap:8px;align-items:center;border-bottom:1px dotted #bba;padding:4px 0;font-size:13px}
 .rs-parts canvas{image-rendering:pixelated;width:48px;height:48px;flex:none;border:1px solid #306230}
 .rs-parts.stock li{opacity:.65}
+/* v27 賽車房 */
+.race-top-row{display:flex;gap:6px}
+.race-top-row .race-top-btn{flex:1;margin-top:0}
+.room-field{display:flex;align-items:center;gap:8px;margin:6px 0}
+.room-field select{flex:1;padding:6px;font-size:15px}
+.room-members{list-style:none;padding:0;margin:0}
+.room-members li{display:flex;justify-content:space-between;align-items:center;padding:8px 6px;border-bottom:1px dotted #bba}
+.room-members li.ok{background:#e4f5c8}
+.room-members li.off{opacity:.5}
+.room-st{font-weight:bold;white-space:nowrap}
+.room-tag{font-size:11px;background:#000;color:#fff;padding:1px 5px;border-radius:3px;vertical-align:middle}
+.room-ask{background:#ffe08a;padding:6px;margin:6px 0;font-weight:bold}
+.room-cd{display:flex;align-items:center;justify-content:center;gap:10px;background:#0f380f;color:#9bbc0f;padding:8px;margin:6px 0;font-weight:bold}
+.room-cd b{font-size:44px;line-height:1}
+.room-pop{position:fixed;top:8px;left:8px;right:8px;z-index:1000;display:flex;align-items:center;gap:8px;background:#0f380f;color:#9bbc0f;border:3px solid #9bbc0f;border-radius:8px;padding:10px;box-shadow:0 4px 12px rgba(0,0,0,.4);animation:roompop .25s ease-out}
+.room-pop-txt{flex:1;display:flex;flex-direction:column;gap:2px;font-size:14px}
+.room-pop-txt b{font-size:16px;color:#fff}
+.room-pop-go{background:#9bbc0f;color:#0f380f;font-weight:bold;font-size:16px;padding:8px 14px;border:0;border-radius:6px}
+.room-pop-x{background:transparent;color:#9bbc0f;border:0;font-size:18px;padding:6px}
+@keyframes roompop{from{transform:translateY(-120%)}to{transform:none}}

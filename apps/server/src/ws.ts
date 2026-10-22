@@ -1,4 +1,4 @@
-import { initRacing, onRaceBus, onRacePresence, raceBusy, raceEcho, startSolo, toRaceAuthority } from './racing';
+import { createRoom, initRacing, onRaceBus, onRacePresence, raceBusy, raceEcho, startSolo, toRaceAuthority } from './racing';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { Db } from './db';
@@ -24,7 +24,9 @@ interface Conn { presenceUser?: PresenceUser; id: number; ws: WebSocket; user: {
   /** 賽車：這條連線正在跑的比賽（哪一場、哪個執行個體在模擬） */
   rr?: { id: string; inst: string } | null;
   /** 單人賽開賽中（還沒送出 race.started）；cancelled＝這段時間按了離開 */
-  soloReq?: { cancelled: boolean } | null }
+  soloReq?: { cancelled: boolean } | null;
+  /** v27 賽車房：這條連線所在的房間（哪一間、哪個執行個體負責） */
+  room?: { id: string; inst: string } | null }
 const conns = new Set<Conn>();
 // 在場名單：home → (instance:conn) → user；透過 NOTIFY 在所有執行個體間同步
 const presence = new PresenceStore();
@@ -73,6 +75,10 @@ function forwardRace(m: any) {
     else if (t === 'rrace.gone') send(c, { type: 'race.gone', race_id: m.race_id });
     return;
   }
+  // v27 賽車房
+  if (t === 'rrace.room') { const ids = new Set(m.users as string[]); for (const c of conns) if (ids.has(c.user.id)) { c.room = { id: m.room.id, inst: m.room.inst }; send(c, { type: 'room.state', room: m.room }); } return; }
+  if (t === 'rrace.roomgone') { const ids = new Set(m.users as string[]); for (const c of conns) if (ids.has(c.user.id) && (!c.room || c.room.id === m.room)) { c.room = null; send(c, { type: 'room.gone', room: m.room, code: m.code }); } return; }
+  if (t === 'rrace.roominvite') { const ids = new Set(m.to as string[]); for (const c of conns) if (ids.has(c.user.id) && !c.room && !c.rr) send(c, { type: 'room.invite', room: m.room, inst: m.inst, from: m.from, from_name: m.from_name, track: m.track, laps: m.laps }); return; }
   if (t === 'rrace.event') { if (home) for (const c of inHome(home)) send(c, { type: 'race.event', home_id: home, ...rest }); }
   else if (t === 'rrace.notice') { for (const c of home ? inHome(home) : conns) if (c.user.id === m.user) send(c, { type: 'race.notice', home_id: home, code: m.code }); }
   else if (t === 'rrace.started') {
@@ -249,6 +255,27 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             try { await startSolo(c.user.id, msg.track, () => req.cancelled); } finally { if (c.soloReq === req) c.soloReq = null; }
             break;
           }
+          // ---- v27 賽車房 ----
+          case 'room.create': {
+            if ((c.match && !c.match.ended) || c.mm || c.rr) throw new AppError('ALREADY_IN_MATCH');
+            if (c.room) throw new AppError('ALREADY_IN_ROOM');
+            await createRoom(c.user.id, msg.track, msg.laps);
+            break;
+          }
+          case 'room.join': {
+            if ((c.match && !c.match.ended) || c.mm || c.rr) throw new AppError('ALREADY_IN_MATCH');
+            if (typeof msg.room !== 'string' || typeof msg.inst !== 'string') throw new AppError('BAD_REQUEST');
+            if (c.room && c.room.id !== msg.room) throw new AppError('ALREADY_IN_ROOM');
+            toRaceAuthority({ t: 'rrace.rjoin', inst: msg.inst.slice(0, 80), room: msg.room.slice(0, 40), user: c.user.id });
+            break;
+          }
+          case 'room.leave': case 'room.config': case 'room.ready': {
+            if (!c.room) break;
+            const t = msg.type === 'room.leave' ? 'rrace.rleave' : msg.type === 'room.config' ? 'rrace.rconf' : 'rrace.rready';
+            toRaceAuthority({ t, inst: c.room.inst, room: c.room.id, user: c.user.id, track: typeof msg.track === 'string' ? msg.track.slice(0, 20) : null, laps: msg.laps ?? null, ready: !!msg.ready });
+            if (msg.type === 'room.leave') c.room = null;
+            break;
+          }
           case 'race.input':
             if (c.rr) toRaceAuthority({ t: 'rrace.in', inst: c.rr.inst, race: c.rr.id, user: c.user.id, seq: msg.seq, gas: !!msg.gas, brake: !!msg.brake, left: !!msg.left, right: !!msg.right, nitro: !!msg.nitro });
             break;
@@ -276,6 +303,8 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
       // 斷線不等於棄賽：先放開油門，RACE_DROP_MS 內重連（race.resume）可以接回
       if (c.rr) toRaceAuthority({ t: 'rrace.drop', inst: c.rr.inst, race: c.rr.id, user: c.user.id });
       if (c.soloReq) c.soloReq.cancelled = true;
+      // v27：同一個人在這台沒有其他連線還在房裡 → 標成斷線（ROOM_DROP_MS 內重新 room.join 可接回）
+      if (c.room && ![...conns].some((x) => x !== c && x.user.id === c.user.id && x.room?.id === c.room!.id)) toRaceAuthority({ t: 'rrace.rdrop', inst: c.room.inst, room: c.room.id, user: c.user.id });
       leaveHome(c); conns.delete(c);
       if (c.match && !c.match.ended) void finish(c.match, 'quit');
     });

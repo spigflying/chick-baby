@@ -221,8 +221,11 @@ export function fillField(humans: Entrant[], slots = RACE_SLOTS): Entrant[] {
 }
 /** v19：電腦車是「要超的車流」：極速／加速調低（原本 78／17），原廠車開得好在簡單賽道能贏、難的能進前 3；全滿車輾壓。 */
 export const AI_TOP = 50, AI_ACCEL = 13; // v22：電腦車再弱（62→50）：模擬中原廠車約 3/4 場前 3、全滿全勝
-export function createRace(seed: number, trackId: string, entrants: Entrant[], difficulty = 1): RaceState {
-  const t = trackById(trackId); if (!t) throw new Error('bad track');
+/** v27：laps 可由房主指定（1–MAX_LAPS），不給就用賽道預設圈數 */
+export const MAX_LAPS = 5;
+export function createRace(seed: number, trackId: string, entrants: Entrant[], difficulty = 1, lapsIn?: number): RaceState {
+  const t0 = trackById(trackId); if (!t0) throw new Error('bad track');
+  const t = lapsIn ? { ...t0, laps: Math.max(1, Math.min(MAX_LAPS, Math.floor(lapsIn))) } : t0;
   const segs = buildTrack(t), len = trackLength(segs), rng = createRng(seed);
   // 發車：電腦依實力排（最強在最前），玩家全部在最後（TG2 規則）
   const ai = entrants.filter((e) => e.ai).map((e) => ({ e, form: (e.skill ?? 1) * (0.94 + nextFloat(rng) * 0.12) })).sort((a, b) => b.form - a.form);

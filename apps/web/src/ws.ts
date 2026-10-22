@@ -10,7 +10,9 @@ export class Live {
   inFight = false;
   /** M2：自己發起或已參加一起下樓梯、等開始中 → 也算活躍。 */
   inLobby = false;
-  get busy() { return this.inMatch || this.inFight || this.inLobby; }
+  /** v27 賽車房：目前所在的房間（伺服器最新狀態＋收到的本地時間）；在房裡也算活躍（不暫停、不主動重連） */
+  room: any = null;
+  get busy() { return this.inMatch || this.inFight || this.inLobby || !!this.room; }
   homeId: string | null = null;
   offset = 0; // 伺服器時間 − 本地時間
   rtt = 0;
@@ -59,7 +61,10 @@ export class Live {
         this.onStatus('online');
         for (let i = 0; i < 5; i++) setTimeout(() => this.ping(), i * 120);
         if (this.homeId) this.send({ type: 'home.join', home_id: this.homeId }); // 重新同步
+        if (this.room) this.send({ type: 'room.join', room: this.room.id, inst: this.room.inst }); // v27：斷線 30 秒內回到房間
       } else if (m.type === 'time.pong') this.pong(m);
+      else if (m.type === 'room.state') this.room = { ...m.room, at: Date.now() };
+      else if (m.type === 'room.gone') { if (!this.room || this.room.id === m.room) this.room = null; }
       else if (m.type === 'server.draining') { setTimeout(() => { if (this.ws === ws) this.reconnect('draining'); }, Math.random() * 500); }
       else if (m.type === 'error' && m.code === 'UNAUTHORIZED') { this.stopped = true; this.onStatus('unauthorized'); }
       else if (m.type === 'game.closed' || (m.type === 'error' && m.code === 'GAME_CLOSED')) { this.stopped = true; this.onStatus('closed', { opens_at: m.opens_at ?? null }); } // 休息時段：不自動重連
