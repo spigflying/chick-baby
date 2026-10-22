@@ -160,35 +160,65 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean }
 export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number }
 
-const ROAD_W = 1.8, CAM_H = 7.5, DEPTH = 0.9, DRAW = 60, HORIZON = 116; // v11：路寬照 TG2（車底那一列路寬 ≈ 0.9 畫面寬、車 ≈ 路寬 0.24）、攝影機較高，地平線 58%
+/** v13：彎道視覺強度（每公尺彎度係數）、攝影機橫向跟車比例。 */
+const CURVE_K = 0.0004, CAM_FOLLOW = 0.4;
+const ROAD_W = 2.4, CAM_H = 7.5, DEPTH = 0.9, DRAW = 60, HORIZON = 116; // v11：路寬照 TG2（車底那一列路寬 ≈ 0.9 畫面寬、車 ≈ 路寬 0.24）、攝影機較高，地平線 58%
 /** 玩家深度的半路寬（px）。車寬一律 = CAR_W × 半路寬 × 2 再乘同一個常數，所以只跟深度有關。 */
 const playerPw = () => ROAD_W * (DEPTH * 6 / (PLAYER_DZ + 4)) * (W / 2);
+/** 彎度前綴和（天空視差用）。 */
+const prefCache = new Map<string, number[]>();
+function curvePrefix(t: Track) { let p = prefCache.get(t.id); if (!p) { const s = trackSegs(t.id); p = [0]; for (let i = 0; i < s.length; i++) p.push(p[i] + s[i].curve); prefCache.set(t.id, p); } return p; }
+/**
+ * v13 純視覺坡道：大部分平路，偶爾一個山丘（凸）或谷（凹）。每個「坡段」是 (1−cos) 平滑的鼓包，起點終點高度 0、斜率 0，
+ * 所以整圈自然閉合、處處平滑。伺服器物理不變。
+ */
+interface Elev { a: Float32Array; s: Float32Array; l: Float32Array; n: number }
+const elevCache = new Map<string, Elev>();
+export function elevTable(t: Track): Elev {
+  let e = elevCache.get(t.id); if (e) return e;
+  const n = trackSegs(t.id).length, a = new Float32Array(n), s = new Float32Array(n), l = new Float32Array(n);
+  let i = 0, pi = 0;
+  for (const [len, , hill] of t.pieces) {
+    const keep = Math.abs(hill) >= 0.6 && len >= 10 && hash(pi * 31 + t.id.length * 7 + t.id.charCodeAt(2)) < 0.55;
+    const amp = keep ? Math.sign(hill) * (26 + Math.abs(hill) * 12) : 0;
+    for (let j = 0; j < len && i < n; j++, i++) { a[i] = amp; s[i] = i - j; l[i] = len; }
+    pi++;
+  }
+  e = { a, s, l, n }; elevCache.set(t.id, e); return e;
+}
+export function elevAt(e: Elev, z: number) {
+  const L = e.n * SEG_LEN; z = ((z % L) + L) % L; const i = Math.min(e.n - 1, Math.floor(z / SEG_LEN));
+  if (!e.a[i]) return 0; const u = (z / SEG_LEN - e.s[i]) / e.l[i];
+  return e.a[i] * (1 - Math.cos(u * Math.PI * 2)) / 2;
+}
 /** 畫一個畫面。 */
 export function drawRace(x: CanvasRenderingContext2D, v: View) {
   const t = v.track, segs = trackSegs(t.id), n = segs.length;
   const night = t.weather === 'night', P = night ? NIGHT : G;
-  const camZ = v.camZ ?? (v.me ? v.me.z - PLAYER_DZ : 0), camX = v.camX ?? (v.me ? v.me.x * 0.55 : 0);
+  const camZ = v.camZ ?? (v.me ? v.me.z - PLAYER_DZ : 0);
+  // v13：攝影機跟著車橫移一部分（世界單位：半路寬 = ROAD_W），全部用小數，不先取整
+  const camXw = v.camX !== undefined ? v.camX * ROAD_W : (v.me ? v.me.x * ROAD_W * CAM_FOLLOW : 0);
   const base = Math.floor(camZ / SEG_LEN), frac = (camZ % SEG_LEN + SEG_LEN) % SEG_LEN / SEG_LEN;
-  const segY = (i: number) => segs[((i % n) + n) % n].y * 0.8;
-  const camY = segY(base) + (segY(base + 1) - segY(base)) * frac + CAM_H;
-  // 天空與遠景（隨彎道視差移動）
-  const bend = segs.slice(0, ((base % n) + n) % n).reduce((a, s) => a + s.curve, 0) * 0.8;
+  const el = elevTable(t), camY = elevAt(el, camZ + PLAYER_DZ) + CAM_H;
+  // 天空與遠景（隨彎道視差移動）：累積彎度＋本段小數部分，連續不跳格
+  const bend = curvePrefix(t)[((base % n) + n) % n] * 0.8 + segs[((base % n) + n) % n].curve * frac * 0.8;
   role('sky'); x.fillStyle = night ? Q[3] : Q[0]; x.fillRect(0, 0, W, H);
   if (night) { for (let i = 0; i < 36; i++) { x.fillStyle = Q[i % 3 ? 2 : 1]; x.fillRect(Math.floor(((hash(i) * 480 - bend * 0.6) % W + W) % W), Math.floor(hash(i + 50) * 60), 1, 1); } const mx = Math.floor(((180 - bend * 0.6) % W + W) % W); x.fillStyle = Q[1]; x.fillRect(mx + 1, 12, 6, 8); x.fillRect(mx, 13, 8, 6); x.fillStyle = Q[3]; x.fillRect(mx + 4, 13, 3, 5); }
   else if (t.weather === 'clear' && !v.hud) { x.fillStyle = Q[1]; const sx0 = Math.floor(((192 - bend * 0.6) % 280 + 280) % 280) - 20; x.fillRect(sx0 + 2, 16, 8, 12); x.fillRect(sx0, 18, 12, 8); }
   role('city'); drawSkyline(x, t.scenery, bend, night ? NIGHT : Q);
-  // 道路：由近到遠投影，再由遠到近畫
-  const pts: { y: number; x: number; w: number; scale: number; i: number; clip: number; wx: number; wy: number; z?: number }[] = [];
-  let dx = -segs[((base % n) + n) % n].curve * frac, cx = 0, maxy = H;
+  // 道路（v13，Outrun/TG2 式路段投影）：從攝影機往前逐段積分彎度
+  // 每段彎度固定 → 航向 h 線性、橫移 x 二次，且對 camZ 連續（不會隨段落邊界跳格）。
+  const pts: { y: number; x: number; w: number; scale: number; i: number; clip: number; wx: number; wy: number; z: number; d: number; h: number; c: number }[] = [];
+  let lx = 0, lh = 0, maxy = H;
+  const proj = (d: number, wx: number, wy: number) => { const zRel = d + 4, scale = DEPTH * 6 / zRel; return { zRel, scale, py: HORIZON - (wy - camY) * scale * (W / 2) / 6, pxc: W / 2 + (wx - camXw) * scale * (W / 2) }; };
   for (let k = 0; k < DRAW; k++) {
-    const i = base + k, s = segs[((i % n) + n) % n];
-    const zRel = Math.max(1, (k - frac) * SEG_LEN + 4); if (zRel <= 0.5) { pts.push({ y: H, x: W / 2, w: 0, scale: 0, i, clip: H, wx: cx * 0.06, wy: segY(i) }); cx += dx; dx += s.curve; continue; }
-    const scale = DEPTH / zRel * 6;
-    const py = HORIZON - (segY(i) - camY) * scale * (W / 2) / 6;
-    const pxc = W / 2 + (cx * 0.06 - camX * ROAD_W) * scale * (W / 2) / 6 * 6 / 6;
-    pts.push({ y: py, x: pxc, w: ROAD_W * scale * (W / 2), scale, i, clip: maxy, wx: cx * 0.06, wy: segY(i), z: zRel });
-    if (py < maxy) maxy = py;
-    cx += dx; dx += s.curve;
+    const d = k === 0 ? 0 : (k - frac) * SEG_LEN, i = base + Math.max(0, k - 1);
+    const c = segs[(((base + k) % n) + n) % n].curve * CURVE_K; // 下一段（d → d+L）的彎度
+    const wy = elevAt(el, camZ + d), p = proj(d, lx, wy);
+    pts.push({ y: p.py, x: p.pxc, w: ROAD_W * p.scale * (W / 2), scale: p.scale, i, clip: maxy, wx: lx, wy, z: p.zRel, d, h: lh, c });
+    if (p.py < maxy) maxy = p.py;
+    const L = k === 0 ? (1 - frac) * SEG_LEN : SEG_LEN;
+    lx += lh * L + c * L * L / 2; lh += c * L;
   }
   for (let k = DRAW - 1; k > 0; k--) {
     const a = pts[k - 1], b = pts[k]; if (b.scale === 0 || a.scale === 0) continue;
@@ -229,11 +259,10 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   const place = (c: ViewCar) => {
     let dz = c.z - camZ; const L = v.len; dz = ((dz % L) + L) % L; if (dz > L / 2) dz -= L;
     if (dz < 0.5 || dz > (DRAW - 2) * SEG_LEN) return null;
-    const kf = (dz - 4 + 4) / SEG_LEN + frac; // pts[k] 的 zRel = (k − frac)·SEG_LEN + 4，車的 zRel = dz + 4
-    const k = Math.floor(kf), a = pts[k], b = pts[k + 1]; if (!a || !b) return null;
-    const f = kf - k, zRel = dz + 4, scale = DEPTH * 6 / zRel; // 直接用真實深度投影（不在 1/z 上做線性內插）
-    const wx = a.wx + (b.wx - a.wx) * f, wy = a.wy + (b.wy - a.wy) * f;
-    return { k, py: HORIZON - (wy - camY) * scale * (W / 2) / 6, pxc: W / 2 + (wx - camX * ROAD_W) * scale * (W / 2), pw: ROAD_W * scale * (W / 2), clip: a.clip };
+    let k = 0; while (k + 1 < pts.length && pts[k + 1].d <= dz) k++;
+    const a = pts[k]; if (!a || !pts[k + 1]) return null;
+    const u = dz - a.d, wx = a.wx + a.h * u + a.c * u * u / 2, wy = elevAt(el, camZ + dz), p = proj(dz, wx, wy);
+    return { k: k + 1, py: p.py, pxc: p.pxc, pw: ROAD_W * p.scale * (W / 2), clip: pts[k + 1].clip };
   };
   for (const c of v.cars) {
     const isMe = !!v.me && c.id === v.me.id, p = place(c); if (!p) continue;
@@ -246,7 +275,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
     const scale = !isMe && target > 50 ? target / 48 : 1;
     const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
-    const sx = Math.round(p.pxc + c.x * p.pw - dw / 2) + shake, sy = (isMe ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.round(p.py - bh * scale)) - bob;
+    const sx = Math.round(p.pxc + c.x * p.pw - dw / 2 + shake), sy = (isMe ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.round(p.py - bh * scale)) - bob;
     sprites.push({ k: p.k + (isMe ? -0.5 : 0), draw: () => {
       x.drawImage(img, sx, sy, dw, dh);
       if (isMe && c.damage > 50) for (let i = 0; i < 3; i++) { x.fillStyle = Q[i % 2 ? 1 : 2]; x.fillRect(sx + 6 + ((v.frame * 3 + i * 7) % 12), sy - 3 - ((v.frame + i * 3) % 6), 2, 2); }
