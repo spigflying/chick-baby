@@ -437,7 +437,15 @@ function drawHud(x: CanvasRenderingContext2D, v: View, now = performance.now()) 
   const sp = String(Math.round(me.speed * 3.6)); otext(x, sp, 104 - textW(sp, 3), 16, me.nitroT > 0 && v.frame % 4 < 2 ? 1 : 0, 3); otext(x, 'KM/H', 104 - textW('KM/H'), 39, 1);
   // 氮氣列：斜體 N＋斜條（每瓶 2 條），用掉的變暗
   otext(x, 'N', 16, 47, 1);
-  for (let i = 0; i < NITRO_PER_RACE * 2; i++) { const on = Math.floor(i / 2) < me.nitro, act = me.nitroT > 0 && Math.floor(i / 2) === me.nitro && v.frame % 2; for (let j = 0; j < 7; j++) { x.fillStyle = Q[3]; x.fillRect(25 + i * 6 + (6 - j) * 0.6 - 1 | 0, 47 + j, 5, 1); x.fillStyle = Q[on || act ? (i % 2 ? 1 : 0) : 2]; x.fillRect(25 + i * 6 + (6 - j) * 0.6 | 0, 47 + j, 3, 1); } }
+  // v20：剩餘氮氣次數 —— 3 支小鋼瓶（剩的實心、用掉的空心、正在噴的閃）＋「×N」
+  const BOT = ['.33.', '3333', '3013', '3013', '3113', '3113', '3333'];
+  for (let i = 0; i < NITRO_PER_RACE; i++) {
+    const on = i < me.nitro, act = me.nitroT > 0 && i === me.nitro, bx = 25 + i * 7;
+    BOT.forEach((r, j) => [...r].forEach((ch, k) => { if (ch === '.') return; const edge = ch === '3';
+      if (!on && !act && !edge) return; // 用掉的：只剩外框（空瓶）
+      x.fillStyle = Q[act ? (v.frame % 2 ? 1 : 3) : on ? (edge ? 3 : ch === '0' ? 1 : 2) : 2]; x.fillRect(bx + k, 47 + j, 1, 1); }));
+  }
+  otext(x, `×${me.nitro}`.replace('×', 'X'), 25 + NITRO_PER_RACE * 7 + 2, 47, me.nitro ? 0 : 2);
   otext(x, 'AUTO', 26, 57, 0);
   // 檔位 R 1..n，目前檔位亮＋放大
   let gx = 22; ['R', ...Array.from({ length: gears }, (_, i) => String(i + 1))].forEach((g, i) => { const cur = me.speed > 1 && i === gear; if (cur) { otext(x, g, gx, 64, 1, 2); gx += 12; } else { otext(x, g, gx, 68, 2); gx += 7; } });

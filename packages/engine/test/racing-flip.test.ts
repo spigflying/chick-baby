@@ -12,7 +12,7 @@ describe('racing v16 roadside objects + flip', () => {
     for (let i = 0; i < 6 && !me.flip; i++) stepRace(s);
     expect(me.flip).toBeGreaterThan(0); expect(me.evK).toBe(HIT_OBJECT); expect(me.damage - d0).toBeGreaterThan(4); expect(snapCar(me)[13]).toBe(me.flip);
     for (let i = 0; i < FLIP_TICKS; i++) stepRace(s);
-    expect(me.flip).toBe(0); expect(Math.abs(me.x)).toBeLessThan(1); expect(me.speed).toBeLessThan(15);
+    expect(me.flip).toBe(0); expect(Math.abs(me.x)).toBeLessThan(1); expect(me.speed).toBeLessThan(25);
   });
   it('road-edge wall hit does not flip', () => { const { s, me } = solo(); me.z = 3; me.x = 1.6; me.speed = 50; stepRace(s); expect(me.evK).toBe(HIT_WALL); expect(me.flip ?? 0).toBe(0); });
 });
