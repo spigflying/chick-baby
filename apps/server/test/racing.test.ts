@@ -4,7 +4,8 @@ import { createDb } from '../src/db';
 import { migrateToLatest } from '../src/migrations';
 import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
-import { fastForwardRace, inRace, raceBusy, startRaceLoop } from '../src/racing';
+import { fastForwardRace, inRace, raceBusy, raceLabel, startRaceLoop } from '../src/racing';
+import { randomUUID } from 'node:crypto';
 import { partPrice, prizeFor, RACE_SLOTS, seasonOf, setRaceInput, TRACKS } from '@chick/engine';
 import { CLOSING_GUARD_MS } from '../src/racing';
 
@@ -43,19 +44,19 @@ describe('racing (server) v5', () => {
     const a = await login('racer1');
     const p = await a.call('GET', '/race/profile');
     expect(p.status).toBe(200); expect(p.json.profile.cash).toBeUndefined(); expect(p.json.profile.season).toBe(seasonOf(Date.now()));
-    expect(p.json.catalog.tracks.length).toBe(TRACKS.length); expect(p.json.catalog.slots).toBe(20); expect(p.json.catalog.max_out_cost).toBe(324000);
+    expect(p.json.catalog.tracks.length).toBe(TRACKS.length); expect(p.json.catalog.slots).toBe(20); expect(p.json.catalog.max_out_cost).toBe(32400);
     const b0 = await bal(a.id);
     expect((await a.call('POST', '/race/buy', { kind: 'engine', tier: 3 })).json.error).toBe('INSUFFICIENT_COINS');
     await sql`UPDATE wallets SET balance = 250000 WHERE user_id = ${a.id}`.execute(db);
     const e3 = await a.call('POST', '/race/buy', { kind: 'engine', tier: 3 }); // 直接買 3 階
-    expect(e3.status).toBe(200); expect(e3.json.parts.engine).toBe(3); expect(e3.json.balance).toBe(250000 - 70000);
+    expect(e3.status).toBe(200); expect(e3.json.parts.engine).toBe(3); expect(e3.json.balance).toBe(250000 - 7000);
     expect((await a.call('POST', '/race/buy', { kind: 'engine', tier: 3 })).json.error).toBe('ALREADY_OWNED');
     const e1 = await a.call('POST', '/race/buy', { kind: 'engine', tier: 1 }); // 降級：全額、不退錢
-    expect(e1.json.parts.engine).toBe(1); expect(e1.json.balance).toBe(250000 - 70000 - partPrice('engine', 1)!);
+    expect(e1.json.parts.engine).toBe(1); expect(e1.json.balance).toBe(250000 - 7000 - partPrice('engine', 1)!);
     const e0 = await a.call('POST', '/race/buy', { kind: 'engine', tier: 0 }); // 原廠標準免費
     expect(e0.json.parts.engine).toBe(0); expect(e0.json.balance).toBe(e1.json.balance);
     const led = await sql<any>`SELECT reason, delta FROM coin_ledger WHERE user_id=${a.id} AND reason='race_part' ORDER BY created_at`.execute(db);
-    expect(led.rows.map((r: any) => Number(r.delta))).toEqual([-70000, -20000]);
+    expect(led.rows.map((r: any) => Number(r.delta))).toEqual([-7000, -2000]);
     const c = await a.call('POST', '/race/buy', { car: 'f1', paint: 7 }); expect(c.json.car).toBe('f1'); expect(c.json.paint).toBe(7);
     expect((await a.call('POST', '/race/buy', { paint: 8 })).status).toBe(400);
     expect((await a.call('POST', '/race/exchange', { dir: 'in', coins: 1 })).status).toBe(404);
@@ -183,6 +184,30 @@ describe('racing (server) v5', () => {
     wb.ws.send(JSON.stringify({ type: 'race.leave' }));
     await fastForwardRace(st3.race_id, drive(a.id)); await wa.wait((m) => m.type === 'race.ended');
     expect(raceBusy(home)).toBe(false);
+    wa.ws.close(); wb.ws.close();
+  });
+  it('race names: pet（user） for duo and solo, long names shortened but keep the closing bracket, no swaps', async () => {
+    expect(raceLabel('咕咕', 'alexanderhamilton')).toBe('咕咕（alexanderha…）');
+    expect(raceLabel(null, 'bob')).toBe('bob'); expect(raceLabel('', '')).toBe('玩家');
+    expect([...raceLabel('一二三四五六七八九十一二', 'bob')].length).toBeLessThanOrEqual(16);
+    const a = await login('alexanderhamilton'), b = await login('bobby');
+    for (const [u, n] of [[a, '咕咕'], [b, '小黃']] as const) expect((await u.call('POST', '/pets', { species: 'chicken', name: n, request_id: randomUUID() })).status).toBe(200);
+    const home = (await a.call('GET', '/me')).json.home.id;
+    const wa = await openWs(a.cookie), wb = await openWs(b.cookie);
+    for (const x of [wa, wb]) x.ws.send(JSON.stringify({ type: 'home.join', home_id: home }));
+    await wb.wait((m) => m.type === 'home.presence' && m.users.length === 2);
+    wa.ws.send(JSON.stringify({ type: 'race.invite' }));
+    const inv = await wb.wait((m) => m.type === 'race.event' && m.kind === 'invite');
+    wb.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: true }));
+    const st = await wa.wait((m) => m.type === 'race.started');
+    const nm = (cars: any[]) => Object.fromEntries(cars.filter((c: any) => !c.ai).map((c: any) => [c.id, c.name]));
+    expect(nm(st.cars)).toEqual({ [a.id]: '咕咕（alexanderha…）', [b.id]: '小黃（bobby）' });
+    await fastForwardRace(st.race_id, (s) => { drive(a.id)(s); drive(b.id)(s); });
+    expect(nm((await wb.wait((m) => m.type === 'race.ended')).ranking)).toEqual(nm(st.cars));
+    wa.msgs.length = 0; wb.ws.send(JSON.stringify({ type: 'race.solo' }));
+    const so = await wb.wait((m) => m.type === 'race.started' && m.race_id !== st.race_id);
+    expect(nm(so.cars)).toEqual({ [b.id]: '小黃（bobby）' });
+    await fastForwardRace(so.race_id); await wb.wait((m) => m.type === 'race.ended' && m.race_id === so.race_id);
     wa.ws.close(); wb.ws.close();
   });
   it('closing guard constant is 8 minutes', () => { expect(CLOSING_GUARD_MS).toBe(480000); });

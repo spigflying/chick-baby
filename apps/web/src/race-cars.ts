@@ -205,7 +205,7 @@ const cache = new Map<string, (number | null)[][]>();
 /** 點陣化：回傳 [列][行] 的色碼（null = 透明）。高度 = 寬 × 30/48。 */
 export function carPixels(model: string, livery: number, lod: number, look: CarLook = {}): (number | null)[][] {
   if (model === 'ai') livery = 0;
-  const key = `${model}:${livery}:${lod}:${+!!look.brake}:${+!!look.nitro}:${+!!look.hit}:${(look.frame ?? 0) & 1}`;
+  const key = `${model}:${livery}:${lod}:${+!!look.brake}:${+!!look.nitro}:${+!!look.hit}:${look.nitro ? (look.frame ?? 0) & 3 : (look.frame ?? 0) & 1}`;
   const hit = cache.get(key); if (hit) return hit.map((r) => r.slice());
   const W = lodW(lod), k = (W - 2) / DESIGN_W, H = Math.round(DESIGN_H * k) + 2;
   const lv = PAINT_LIVERIES[livery % PAINT_LIVERIES.length];
@@ -236,13 +236,20 @@ export function carPixels(model: string, livery: number, lod: number, look: CarL
   // 1px 外框：透明格子旁邊有實心 → 最暗色
   const out = g.map((r) => r.slice());
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (g[y][x] === null && [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => g[y + dy]?.[x + dx] != null)) out[y][x] = 3;
-  if (look.nitro && lod <= 2) { // 排氣火焰（往下噴、閃動）
-    const len = Math.round((lod < 0 ? 18 : lod === 0 ? 14 : lod === 1 ? 9 : 5) + ((look.frame ?? 0) & 1) * k * 3), fw = Math.max(1, Math.round(4 * k));
+  if (look.nitro && lod <= 2) { // 排氣火焰：又長又寬、4 格閃動、尖端參差，外圈描最暗色
+    const f = (look.frame ?? 0) & 3, fl = [0, 3, 1, 4][f];
+    const len = Math.round((lod < 0 ? 30 : lod === 0 ? 24 : lod === 1 ? 15 : 8) + fl * k * 2.5), fw = Math.max(2, Math.round(7 * k));
     const ex: Record<string, number[]> = { falcon: [24], f1: [24], rhino: [11, 37], muscle: [9, 39], rally: [35], drift: [36], lmp: [20, 28] };
-    const xs = (ex[model] ?? [21, 27]).map((e) => X(e) - (fw >> 1));
-    const top = Y(27);
-    for (let j = 0; j < len; j++) { const y = top + j; if (y >= out.length) out.push(Array(W).fill(null)); const c = j < len * 0.5 ? 0 : j < len * 0.8 ? 1 : 2; const shrink = j > len * 0.6 ? 1 : 0;
-      for (const x0 of xs) for (let d = shrink; d < fw - shrink || d === shrink && d < fw; d++) out[y][x0 + d] = c; }
+    const xs = (ex[model] ?? [21, 27]).map((e) => X(e));
+    const top = Y(27), fire: [number, number, number][] = [];
+    xs.forEach((cx0, ei) => { for (let j = 0; j < len; j++) { const t = j / len, half = Math.max(0.5, (fw / 2) * (1 - t * 0.85));
+      for (let d = -Math.ceil(half); d <= Math.ceil(half); d++) { if (Math.abs(d) > half) continue;
+        const tip = len - ((d * 7 + f * 3 + ei * 5) & 3) * Math.max(1, Math.round(k * 2)); if (j > tip) continue; // 參差的尖端
+        const r = Math.abs(d) / Math.max(1, half); const c = t < 0.35 && r < 0.6 ? 0 : t < 0.7 ? 1 : 2; fire.push([cx0 + d, top + j, c]); } } });
+    const maxY = Math.max(...fire.map((q) => q[1])) + 2; while (out.length < maxY) out.push(Array(W).fill(null));
+    const mk = new Set(fire.map(([fx, fy]) => fy * 4096 + fx));
+    for (const [fx, fy] of fire) for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1]]) { const nx = fx + dx, ny = fy + dy; if (nx >= 0 && nx < W && !mk.has(ny * 4096 + nx) && out[ny][nx] === null) out[ny][nx] = 3; }
+    for (const [fx, fy, c] of fire) if (fx >= 0 && fx < W) out[fy][fx] = c;
   }
   cache.set(key, out); return out.map((r) => r.slice());
 }

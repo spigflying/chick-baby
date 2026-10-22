@@ -45,7 +45,7 @@ describe('racing engine v5', () => {
   });
   it('TG2-style shop: 3 tiers, prices rise; gearbox needs engine; wet tyres matter in rain', () => {
     for (const k of PART_KINDS) { expect(PARTS[k].tiers.length).toBe(4); PARTS[k].tiers.forEach((t, i) => { if (i) expect(t.price).toBeGreaterThan(PARTS[k].tiers[i - 1].price); }); }
-    expect(PARTS.engine.tiers[3].price).toBe(70000); expect(PARTS.engine.tiers[3].tg2).toBe(80000); expect(PARTS.dry.tiers[1].price).toBe(2000); expect(MAX_OUT_COST).toBe(324000); expect(PAINTS).toBe(8); expect(PART_KINDS).toEqual(['engine', 'gearbox', 'nitro', 'dry', 'wet', 'armorF', 'armorR', 'armorS']); expect(PARTS.wet.tiers.map((t) => t.price)).toEqual([0, 2000, 4000, 6000]);
+    expect(PARTS.engine.tiers[3].price).toBe(7000); expect(PARTS.engine.tiers[3].tg2).toBe(80000); expect(PARTS.dry.tiers[1].price).toBe(200); expect(MAX_OUT_COST).toBe(32400); expect(PAINTS).toBe(8); expect(PART_KINDS).toEqual(['engine', 'gearbox', 'nitro', 'dry', 'wet', 'armorF', 'armorR', 'armorS']); expect(PARTS.wet.tiers.map((t) => t.price)).toEqual([0, 200, 400, 600]);
     expect(carStats({ gearbox: 3 }).topSpeed).toBeLessThan(carStats({ gearbox: 3, engine: 3 }).topSpeed);
     expect(carStats({ gearbox: 3, engine: 2 }).topSpeed).toBeGreaterThan(carStats({ engine: 2 }).topSpeed);
     expect(carStats({ wet: 3 }).wetGrip).toBeGreaterThan(carStats({}).wetGrip);

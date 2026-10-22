@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createRace, stepRace, fillField, roadside, snapCar, FLIP_TICKS, HIT_OBJECT, HIT_WALL } from '../src/racing';
+import { createRace, stepRace, fillField, roadside, snapCar, FLIP_TICKS, HIT_OBJECT, HIT_WALL, SPEED_X } from '../src/racing';
 const solo = () => { const s = createRace(2, 'tw1', fillField([{ id: 'me', name: 'me' }])); s.countdown = 0; const me = s.cars.find((c) => c.id === 'me')!; s.cars.splice(0, s.cars.length, me); return { s, me }; };
 describe('racing v16 roadside objects + flip', () => {
   it('roadside objects are deterministic and off-track (1.2–1.5 half-road)', () => {
@@ -12,7 +12,7 @@ describe('racing v16 roadside objects + flip', () => {
     for (let i = 0; i < 6 && !me.flip; i++) stepRace(s);
     expect(me.flip).toBeGreaterThan(0); expect(me.evK).toBe(HIT_OBJECT); expect(me.damage - d0).toBeGreaterThan(4); expect(snapCar(me)[13]).toBe(me.flip);
     for (let i = 0; i < FLIP_TICKS; i++) stepRace(s);
-    expect(me.flip).toBe(0); expect(Math.abs(me.x)).toBeLessThan(1); expect(me.speed).toBeLessThan(25);
+    expect(me.flip).toBe(0); expect(Math.abs(me.x)).toBeLessThan(1); expect(me.speed).toBeLessThan(12.5 * SPEED_X);
   });
   it('road-edge wall hit does not flip', () => { const { s, me } = solo(); me.z = 3; me.x = 1.6; me.speed = 50; stepRace(s); expect(me.evK).toBe(HIT_WALL); expect(me.flip ?? 0).toBe(0); });
 });

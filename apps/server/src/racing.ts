@@ -139,7 +139,14 @@ export function onRaceBus(m: any) {
 }
 /** 關門前 8 分鐘不開新比賽 */
 function closingCode(now = Date.now()): string | null { const st = clock().status(now); if (!st.open) return 'GAME_CLOSED'; return st.closes_at !== null && st.closes_at - now < CLOSING_GUARD_MS ? 'RACE_CLOSING' : null; }
-const label = (u: any) => (u?.pet?.name ? `${u.pet.name}（${u.display_name}）` : u?.display_name) ?? '玩家';
+/** 賽車上的名字：「寵物名（玩家名）」，太長只縮玩家名、保留右括號；沒有寵物就只用玩家名。 */
+export function raceLabel(pet: string | null | undefined, display: string | null | undefined, max = 16): string {
+  const d = [...String(display ?? '').trim()], p = [...String(pet ?? '').trim()].slice(0, 12);
+  if (!p.length) return (d.length ? (d.length > max ? d.slice(0, max - 1).join('') + '…' : d.join('')) : '玩家');
+  const room = max - p.length - 2; if (!d.length || room < 2) return p.join('');
+  return `${p.join('')}（${d.length > room ? d.slice(0, room - 1).join('') + '…' : d.join('')}）`;
+}
+const label = (u: any) => raceLabel(u?.pet?.name, u?.display_name);
 
 /** 發起：這個家裡其他在場的人收到邀請（15 秒）。沒有其他人 → 直接單人開跑（全部電腦車）。賽道＝發起人目前的錦標賽站。 */
 async function invite(home: string, user: string, name?: string, now = Date.now()) {
@@ -205,9 +212,13 @@ async function start(home: string | null, host: string, users: string[], track: 
     if (why) { if (home) outHome({ t: 'rrace.event', home, kind: 'invite_cancel', invite: inviteId, from: host, code: why }); else deps!.local({ t: 'rrace.notice', home: null, user: host, code: why }); return null; }
     const names = new Map((home ? presence.users(home) : []).map((u) => [u.id, label(u)]));
     const rows = await (db as any).selectFrom('users').select(['id', 'display_name']).where('id', 'in', users).execute();
-    for (const r of rows) if (!names.has(r.id)) names.set(r.id, r.display_name);
+    // 不在家裡名單裡（單人賽）：自己查寵物名，跟一起賽車時顯示一樣
+    const missing = rows.filter((r: any) => !names.has(r.id)).map((r: any) => r.id);
+    const pets = missing.length ? await (db as any).selectFrom('pets').select(['owner_id', 'name']).where('owner_id', 'in', missing).where('status', 'in', ['egg', 'alive']).execute() : [];
+    const petOf = new Map(pets.map((x: any) => [x.owner_id, x.name]));
+    for (const r of rows) if (!names.has(r.id)) names.set(r.id, raceLabel(petOf.get(r.id) as any, r.display_name));
     const seats: Seat[] = [];
-    for (const u of users) { const p = await getProfile(db, u); seats.push({ userId: u, name: String(names.get(u) ?? '玩家').slice(0, 16), car: p.car, paint: p.paint, parts: p.parts, left: false }); }
+    for (const u of users) { const p = await getProfile(db, u); seats.push({ userId: u, name: String(names.get(u) ?? '玩家'), car: p.car, paint: p.paint, parts: p.parts, left: false }); }
     const seed = randomSeed();
     const state = createRace(seed, track, fillField(seats.map((s) => ({ id: s.userId, name: s.name, car: s.car, parts: s.parts, color: s.paint }))));
     const r: Room = { id: randomUUID(), home, host, inst: deps!.instance(), track, seats, state, startAt: Date.now(), ended: false, seq: new Map() };

@@ -1,4 +1,6 @@
 /** 賽車模式頁面：錦標賽選單、車庫、比賽（WS 即時多人，伺服器權威）、結果。 */
+import { tabNav } from './race-nav';
+import { raceOrder, kmhShown } from './race-gfx';
 import { api, errText } from './api';
 import type { Live } from './ws';
 import { createRace, stepRace, trackSegs, SEG_LEN, raceRanking, trackById, CARS, PARTS, PART_KINDS, TRACKS, COUNTRIES, carStats, fillField, cupTrack, prizeFor, PRIZES, POINTS, ME, PAINT_NAMES, MAX_OUT_COST, PRICE_DIVISOR, QUALIFY_RANK, RACES_PER_COUNTRY, RACE_SLOTS, NITRO_PER_RACE, type RaceState, type PartKind } from '@chick/engine';
@@ -74,24 +76,23 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     if (mode === 'results' && race?.ended && !race.ended.aborted) return showResults(race.ended);
     const head = `<p class="race-cash">金幣 <b>${money(coins)}</b>　積分 <b>${prof.points}</b>　勝場 ${prof.wins}/${prof.races}<br><span class="muted">賽季 ${esc(prof.season)}（每月重置積分與解鎖，獎金和零件保留）</span></p>`;
     if (mode === 'lobby' || mode === 'race') {
-      body.innerHTML = head + `<p>${mode === 'lobby' ? '準備發車…' : '比賽進行中…'}</p><button id="rleave">離開比賽</button>`;
+      body.innerHTML = `<button id="rleave" class="race-top-btn">離開比賽</button>` + head + `<p>${mode === 'lobby' ? '準備發車…' : '比賽進行中…'}</p>`;
       (body.querySelector('#rleave') as HTMLElement).onclick = leave;
       return;
     }
     if (tab === 'cup') {
       const ct = cupTrack(prof.cup); const st = Object.entries(prof.cup.points ?? {}).sort((a: any, b: any) => b[1] - a[1]) as [string, number][];
-      body.innerHTML = head +
+      body.innerHTML = `<button id="rgo" class="big race-top-btn">單人出發：${esc(trackById(sel)!.name)}</button>` + head +
         COUNTRIES.map((c, ci) => { const lock = ci >= prof.unlocked; return `<h3>${lock ? '🔒 ' : ''}${esc(c.name)}${ci === prof.cup.country ? ' <span class="muted">← 目前</span>' : ''}</h3><ul class="tracks">${c.tracks.map((id) => { const t = trackById(id)!, cur = ct?.id === id; return `<li class="${t.id === sel ? 'sel' : ''} ${lock ? 'lock' : ''}" data-tr="${t.id}"><span>${t.raceIdx + 1}. <b>${esc(t.name)}</b> <span class="muted">${WEATHER[t.weather]}・${t.laps} 圈</span></span><span>${cur ? '錦標賽站' : ''}</span></li>`; }).join('')}</ul>`; }).join('') +
         `<p class="muted">從最後一名起跑，共 ${RACE_SLOTS} 台。前 ${QUALIFY_RANK} 名晉級下一站；前 6 名有獎金 ${PRIZES.map(money).join('/')} 和積分 ${POINTS.join('/')}。每個國家 ${RACES_PER_COUNTRY} 站，國家積分第一解鎖下一國。</p>
         ${st.length ? `<h3>${esc(COUNTRIES[prof.cup.country]?.name)} 國家積分（第 ${prof.cup.race + 1} 站）</h3>${standingsHtml(st)}` : ''}
-        <button id="rgo" class="big">單人出發：${esc(trackById(sel)!.name)}</button>
         <p class="muted">想和朋友一起跑？到家裡按「玩 → 一起賽車」，在場的人會收到邀請（跟一起下樓梯一樣）；空位由灰色電腦車補滿 ${RACE_SLOTS} 台。</p>`;
       body.querySelectorAll('li[data-tr]').forEach((li) => (li as HTMLElement).onclick = () => { const id = (li as HTMLElement).dataset.tr!; if (trackById(id)!.countryIdx >= prof.unlocked) return toast(ERR.TRACK_LOCKED); sel = id; setAttract(); renderPanel(); });
       (body.querySelector('#rgo') as HTMLElement).onclick = () => join();
     } else if (tab === 'garage') {
       const st = carStats(prof.parts, prof.car);
-      body.innerHTML = head + `<h3>改裝店（在左邊畫面裡）</h3><p class="muted">8 類零件＋塗裝，共 9 個畫面，用 ◀類／類▶ 換類別。每類任選一階直接買（不用照順序）；換別的階（包括降級）舊零件丟掉、全額付款、不退錢。全部 3 階共 ${money(MAX_OUT_COST)}（TG2 原價 ×${1 / PRICE_DIVISOR}）。氮氣升級只加強力道和時間，每場一律 ${NITRO_PER_RACE} 次；雨胎下雨／下雪時自動換上。</p>
-        <p class="muted">目前：極速 ${Math.round(st.topSpeed * 3.6)} km/h・加速 ${st.accel.toFixed(0)}・抓地 ${st.grip.toFixed(2)}／雨 ${st.wetGrip.toFixed(2)}・裝甲 前${Math.round(st.armor.F * 100)}／後${Math.round(st.armor.R * 100)}／側${Math.round(st.armor.S * 100)}%・塗裝 ${esc(PAINT_NAMES[prof.paint] ?? '')}</p>
+      body.innerHTML = head + `<h3>改裝店（在左邊畫面裡）</h3><p class="muted">8 類零件＋塗裝，共 9 個畫面，用 ◀類／類▶ 換類別。每類任選一階直接買（不用照順序）；換別的階（包括降級）舊零件丟掉、全額付款、不退錢。全部 3 階共 ${money(MAX_OUT_COST)}（TG2 原價 ÷${PRICE_DIVISOR}）。氮氣升級只加強力道和時間，每場一律 ${NITRO_PER_RACE} 次；雨胎下雨／下雪時自動換上。</p>
+        <p class="muted">目前：極速 ${Math.round(kmhShown(st.topSpeed))} km/h（雨胎／乾地胎再各 +${Math.round(kmhShown(st.tireTopWet))}／+${Math.round(kmhShown(st.tireTopDry))}）・加速 ${st.accel.toFixed(0)}・抓地 ${st.grip.toFixed(2)}／雨 ${st.wetGrip.toFixed(2)}・裝甲 前${Math.round(st.armor.F * 100)}／後${Math.round(st.armor.R * 100)}／側${Math.round(st.armor.S * 100)}%・塗裝 ${esc(PAINT_NAMES[prof.paint] ?? '')}</p>
         <h3>車款 <span class="muted">外觀，免費隨意換</span></h3><ul>${CARS.map((c) => `<li><span><canvas class="mini" data-car="${c.id}" width="34" height="22"></canvas> <b>${esc(c.name)}</b> <span class="muted">${esc(c.desc ?? '')}</span></span>${prof.car === c.id ? '<span>使用中</span>' : `<button data-car-buy="${c.id}">換這台</button>`}</li>`).join('')}</ul>`;
       body.querySelectorAll('canvas.mini').forEach((c) => { const cx = (c as HTMLCanvasElement).getContext('2d')!; cx.fillStyle = G[0]; cx.fillRect(0, 0, 34, 22); cx.drawImage(carCanvas((c as HTMLElement).dataset.car!, prof.paint, {}, 1), 1, 1); });
       body.querySelectorAll('[data-car-buy]').forEach((b) => (b as HTMLElement).onclick = () => buy({ car: (b as HTMLElement).dataset.carBuy }));
@@ -124,7 +125,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     }
     const edge = shopMove(shop, a as any); if (edge) { setCat(shop.cat + (edge === 'next' ? 1 : -1)); if (edge === 'prev') shop.cur = isPaint(shop.cat) ? 3 : 1; else shop.cur = 0; }
   }
-  root.querySelectorAll('#rtabs button').forEach((b) => (b as HTMLElement).onclick = () => { tab = (b as HTMLElement).dataset.t!; renderPanel(); });
+  root.querySelectorAll('#rtabs button').forEach((b) => (b as HTMLElement).onclick = () => { const r = tabNav(mode, (b as HTMLElement).dataset.t!); tab = r.tab; mode = r.mode; if (r.clearRace) race = null; renderPanel(); });
 
   // ---------- 連線 ----------
   function join() {
@@ -149,14 +150,16 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       showResults(m); void load();
     }
   });
-  const stName = (k: string) => k === ME ? '你' : k.startsWith('user:') ? '其他玩家' : k;
+  let knownNames = new Map<string, string>(); // 這場比賽裡其他真人的名字（積分榜 user:id → 名字）
+  const stName = (k: string) => k === ME ? '你' : k.startsWith('user:') ? knownNames.get(k.slice(5)) ?? '其他玩家' : k;
   function standingsHtml(st: [string, number][]) { return `<ol class="results">${st.slice(0, 10).map(([k, p]) => `<li class="${k === ME ? 'me' : ''}"><span>${esc(stName(k))}</span><span>${p} 分</span></li>`).join('')}</ol>`; }
   function showResults(m: any) {
+    for (const c of m.ranking ?? []) if (!c.ai) knownNames.set(c.id, c.name);
     const e = m.me;
-    body.innerHTML = `<h3>${esc(trackById(m.track)!.name)} 結果</h3><ol class="results">${m.ranking.map((c: any) => `<li class="${c.id === me.user.id ? 'me' : ''}"><span>${c.rank}. ${esc(c.name)}${c.ai ? ' <span class="muted">電腦</span>' : ''}</span><span>${fmtMs(c.time_ms)}</span></li>`).join('')}</ol>
+    body.innerHTML = `<button id="rback" class="big race-top-btn">回選單</button><h3>${esc(trackById(m.track)!.name)} 結果</h3><ol class="results">${m.ranking.map((c: any) => `<li class="${c.id === me.user.id ? 'me' : ''}"><span>${c.rank}. ${esc(c.name)}${c.ai ? ' <span class="muted">電腦</span>' : ''}</span><span>${fmtMs(c.time_ms)}</span></li>`).join('')}</ol>
       ${e ? `<p>獎金 <b>${money(e.prize)}</b>　積分 +${e.points}　完美度 <b>${e.condition}%</b>（撞傷下一場前自動修好）</p>
       <p>${e.cup_counted ? (e.qualified ? (e.champion ? '🏆 國家冠軍！解鎖下一個國家' : e.country_done ? '本國四站結束，但不是冠軍，重新挑戰這個國家' : '晉級下一站') : '沒進前 10 名：這個國家要從第 1 站重來') : '<span class="muted">這場不是你目前的錦標賽站（不計國家積分）</span>'}</p>
-      ${e.cup_counted ? `<h3>國家積分</h3>${standingsHtml(e.standings)}` : ''}` : ''}<button id="rback" class="big">回選單</button>`;
+      ${e.cup_counted ? `<h3>國家積分</h3>${standingsHtml(e.standings)}` : ''}` : ''}`;
     (body.querySelector('#rback') as HTMLElement).onclick = () => { mode = 'menu'; race = null; renderPanel(); };
   }
   // ---------- 操作：觸控按鈕＋鍵盤（不 stopPropagation，閒置偵測要收到 pointerdown） ----------
@@ -205,9 +208,9 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       const cars = view(); if (!cars) return drawWait();
       const meCar = cars.find((c) => c.id === me.user.id) ?? null;
       const last = race.snaps[race.snaps.length - 1];
-      const fk = (c: ViewCar) => c.fin ?? 1e12; const ranked = [...cars].sort((p, q) => fk(p) - fk(q) || q.z - p.z);
+      const ranked = raceOrder(cars);
       if (import.meta.env.DEV && meCar) (window as any).__race = { x: meCar.x, z: meCar.z, curve: segAt(trackById(race.track)!.id, meCar.z + 40) };
-      const flash = meCar?.fin != null ? 'FINISH!' : meCar && meCar.hit > 0 ? 'CRASH!' : meCar && meCar.nitroT > 0 ? 'NITRO!' : meCar && Math.abs(meCar.x) > 1 ? 'OFF ROAD' : undefined;
+      const flash = meCar?.fin != null ? 'FINISH!' : meCar && meCar.hit > 0 ? 'CRASH!' : meCar && Math.abs(meCar.x) > 1 ? 'OFF ROAD' : undefined;
       if (meCar && (meCar.evT ?? 0) > lastHitT) { if (lastHitT >= 0) hitSound(meCar.evK === 5 ? 12 : meCar.evS ?? 2); lastHitT = meCar.evT!; }
       const stt = prof ? carStats(prof.parts, prof.car) : null;
       drawRace(x, { gears: [4, 5, 5, 6][prof?.parts?.gearbox ?? 0], top: stt?.topSpeed, track: t, me: meCar, cars, tick: last.tick, countdown: last.countdown, laps: race.laps, len: race.len, rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash });
