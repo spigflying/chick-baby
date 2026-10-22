@@ -200,16 +200,14 @@ interface HitFx { t0: number; k: number; s: number; side: number }
 const fxSeen = new Map<string, number>(), fxHit = new Map<string, HitFx>(); let sparks: Spark[] = [];
 /** 力道 0..1（伺服器的 evS：路邊 ~2-8、追撞 ~1-4、側擦 2.5） */
 const hitK = (s: number) => Math.max(0.25, Math.min(1, s / 7));
-// ---------------- 路上氮氣道具：像素圖（4 綠：0 最亮…3 最暗；'.' 透明），4 幀一循環閃爍 ----------------
+// ---------------- 路上氮氣道具：像素圖（4 綠：0 最亮…3 最暗；'.' 透明），純罐子、不發光不閃 ----------------
 const PICKUP_ART = ['....333333....', '....300003....', '...33333333...', '..3311111113..', '.331000000133.', '.310000300013.', '.310003300013.', '.310033300013.', '.310333333013.', '.310000333013.', '.310000330013.', '.310003300013.', '.310033000013.', '.310030000013.', '.311111111113.', '.322222222223.', '..3333333333..', '...3......3...'];
 const pickupCache = new Map<string, HTMLCanvasElement>();
-export function pickupCanvas(blink: boolean, P: string[] = Q) {
-  const key = `${blink}|${P.join()}`; let cv = pickupCache.get(key); if (cv) return cv;
-  const h = PICKUP_ART.length, w = PICKUP_ART[0].length, pad = 2; cv = document.createElement('canvas'); cv.width = w + pad * 2; cv.height = h + pad * 2;
-  const c = cv.getContext('2d')!; const on = (xx: number, yy: number) => PICKUP_ART[yy]?.[xx] !== undefined && PICKUP_ART[yy][xx] !== '.';
-  c.fillStyle = P[blink ? 0 : 1]; // 光暈
-  for (let yy = -pad; yy < h + pad; yy++) for (let xx = -pad; xx < w + pad; xx++) if (!on(xx, yy) && [[-1, 0], [1, 0], [0, -1], [0, 1], [-2, 0], [2, 0], [0, -2], [0, 2]].some(([dx, dy]) => on(xx + dx, yy + dy))) c.fillRect(xx + pad, yy + pad, 1, 1);
-  for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) { const ch = PICKUP_ART[yy][xx]; if (ch === '.') continue; let k = +ch; if (blink && ch === '3' && xx > 4 && xx < 10 && yy > 4 && yy < 14) k = 2; c.fillStyle = P[k]; c.fillRect(xx + pad, yy + pad, 1, 1); }
+export function pickupCanvas(P: string[] = Q) {
+  const key = P.join(); let cv = pickupCache.get(key); if (cv) return cv;
+  const h = PICKUP_ART.length, w = PICKUP_ART[0].length, pad = 0; cv = document.createElement('canvas'); cv.width = w + pad * 2; cv.height = h + pad * 2;
+  const c = cv.getContext('2d')!;
+  for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) { const ch = PICKUP_ART[yy][xx]; if (ch === '.') continue; const k = +ch; c.fillStyle = P[k]; c.fillRect(xx + pad, yy + pad, 1, 1); }
   pickupCache.set(key, cv); return cv;
 }
 const fxPick = new Map<string, { t: number; t0: number }>();
@@ -328,9 +326,9 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   for (const pk of v.pickups ?? []) { // 路上氮氣道具：跟車同一套投影
     if (Math.abs(pk.z - camZ) > v.len / 2) continue;
     const p0 = place({ z: pk.z } as ViewCar); if (!p0 || p0.py > GROUND || (p0.clip < H && p0.py > p0.clip + 2) || (t.weather === 'fog' && p0.k > 13)) continue;
-    const img = pickupCanvas(v.frame % 4 < 2, night ? NIGHT.map((c, i) => (i === 0 ? G[0] : c)) : Q), hh = Math.max(4, Math.min(40, Math.round(p0.pw * 0.8))), ww = Math.max(3, Math.round(hh * img.width / img.height));
-    if (hh < 5 && p0.k > 30) continue;
-    const bob = v.frame % 8 < 4 ? 0 : 1;
+    const img = pickupCanvas(night ? NIGHT.map((c, i) => (i === 0 ? G[0] : c)) : Q), hh = Math.max(3, Math.min(19, Math.round(p0.pw * 0.38))), ww = Math.max(3, Math.round(hh * img.width / img.height));
+    if (hh < 4 && p0.k > 30) continue;
+    const bob = 0;
     sprites.push({ k: p0.k + 0.1, draw: () => x.drawImage(img, Math.round(p0.pxc + pk.x * p0.pw - ww / 2), Math.round(p0.py - hh) - bob, ww, hh) });
   }
   for (const c of v.cars) {
@@ -359,11 +357,10 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
       const fl = hitAge(c.id, now, 90 + 90 * (fxHit.get(c.id)?.k ?? 0)); if (fl && Math.floor(fl.a * 4) % 2 === 0) x.drawImage(flashOf(img), sx, sy, dw, dh); // 閃白
       for (const p of sparks) { if (p.id !== c.id) continue; const age = now - p.t0; if (age < 0 || age > p.life) continue; const ts = age / 1000;
         const sc = dw / 48; x.fillStyle = Q[p.c]; x.fillRect(Math.round(sx + dw / 2 + p.ox * dw + p.vx * ts * sc), Math.round(sy + p.oy * dh + (p.vy * ts + 160 * ts * ts) * sc), p.sz, p.sz); }
-      const pa = pickAge(c.id, now); if (pa !== null && (isMe || !c.ai)) { // 吃到道具：8 點星形火花＋外擴光圈
-        const cx0 = sx + dw / 2, cy0 = sy + dh * 0.4, R = dw * (0.25 + pa * 0.75);
-        if (pa < 0.35) { x.fillStyle = Q[0]; const rr = Math.round(dw * (0.2 + pa * 1.2)); for (let i = 0; i < 24; i++) { const a = i / 24 * Math.PI * 2; x.fillRect(Math.round(cx0 + Math.cos(a) * rr), Math.round(cy0 + Math.sin(a) * rr * 0.6), 2, 2); } }
-        for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4 + 0.2, px = Math.round(cx0 + Math.cos(a) * R), py = Math.round(cy0 + Math.sin(a) * R * 0.7), z = pa < 0.6 ? 2 : 1;
-          x.fillStyle = Q[3]; x.fillRect(px - z - 1, py - 1, z * 2 + 3, 3); x.fillRect(px - 1, py - z - 1, 3, z * 2 + 3); x.fillStyle = Q[(i + v.frame) % 2 ? 0 : 1]; x.fillRect(px - z, py, z * 2 + 1, 1); x.fillRect(px, py - z, 1, z * 2 + 1); }
+      const pa = pickAge(c.id, now); if (pa !== null && (isMe || !c.ai)) { // 吃到道具：小小 6 點火花（不發光）
+        const cx0 = sx + dw / 2, cy0 = sy + dh * 0.4, R = dw * (0.2 + pa * 0.4);
+                for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + 0.2, px = Math.round(cx0 + Math.cos(a) * R), py = Math.round(cy0 + Math.sin(a) * R * 0.7), z = pa < 0.5 ? 1 : 0;
+          x.fillStyle = Q[i % 2 ? 0 : 1]; x.fillRect(px - z, py, z * 2 + 1, 1); x.fillRect(px, py - z, 1, z * 2 + 1); }
       }
       if (isMe && c.damage > 50) for (let i = 0; i < 3; i++) { x.fillStyle = Q[i % 2 ? 1 : 2]; x.fillRect(sx + 6 + ((v.frame * 3 + i * 7) % 12), sy - 3 - ((v.frame + i * 3) % 6), 2, 2); }
       if (isMe && Math.abs(c.x) > 1 && c.speed > 5) for (let i = 0; i < 4; i++) { x.fillStyle = Q[1]; x.fillRect(sx + (i % 2 ? dw - 2 : 0) + (v.frame % 3), sy + bh - 2 - (i >> 1) * 2, 2, 1); }
@@ -460,7 +457,7 @@ export function drawMinimap(x: CanvasRenderingContext2D, v: View, mx: number, my
     const [tx, ty] = cands.reduce((b, c) => (cost(c) < cost(b) ? c : b));
     placed.push([tx, ty, tw]); otext(x, t, Math.round(tx), Math.round(ty), col);
   };
-  if (v.frame % 8 < 5) for (const pk of v.pickups ?? []) { const p = at(pk.z); x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 2, my + p[1] - 2, 5, 5); x.fillStyle = Q[0]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 3, 3); } // 路上氮氣道具：閃爍方塊
+  if (v.frame % 8 < 5) for (const pk of v.pickups ?? []) { const p = at(pk.z); x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 3, 3); } // 路上氮氣道具：閃爍小方塊（無光暈）
   const others = order.map((c, i) => ({ c, i })).filter(({ c }) => !(v.me && c.id === v.me.id));
   for (const { c } of others) if (c.ai) { const p = at(c.z); x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 2, 2); }
   const tagged = others.filter(({ c, i }) => !c.ai || i < 3);
