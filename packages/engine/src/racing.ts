@@ -200,7 +200,7 @@ export interface RaceCar {
   /** v15 碰撞事件（給畫面特效）：evT＝最後一次被撞的 tick、evK＝種類 1 撞路邊 2 追撞前車 3 被追撞 4 側擦、evS＝力道（扣裝甲前的傷害）、evSide＝-1 左 / 0 前後 / 1 右 */
   evT?: number; evK?: number; evS?: number; evSide?: number;
   /** v16 翻車剩餘 tick（0＝沒在翻） */
-  flip?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; hit: number; hits: number;
+  flip?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number;
 }
 /** 完美度（%）＝ 100 − damage */
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
@@ -216,7 +216,7 @@ export function fillField(humans: Entrant[], slots = RACE_SLOTS): Entrant[] {
   return [...ai, ...humans].slice(0, slots);
 }
 /** v19：電腦車是「要超的車流」：極速／加速調低（原本 78／17），原廠車開得好在簡單賽道能贏、難的能進前 3；全滿車輾壓。 */
-export const AI_TOP = 62, AI_ACCEL = 13;
+export const AI_TOP = 50, AI_ACCEL = 13; // v22：電腦車再弱（62→50）：模擬中原廠車約 3/4 場前 3、全滿全勝
 export function createRace(seed: number, trackId: string, entrants: Entrant[], difficulty = 1): RaceState {
   const t = trackById(trackId); if (!t) throw new Error('bad track');
   const segs = buildTrack(t), len = trackLength(segs), rng = createRng(seed);
@@ -250,19 +250,19 @@ export function setRaceInput(s: RaceState, id: string, inp: Partial<RaceInput>) 
 function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
   const X = SPEED_X, near = segAt(s, c.z + 40 * X), far = segAt(s, c.z + 90 * X);
   const curve = Math.abs(near.curve) > Math.abs(far.curve) ? near.curve : far.curve;
-  let target = c.aiLane * 0.8 + Math.max(-0.6, Math.min(0.6, curve * 0.15)); // 走彎內側
-  let blocked = false, follow = false;
+  // v22：AI 當「車流」——固定走自己的車道，不切彎內側、不換線超車（以前每 tick 依前車換目標，4 倍速下偵測距離變長 → 一直左右切）
+  let target = c.aiLane * 0.8, blocked = false, follow = false;
+  let ahead: RaceCar | null = null;
   for (const o of s.cars) {
     if (o === c || o.finishedTick !== null) continue;
     const dz = o.z - c.z;
-    if (dz > 0 && dz < 28 * X && Math.abs(o.x - c.x) < COLLIDE_DX + 0.08 && o.speed < c.speed + 2 * X) { // 前面有慢車：往空的那邊超
-      blocked = true; const left = o.x - 0.65, right = o.x + 0.65;
-      target = Math.abs(left) < Math.abs(right) ? (left > -0.95 ? left : right) : (right < 0.95 ? right : left);
-      if (dz < 9 * X && c.speed > o.speed - X) follow = true; // 太近：先收油跟車，別追撞
-    }
+    if (dz > 0 && dz < 12 * X && Math.abs(o.x - c.x) < COLLIDE_DX + 0.08 && (!ahead || dz < ahead.z - c.z)) ahead = o;
   }
-  // v19：不擋車 —— 後面 25m 內有更快的車逼近時，維持目前位置（不切進對方的線），讓對方好超
-  for (const o of s.cars) { if (o === c || o.finishedTick !== null) continue; const dz = c.z - o.z; if (dz > 0 && dz < 25 * X && o.speed > c.speed + 3 * X && Math.abs(target - o.x) < Math.abs(c.x - o.x)) { target = c.x; break; } }
+  if (ahead) { blocked = true; if (c.speed > ahead.speed - X) follow = true; } // 前面同車道有車：收油跟車，不切出去
+  // 讓車：後面有明顯更快的車在同一條線上逼近 → 選一邊（離對方遠的那邊）靠過去，至少維持 3 秒，不來回換
+  if (!c.aiYieldT) for (const o of s.cars) { if (o === c || o.finishedTick !== null) continue; const dz = c.z - o.z;
+    if (dz > 0 && dz < 30 * X && o.speed > c.speed + 3 * X && Math.abs(o.x - c.x) < COLLIDE_DX + 0.15) { c.aiYield = o.x > c.x ? -1 : 1; if (Math.abs(c.x + c.aiYield * 0.55) > 0.9) c.aiYield = -c.aiYield; c.aiYieldT = 60; break; } }
+  if (c.aiYieldT) { c.aiYieldT--; target = Math.max(-0.85, Math.min(0.85, c.aiLane * 0.8 + (c.aiYield ?? 0) * 0.55)); }
   if (c.aiRecover > 0) { c.aiRecover--; target = c.aiLane * -0.6; }
   // v14：目標線平滑（換線、彎道切線慢慢移過去，不會一下左一下右）
   c.aiT = (c.aiT ?? c.x) + (target - (c.aiT ?? c.x)) * 0.08;
@@ -330,9 +330,11 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
     if (c.speed > vmax) c.speed -= (c.speed - vmax) * 2 * dt;
     c.speed = Math.max(0, c.speed);
     const sp = c.speed / (70 * X);
-    const steer = c.ai && inp.steer !== undefined ? inp.steer : (inp.left ? -1 : 0) + (inp.right ? 1 : 0);
-    c.x += steer * STEER_RATE * Math.min(1, sp + 0.15) * dt;
-    c.x -= seg.curve * sp * sp * slideFactor(grip) * CORNER_PULL * dt;
+    const pull = seg.curve * sp * sp * slideFactor(grip) * CORNER_PULL, auth = STEER_RATE * Math.min(1, sp + 0.15);
+    // v22：AI 在每個子步依目前路段先抵銷離心外甩（前饋），比例方向盤只修小偏差 → 過彎穩定、不左右擺（總轉向仍限 ±1）
+    const steer = c.ai && inp.steer !== undefined ? Math.max(-1, Math.min(1, inp.steer + pull / auth)) : (inp.left ? -1 : 0) + (inp.right ? 1 : 0);
+    c.x += steer * auth * dt;
+    c.x -= pull * dt;
     if (Math.abs(c.x) > 1.55) { // 撞上路邊護欄
       if (c.hit <= 0) { hurt(c, 6 * (0.3 + sp), 'S', s.tick, HIT_WALL, Math.sign(c.x)); c.speed *= 0.35; c.hit = 16; }
       c.x = Math.sign(c.x) * 1.15;
