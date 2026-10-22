@@ -5,6 +5,10 @@
  */
 export const LODS = [48, 32, 20, 12, 8] as const;
 export const DESIGN_W = 48, DESIGN_H = 30;
+/** 排氣管位置（設計座標 x，0..DESIGN_W）；排氣口在 y=27 */
+export const EXHAUSTS: Record<string, number[]> = { falcon: [24], f1: [24], rhino: [11, 37], muscle: [9, 39], rally: [35], drift: [36], lmp: [20, 28] };
+export const exhaustsOf = (model: string) => EXHAUSTS[model] ?? [21, 27];
+export const EXHAUST_Y = 27;
 /** 玩家車專用尺寸（lod = -1）：約畫面 1/4 寬，跟 TG2 比例接近；在這個寬度直接點陣化，不放大。 */
 export const PLAYER_W = 52;
 const lodW = (lod: number) => lod < 0 ? PLAYER_W : LODS[lod];
@@ -239,8 +243,7 @@ export function carPixels(model: string, livery: number, lod: number, look: CarL
   if (look.nitro && lod <= 2) { // 排氣火焰：又長又寬、4 格閃動、尖端參差，外圈描最暗色
     const f = (look.frame ?? 0) & 3, fl = [0, 3, 1, 4][f];
     const len = Math.round((lod < 0 ? 30 : lod === 0 ? 24 : lod === 1 ? 15 : 8) + fl * k * 2.5), fw = Math.max(2, Math.round(7 * k));
-    const ex: Record<string, number[]> = { falcon: [24], f1: [24], rhino: [11, 37], muscle: [9, 39], rally: [35], drift: [36], lmp: [20, 28] };
-    const xs = (ex[model] ?? [21, 27]).map((e) => X(e));
+    const xs = exhaustsOf(model).map((e) => X(e));
     const top = Y(27), fire: [number, number, number][] = [];
     xs.forEach((cx0, ei) => { for (let j = 0; j < len; j++) { const t = j / len, half = Math.max(0.5, (fw / 2) * (1 - t * 0.85));
       for (let d = -Math.ceil(half); d <= Math.ceil(half); d++) { if (Math.abs(d) > half) continue;

@@ -1,6 +1,6 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
 import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, type Track } from '@chick/engine';
-import { carBodyH, carPixels, LODS, PLAYER_W, type CarLook } from './race-cars';
+import { carBodyH, carPixels, LODS, PLAYER_W, exhaustsOf, DESIGN_W, EXHAUST_Y, type CarLook } from './race-cars';
 import { pickupDims } from './race-pickup';
 import { frontSprite, ensureComposite, S as PET_S } from './sprites';
 
@@ -390,7 +390,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
         x.save(); x.translate(Math.round(sx + dw / 2 + dir * fp * dw * 0.35), Math.round(sy + dh / 2 - lift)); x.rotate(Math.round(ang / (Math.PI / 8)) * (Math.PI / 8)); x.scale(1, squash);
         x.drawImage(img, -dw / 2, -dh / 2, dw, dh); if (fp < 0.08) x.drawImage(flashOf(img), -dw / 2, -dh / 2, dw, dh); x.restore();
         x.fillStyle = Q[3]; const shw = Math.round(dw * (0.5 + 0.5 * (1 - lift / (dh * 1.6)))); x.fillRect(Math.round(sx + dw / 2 - shw / 2 + dir * fp * dw * 0.35), sy + dh - 2, shw, 2); // 地上影子
-      } else { x.drawImage(img, sx, sy, dw, dh); if (c.pet && !c.ai) drawPetRider(x, c.pet, petMood(c, now), sx + dw / 2, sy + Math.round(bh * 0.4 * scale), v.frame, c.speed > 5, scale, night ? PET_NIGHT : Q); }
+      } else { const fire = isMe && c.nitroT > 0 && !c.fin; if (fire) drawFlameBack(x, c.car, sx, sy, dw, bh, v.frame); x.drawImage(img, sx, sy, dw, dh); if (fire) drawBigFlame(x, c.car, sx, sy, dw, v.frame); if (c.pet && !c.ai) drawPetRider(x, c.pet, petMood(c, now), sx + dw / 2, sy + Math.round(bh * 0.4 * scale), v.frame, c.speed > 5, scale, night ? PET_NIGHT : Q); }
       const fl = hitAge(c.id, now, 90 + 90 * (fxHit.get(c.id)?.k ?? 0)); if (fl && Math.floor(fl.a * 4) % 2 === 0) x.drawImage(flashOf(img), sx, sy, dw, dh); // 閃白
       for (const p of sparks) { if (p.id !== c.id) continue; const age = now - p.t0; if (age < 0 || age > p.life) continue; const ts = age / 1000;
         const sc = dw / 48; x.fillStyle = Q[p.c]; x.fillRect(Math.round(sx + dw / 2 + p.ox * dw + p.vx * ts * sc), Math.round(sy + p.oy * dh + (p.vy * ts + 160 * ts * ts) * sc), p.sz, p.sz); }
@@ -416,8 +416,62 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   Q = G;
 }
 /** 氮氣：不出字，用畫面本身表現——下半部微微拉寬（FOV 感）、從消失點往外的速度線、左右邊緣一閃一閃的亮色描邊。 */
+// ---------------- v25 氮氣特效：大火焰＋放射狀動態模糊（4 綠、像素風） ----------------
+/** 強度（0 關…1 預設…1.5 強）：flame＝火焰長度倍率、blur＝邊緣模糊密度倍率 */
+export const NITRO_FX = { flame: 1, blur: 1 };
+const n1 = (i: number) => hash(i * 7.31 + 0.17);
+/** 每根排氣管往後（朝鏡頭＝往下）噴出扇形大火：中心最亮、外圈最暗描邊，20Hz 閃動、舌尖參差。L≈車寬 0.65（兩側合起來比車還寬） */
+function drawBigFlame(x: CanvasRenderingContext2D, model: string, sx: number, sy: number, dw: number, frame: number) {
+  // 畫在車身上面：從排氣口往後（朝鏡頭＝往下）噴，越往下越寬，畫面底下切掉；舌頭長度每幀變（20Hz 閃動）
+  const k = dw / DESIGN_W, L = dw * 0.7 * NITRO_FX.flame; if (L < 4) return;
+  const ys = sy + Math.round(EXHAUST_Y * k) - 2, xs = exhaustsOf(model).map((e) => sx + e * k), cols = Math.ceil(L * 1.3);
+  const y1 = Math.min(H, Math.ceil(ys + L));
+  for (const ex of xs) for (let px = Math.floor(ex - cols); px <= ex + cols; px++) {
+    const u = (px - ex) / cols, len = L * (1 - u * u * 0.75) * (0.7 + 0.3 * n1(Math.floor(px / 2) * 13 + frame * 7 + ex)); // 中間最長、兩側短
+    for (let py = ys; py < y1; py++) {
+      const d = py - ys, hw = (d + 2) * 1.5; if (Math.abs(px - ex) > hw || d > len) continue; // 往下張開的扇形
+      const s = Math.max(d / len, Math.abs(px - ex) / hw);
+      x.fillStyle = Q[s < 0.35 ? 0 : s < 0.6 ? 1 : s < 0.85 ? 2 : 3]; x.fillRect(px, py, 1, 1);
+    }
+  }
+}
+/** 車身後面的火球：以排氣口為中心、比車寬的橢圓，邊緣參差閃動；車身蓋在上面 → 火舌從車尾兩側與上方竄出 */
+function drawFlameBack(x: CanvasRenderingContext2D, model: string, sx: number, sy: number, dw: number, bh: number, frame: number) {
+  const k = dw / DESIGN_W, f = NITRO_FX.flame; if (dw * f < 8) return;
+  const xs = exhaustsOf(model).map((e) => sx + e * k), cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = sy + Math.round(EXHAUST_Y * k);
+  const rx = dw * (0.5 + 0.28 * f) + (xs.length > 1 ? (Math.max(...xs) - Math.min(...xs)) / 2 : 0), ry = bh * 0.75 * f, bins = 16;
+  const tl: number[] = []; for (let b = 0; b < bins; b++) tl.push(0.68 + 0.32 * n1(b * 17 + frame * 3));
+  for (let py = Math.max(0, Math.floor(cy - ry)); py < Math.min(H, cy + ry * 0.4); py++) for (let px = Math.floor(cx - rx); px <= cx + rx; px++) {
+    const dx = (px - cx) / rx, dy = (py - cy) / ry, a = Math.atan2(dy, dx), bi = Math.floor((a + Math.PI) / (2 * Math.PI) * bins) % bins;
+    const s = Math.hypot(dx, dy) / tl[bi]; if (s >= 1) continue;
+    const ci = s < 0.62 ? 0 : s < 0.84 ? 1 : 2; if (((px + py + frame) & 1) && s > 0.62 && s < 0.7) continue; x.fillStyle = Q[ci]; x.fillRect(px, py, 1, 1);
+  }
+}
+/** Bayer 4×4 有序抖動遮罩：中間（消失點附近）完全透明，越往邊緣越密 → 疊上放大的畫面＝放射狀拖影，但仍只有 4 種綠 */
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+const maskCache = new Map<string, HTMLCanvasElement>();
+function blurMask(dens: number, cy: number) {
+  const key = `${dens.toFixed(2)}|${cy}`; let m = maskCache.get(key); if (m) return m;
+  m = document.createElement('canvas'); m.width = W; m.height = H; const g = m.getContext('2d')!; g.fillStyle = '#000';
+  for (let y = 0; y < H; y++) for (let xx = 0; xx < W; xx++) { const r = Math.hypot((xx - W / 2) / (W / 2), (y - cy) / (H * 0.62)); const st = Math.min(1, Math.max(0, (r - 0.38) / 0.62)) ** 1.4 * dens; if ((BAYER[(y & 3) * 4 + (xx & 3)] + 0.5) / 16 < st) g.fillRect(xx, y, 1, 1); }
+  maskCache.set(key, m); return m;
+}
+let zoomCv: HTMLCanvasElement | null = null;
+function drawRadialBlur(x: CanvasRenderingContext2D, frame: number, cy: number) {
+  if (NITRO_FX.blur <= 0 || typeof document === 'undefined') return;
+  if (!zoomCv) { zoomCv = document.createElement('canvas'); zoomCv.width = W; zoomCv.height = H; }
+  const z = zoomCv.getContext('2d')!; z.imageSmoothingEnabled = false;
+  for (const [s0, d] of [[1.05, 0.55], [1.12, 0.4]] as const) { // 兩層：小放大較密、大放大較疏
+    const s = s0 + (frame & 1) * 0.015, cx = W / 2;
+    z.globalCompositeOperation = 'copy'; z.drawImage(x.canvas, 0, 0, W, H, cx - cx * s, cy - cy * s, W * s, H * s);
+    z.globalCompositeOperation = 'destination-in'; z.drawImage(blurMask(Math.min(1, d * NITRO_FX.blur), Math.round(cy)), 0, 0);
+    x.drawImage(zoomCv, 0, 0);
+  }
+  z.globalCompositeOperation = 'source-over';
+}
 function drawNitroFx(x: CanvasRenderingContext2D, v: View, now: number) {
   role('fx');
+  drawRadialBlur(x, v.frame, HORIZON + 6);
   const t = now / 1000, pulse = 0.5 + 0.5 * Math.sin(t * 18), cx = W / 2, cy = HORIZON + 6;
   // 1) 拉伸：地平線以下左右各外擴 3~5%
   const st = 0.03 + 0.02 * pulse, sy = HORIZON, sh = H - HORIZON;
