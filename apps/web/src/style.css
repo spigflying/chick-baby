@@ -238,3 +238,13 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .rs-parts li{display:flex;gap:8px;align-items:center;border-bottom:1px dotted #bba;padding:4px 0;font-size:13px}
 .rs-parts canvas{image-rendering:pixelated;width:48px;height:48px;flex:none;border:1px solid #306230}
 .rs-parts.stock li{opacity:.65}
+.rs-speeds[data-sf] .rs-unit{display:none}
+.rs-speeds[data-sf] .rs-num.main canvas{height:auto;width:min(100%,300px)}
+.rs-speeds[data-sf] .rs-num.sub canvas{height:auto;width:min(100%,140px)}
+.rs-speeds[data-sf=C] .rs-num.main canvas{width:min(100%,220px)}
+.rs-speeds[data-sf=C] .rs-num.sub canvas{width:min(100%,100px)}
+.rs-speeds[data-sf] .rs-num.main{flex-basis:100%}
+.rs-speeds[data-sf] .rs-num.main canvas{width:300px;max-width:100%}
+.rs-speeds[data-sf] .rs-num.sub canvas{width:150px}
+.rs-speeds[data-sf=C] .rs-num.main canvas{width:240px}
+.rs-speeds[data-sf=C] .rs-num.sub canvas{width:130px}
