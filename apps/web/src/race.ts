@@ -8,6 +8,20 @@ import { SnapClock, bracket } from './race-interp';
 
 const segAt = (id: string, z: number) => { const s = trackSegs(id); return s[((Math.floor(z / SEG_LEN) % s.length) + s.length) % s.length].curve; };
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+let hitAc: AudioContext | null = null;
+/** v15 撞擊音：短促的雜訊＋低頻方波，力道越大越響越長。靜音（localStorage chick.mute = '1'）或瀏覽器擋住就略過。 */
+function hitSound(strength: number) {
+  try {
+    if (localStorage.getItem('chick.mute') === '1') return;
+    hitAc = hitAc ?? new AudioContext(); const ac = hitAc, t = ac.currentTime, k = Math.max(0.3, Math.min(1, strength / 8)), dur = 0.08 + 0.14 * k;
+    const buf = ac.createBuffer(1, Math.ceil(ac.sampleRate * dur), ac.sampleRate), d = buf.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length) ** 2;
+    const n = ac.createBufferSource(), g = ac.createGain(), o = ac.createOscillator(), og = ac.createGain();
+    n.buffer = buf; g.gain.value = 0.05 + 0.07 * k; n.connect(g).connect(ac.destination); n.start(t);
+    o.type = 'square'; o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(55, t + dur);
+    og.gain.setValueAtTime(0.04 * k, t); og.gain.exponentialRampToValueAtTime(0.0001, t + dur); o.connect(og).connect(ac.destination); o.start(t); o.stop(t + dur + 0.02);
+  } catch { /* ignore */ }
+}
 const money = (n: number) => '◎' + Math.round(n).toLocaleString('en-US');
 /** 畫布字型沒有 ◎，畫面裡用「N 金幣」 */
 const coinTxt = (n: number) => `${Math.round(n)} 金幣`;
@@ -173,12 +187,13 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   sendTimer = window.setInterval(() => pushInput(true), 250);
   // ---------- 繪圖迴圈 ----------
   const clock = new SnapClock(), T0 = performance.now();
+  let lastHitT = -1; // 第一次看到就只記下，不補放舊的撞擊音
   let acc = 0, lastNow = T0, prevAttract: Map<string, [number, number]> | null = null;
   function view(): ViewCar[] | null {
     if (!race || race.snaps.length === 0) return null;
     const [a, b, f] = bracket(race.snaps, clock.renderTick(performance.now()));
     return race.cars.map((c) => { const p = a.cars.get(c.id), q = b.cars.get(c.id) ?? p; if (!p || !q) return null;
-      return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[1] + (q[1] - p[1]) * f, x: p[2] + (q[2] - p[2]) * f, speed: p[3] + (q[3] - p[3]) * f, damage: q[4], nitro: q[5], nitroT: q[6], fin: q[7], hit: q[8], brake: c.id === me.user.id ? keys.brake : q[3] < p[3] - 0.5 } as ViewCar; }).filter(Boolean) as ViewCar[];
+      return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, z: p[1] + (q[1] - p[1]) * f, x: p[2] + (q[2] - p[2]) * f, speed: p[3] + (q[3] - p[3]) * f, damage: q[4], nitro: q[5], nitroT: q[6], fin: q[7], hit: q[8], evT: q[9] ?? 0, evK: q[10] ?? 0, evS: q[11] ?? 0, evSide: q[12] ?? 0, brake: c.id === me.user.id ? keys.brake : q[3] < p[3] - 0.5 } as ViewCar; }).filter(Boolean) as ViewCar[];
   }
   // 每個 rAF 都重畫（60fps）；位置依時間內插。動畫用的 frame 仍是 20Hz 計數（閃爍等節奏不變）。
   function loop() {
@@ -193,6 +208,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       const fk = (c: ViewCar) => c.fin ?? 1e12; const ranked = [...cars].sort((p, q) => fk(p) - fk(q) || q.z - p.z);
       if (import.meta.env.DEV && meCar) (window as any).__race = { x: meCar.x, z: meCar.z, curve: segAt(trackById(race.track)!.id, meCar.z + 40) };
       const flash = meCar?.fin != null ? 'FINISH!' : meCar && meCar.hit > 0 ? 'CRASH!' : meCar && meCar.nitroT > 0 ? 'NITRO!' : meCar && Math.abs(meCar.x) > 1 ? 'OFF ROAD' : undefined;
+      if (meCar && (meCar.evT ?? 0) > lastHitT) { if (lastHitT >= 0) hitSound(meCar.evS ?? 2); lastHitT = meCar.evT!; }
       const stt = prof ? carStats(prof.parts, prof.car) : null;
       drawRace(x, { gears: [4, 5, 5, 6][prof?.parts?.gearbox ?? 0], top: stt?.topSpeed, track: t, me: meCar, cars, tick: last.tick, countdown: last.countdown, laps: race.laps, len: race.len, rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash });
       if (mode === 'results') drawResultsOverlay(); return;

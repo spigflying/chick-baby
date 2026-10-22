@@ -166,7 +166,9 @@ export interface RaceCar {
   id: string; name: string; ai: boolean; car: string; color: number;
   z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; lap: number;
   finishedTick: number | null; stats: CarStats; input: RaceInput; prevNitro: boolean; nitroQ: boolean;
-  aiLane: number; aiT?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; hit: number; hits: number;
+  aiLane: number; aiT?: number;
+  /** v15 碰撞事件（給畫面特效）：evT＝最後一次被撞的 tick、evK＝種類 1 撞路邊 2 追撞前車 3 被追撞 4 側擦、evS＝力道（扣裝甲前的傷害）、evSide＝-1 左 / 0 前後 / 1 右 */
+  evT?: number; evK?: number; evS?: number; evSide?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; hit: number; hits: number;
 }
 /** 完美度（%）＝ 100 − damage */
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
@@ -251,7 +253,9 @@ export const CORNER_PULL = 0.5 * STEER_RATE / 1.6;
 export const slideFactor = (grip: number) => Math.min(1.4, 0.35 * Math.pow(1.4 / Math.max(0.3, grip), 2.5));
 export function gripOf(c: RaceCar, w: Weather) { return w === 'rain' ? c.stats.wetGrip : w === 'snow' ? c.stats.wetGrip * 0.85 : w === 'fog' ? c.stats.grip * 0.95 : c.stats.grip; }
 /** 碰撞：依部位扣完美度（裝甲減免）。每次撞擊都算。 */
-function hurt(c: RaceCar, amount: number, zone: 'F' | 'S' | 'R') {
+export const HIT_WALL = 1, HIT_REAR_END = 2, HIT_REARED = 3, HIT_SWIPE = 4;
+function hurt(c: RaceCar, amount: number, zone: 'F' | 'S' | 'R', tick = 0, kind = 0, side = 0) {
+  if (kind) { c.evT = tick; c.evK = kind; c.evS = +amount.toFixed(2); c.evSide = side; }
   c.damage = Math.min(100, c.damage + amount * (1 - c.stats.armor[zone])); c.hits++;
   if (c.ai) c.aiRecover = amount > 2 ? 20 : 8;
 }
@@ -280,7 +284,7 @@ export function stepRace(s: RaceState) {
     c.x += steer * STEER_RATE * Math.min(1, sp + 0.15) * dt;
     c.x -= seg.curve * sp * sp * slideFactor(grip) * CORNER_PULL * dt;
     if (Math.abs(c.x) > 1.55) { // 撞上路邊物
-      if (c.hit <= 0) { hurt(c, 6 * (0.3 + sp), 'S'); c.speed *= 0.35; c.hit = 16; }
+      if (c.hit <= 0) { hurt(c, 6 * (0.3 + sp), 'S', s.tick, HIT_WALL, Math.sign(c.x)); c.speed *= 0.35; c.hit = 16; }
       c.x = Math.sign(c.x) * 1.15;
     }
     if (c.hit > 0) c.hit--;
@@ -297,11 +301,11 @@ export function stepRace(s: RaceState) {
       const rel = (a.speed - b.speed) / 30;
       if (a.speed - b.speed < 1.5) { a.speed = b.speed; continue; } // 輕輕貼上：不算撞
       a.speed = b.speed * 0.85; b.speed += 2;
-      hurt(a, 3 * (0.3 + rel), 'F'); hurt(b, 2 * (0.3 + rel), 'R');
+      hurt(a, 3 * (0.3 + rel), 'F', s.tick, HIT_REAR_END, 0); hurt(b, 2 * (0.3 + rel), 'R', s.tick, HIT_REARED, 0);
       a.hit = Math.max(a.hit, 8); b.hit = Math.max(b.hit, 6);
       const push = a.x < b.x ? -0.12 : 0.12; a.x += push; b.x -= push;
     } else if (dz <= 1.5 && a.hit <= 0 && b.hit <= 0) { // 並排擦撞
-      hurt(a, 2.5, 'S'); hurt(b, 2.5, 'S'); a.hit = b.hit = 8; a.speed *= 0.92; b.speed *= 0.92;
+      hurt(a, 2.5, 'S', s.tick, HIT_SWIPE, a.x < b.x ? 1 : -1); hurt(b, 2.5, 'S', s.tick, HIT_SWIPE, a.x < b.x ? -1 : 1); a.hit = b.hit = 8; a.speed *= 0.92; b.speed *= 0.92;
       const push = a.x < b.x ? -0.2 : 0.2; a.x += push; b.x -= push;
     }
   }
@@ -312,6 +316,8 @@ export function raceRanking(s: RaceState): RaceCar[] {
   return [...s.cars].sort((a, b) => (a.finishedTick ?? Infinity) - (b.finishedTick ?? Infinity) || b.z - a.z);
 }
 export const raceTimeMs = (s: RaceState, c: RaceCar) => c.finishedTick === null ? null : Math.round(((c.finishedTick - RACE_TICK_RATE * 3) * 1000) / RACE_TICK_RATE);
+/** 快照每台車的陣列（伺服器／預覽共用）：[id, z, x, speed, damage, nitro, nitroT, finishedTick, hit, evT, evK, evS, evSide] */
+export const snapCar = (c: RaceCar) => [c.id, +c.z.toFixed(2), +c.x.toFixed(3), +c.speed.toFixed(2), +c.damage.toFixed(1), c.nitro, c.nitroT, c.finishedTick, c.hit, c.evT ?? 0, c.evK ?? 0, c.evS ?? 0, c.evSide ?? 0];
 export const kmh = (v: number) => Math.round(v * 3.6);
 /** 賽季：一個日曆月（台北時間），例如 '2026-10'。 */
 export function seasonOf(ms: number) { const d = new Date(ms + 8 * 3600_000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; }
