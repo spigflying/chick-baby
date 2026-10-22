@@ -32,6 +32,8 @@ export function carCanvas(model: string, color: number, opts: CarLook = {}, lod 
   (c as any).bodyH = carBodyH(lod); // 車身高度（不含火焰），用來對齊地面
   carCache.set(key, c); return c;
 }
+/** v14：挑不小於目標寬度的最小 LOD（再縮到目標寬），比 48 大就用 48 放大。 */
+export function lodFor(targetW: number) { for (let i = LODS.length - 1; i >= 0; i--) if (LODS[i] >= targetW - 0.5) return i; return 0; }
 /** 依照畫面上應有的寬度挑 LOD：挑「不超過目標寬度」的最大一張，原尺寸畫，不縮放。 */
 export function pickLod(targetW: number) { for (let i = 0; i < LODS.length; i++) if (LODS[i] <= targetW + 0.5) return i; return LODS.length - 1; }
 /** 車寬（以半個路寬為 1）：玩家在 PLAYER_DZ 時剛好 24px，所以同深度的車都一樣大。 */
@@ -262,20 +264,27 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     let k = 0; while (k + 1 < pts.length && pts[k + 1].d <= dz) k++;
     const a = pts[k]; if (!a || !pts[k + 1]) return null;
     const u = dz - a.d, wx = a.wx + a.h * u + a.c * u * u / 2, wy = elevAt(el, camZ + dz), p = proj(dz, wx, wy);
-    return { k: k + 1, py: p.py, pxc: p.pxc, pw: ROAD_W * p.scale * (W / 2), clip: pts[k + 1].clip };
+    return { k: k + 1, py: p.py, pxc: p.pxc, pw: ROAD_W * p.scale * (W / 2), clip: a.clip };
   };
+  // v14：近處的車（含自己）真實深度會投影到畫面外，畫的時候抬到底線 GROUND；橫向位置也要用「那一列」的路寬，
+  // 否則車左右移動比路面快 ~1.8 倍（這正是轉向看起來很衝的原因之一），並排的電腦車也會被甩到畫面邊。
+  const GROUND = H - 6;
+  const rowAt = (y: number) => { for (let k = 1; k < pts.length; k++) { const a = pts[k - 1], b = pts[k]; if (b.y <= y && a.y >= y && a.y > b.y) { const f = (y - b.y) / (a.y - b.y); return { x: b.x + (a.x - b.x) * f, w: b.w + (a.w - b.w) * f }; } } return null; };
+  const gw = rowAt(GROUND)?.w ?? playerPw(); // 底線那一列的半路寬：玩家車寬 PLAYER_W 對應這個路寬
   for (const c of v.cars) {
-    const isMe = !!v.me && c.id === v.me.id, p = place(c); if (!p) continue;
-    if (!isMe && p.py > p.clip + 2) continue; // 被坡頂擋住
+    const isMe = !!v.me && c.id === v.me.id, p0 = place(c); if (!p0) continue;
+    const row = p0.py > GROUND ? rowAt(GROUND) : null, p = row ? { ...p0, pxc: row.x, lat: row.w } : { ...p0, lat: p0.pw };
+    if (!isMe && p.clip < H && p.py > p.clip + 2) continue; // 被坡頂擋住
     if (!isMe && t.weather === 'fog' && p.k > 13) continue; // 霧裡看不到遠方的車
-    const target = PLAYER_W * p.pw / playerPw(); if (!isMe && target < 5) continue; const lod = isMe ? -1 : pickLod(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
+    const target = PLAYER_W * p.lat / gw; /* v14：車寬跟畫在那一列的路寬成正比 */ if (!isMe && target < 5) continue; const lod = isMe ? -1 : lodFor(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
     const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 60 && v.frame % 20 < 2), frame: v.frame }, lod);
     const bh = (img as any).bodyH as number;
     const bob = isMe && c.speed > 5 && v.frame % 4 < 2 ? 1 : 0, shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
     // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
-    const scale = !isMe && target > 50 ? target / 48 : 1;
+    // v14：AI 與玩家同比例 —— 挑「不小於目標寬度」的 LOD 再縮到剛好目標寬（以前挑較小的 LOD 不放大，遠一點就小一截）
+    const scale = isMe ? 1 : target / LODS[lod];
     const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
-    const sx = Math.round(p.pxc + c.x * p.pw - dw / 2 + shake), sy = (isMe ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.round(p.py - bh * scale)) - bob;
+    const sx = Math.round(p.pxc + c.x * p.lat - dw / 2 + shake), sy = (isMe ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.min(H - 6 - Math.round(bh * scale), Math.round(p.py - bh * scale))) - bob; // v14：和玩家並排的車也貼同一條底線，不會掉出畫面
     sprites.push({ k: p.k + (isMe ? -0.5 : 0), draw: () => {
       x.drawImage(img, sx, sy, dw, dh);
       if (isMe && c.damage > 50) for (let i = 0; i < 3; i++) { x.fillStyle = Q[i % 2 ? 1 : 2]; x.fillRect(sx + 6 + ((v.frame * 3 + i * 7) % 12), sy - 3 - ((v.frame + i * 3) % 6), 2, 2); }

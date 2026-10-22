@@ -161,12 +161,12 @@ export function settleCup(cupIn: Cup, unlocked: number, trackId: string, ranking
 
 
 // ---------------- 模擬 ----------------
-export interface RaceInput { gas: boolean; brake: boolean; left: boolean; right: boolean; nitro: boolean }
+export interface RaceInput { gas: boolean; brake: boolean; left: boolean; right: boolean; nitro: boolean; /** 只有 AI 用：-1…1 的類比轉向 */ steer?: number }
 export interface RaceCar {
   id: string; name: string; ai: boolean; car: string; color: number;
   z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; lap: number;
   finishedTick: number | null; stats: CarStats; input: RaceInput; prevNitro: boolean; nitroQ: boolean;
-  aiLane: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; hit: number; hits: number;
+  aiLane: number; aiT?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; hit: number; hits: number;
 }
 /** 完美度（%）＝ 100 − damage */
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
@@ -226,21 +226,28 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
     }
   }
   if (c.aiRecover > 0) { c.aiRecover--; target = c.aiLane * -0.6; }
-  const dx = target - c.x;
+  // v14：目標線平滑（換線、彎道切線慢慢移過去，不會一下左一下右）
+  c.aiT = (c.aiT ?? c.x) + (target - (c.aiT ?? c.x)) * 0.08;
+  const dx = c.aiT - c.x;
   // 安全彎速：讓離心滑出量不超過方向盤修正能力的 75%（抓地差的 AI 也得在彎前收油，公平）
-  const slideSafe = Math.abs(curve) < 0.3 ? Infinity : 70 * Math.sqrt(1.2 / (Math.abs(curve) * slideFactor(grip) * CORNER_PULL));
+  const slideSafe = Math.abs(curve) < 0.3 ? Infinity : 70 * Math.sqrt(STEER_RATE * 0.75 / (Math.abs(curve) * slideFactor(grip) * CORNER_PULL));
   const safe = Math.min(slideSafe, c.stats.topSpeed * Math.min(1, 1.05 - Math.max(0, Math.abs(curve) - 2) * 0.09 / grip));
   const tooFast = c.speed > safe;
   const straight = Math.abs(near.curve) < 1.2 && Math.abs(far.curve) < 1.8;
   const nitro = c.nitro > 0 && c.nitroT === 0 && straight && c.z >= c.aiNitroAt[NITRO_PER_RACE - c.nitro] && !blocked;
-  return { gas: !tooFast && !follow && c.aiRecover < 14, brake: tooFast && c.speed > safe + 4, left: dx < -0.06, right: dx > 0.06, nitro };
+  // v14：AI 用比例式方向盤（偏多少轉多少，最大仍是 STEER_RATE），不再「全左／全右」來回修 → 不會左右抖
+  const steerAmt = Math.max(-1, Math.min(1, dx / 0.18));
+  return { gas: !tooFast && !follow && c.aiRecover < 14, brake: tooFast && c.speed > safe + 4, left: steerAmt < 0, right: steerAmt > 0, nitro, steer: steerAmt };
 }
 /**
  * 過彎離心力（v12）：每秒往彎外滑 = 彎度 × (速度/70)² × slideFactor(抓地)。
  * slideFactor 隨抓地力 2.5 次方下降：原廠胎在快彎明顯被甩出去，3 階胎幾乎貼著線走（雨天用雨胎抓地）。
  */
 /** v13（curves）：過彎外甩整體減半（所有胎、乾濕地一律 ×0.5，相對差異不變）。 */
-export const CORNER_PULL = 0.5;
+/** v14（steer）：固定速率轉向（每秒最多橫移幾個半路寬），從 1.6 降到 0.75：點一下只動一點、按住穩定平移。AI 也用同一個值。 */
+export const STEER_RATE = 0.75;
+/** 外甩跟著轉向一起縮放（v13 的 0.5 × 0.75/1.6），過彎守線難度與 v13 相同，只是整體橫向動作變慢。 */
+export const CORNER_PULL = 0.5 * STEER_RATE / 1.6;
 export const slideFactor = (grip: number) => Math.min(1.4, 0.35 * Math.pow(1.4 / Math.max(0.3, grip), 2.5));
 export function gripOf(c: RaceCar, w: Weather) { return w === 'rain' ? c.stats.wetGrip : w === 'snow' ? c.stats.wetGrip * 0.85 : w === 'fog' ? c.stats.grip * 0.95 : c.stats.grip; }
 /** 碰撞：依部位扣完美度（裝甲減免）。每次撞擊都算。 */
@@ -269,8 +276,8 @@ export function stepRace(s: RaceState) {
     if (c.speed > vmax) c.speed -= (c.speed - vmax) * 2 * dt;
     c.speed = Math.max(0, c.speed);
     const sp = c.speed / 70;
-    const steer = (inp.left ? -1 : 0) + (inp.right ? 1 : 0);
-    c.x += steer * 1.6 * Math.min(1, sp + 0.15) * dt;
+    const steer = c.ai && inp.steer !== undefined ? inp.steer : (inp.left ? -1 : 0) + (inp.right ? 1 : 0);
+    c.x += steer * STEER_RATE * Math.min(1, sp + 0.15) * dt;
     c.x -= seg.curve * sp * sp * slideFactor(grip) * CORNER_PULL * dt;
     if (Math.abs(c.x) > 1.55) { // 撞上路邊物
       if (c.hit <= 0) { hurt(c, 6 * (0.3 + sp), 'S'); c.speed *= 0.35; c.hit = 16; }
