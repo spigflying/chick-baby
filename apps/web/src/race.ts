@@ -1,9 +1,11 @@
 /** 賽車模式頁面：錦標賽選單、車庫、比賽（WS 即時多人，伺服器權威）、結果。 */
 import { tabNav } from './race-nav';
+import { statusHtml, mountStatus } from './race-status';
 import { raceOrder, kmhShown } from './race-gfx';
 import { fitScale } from './race-fit';
 import { api, errText } from './api';
 import type { Live } from './ws';
+import { pickupShare } from '@chick/engine';
 import { createRace, stepRace, trackSegs, SEG_LEN, raceRanking, trackById, CARS, PARTS, PART_KINDS, TRACKS, COUNTRIES, carStats, fillField, cupTrack, prizeFor, PRIZES, POINTS, ME, PAINT_NAMES, MAX_OUT_COST, PRICE_DIVISOR, QUALIFY_RANK, RACES_PER_COUNTRY, RACE_SLOTS, NITRO_PER_RACE, type RaceState, type PartKind } from '@chick/engine';
 import { drawShop, newShop, shopHit, shopMove, isPaint, SHOP_SCREENS } from './race-shop';
 import { drawRace, carCanvas, text, textW, zh, zhW, panel, drawMinimap, W, H, G, type ViewCar } from './race-gfx';
@@ -50,7 +52,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       <p class="muted race-keys" id="rkeys">鍵盤：←→ 轉向、↑/Z 油門、↓/X 煞車、空白鍵 氮氣</p>
     </div>
     <div class="panel race-panel"><h2>賽車錦標賽</h2>
-      <div class="tabs" id="rtabs"><button data-t="cup" class="on">錦標賽</button><button data-t="garage">車庫</button><button data-t="board">排行榜</button></div>
+      <div class="tabs" id="rtabs"><button data-t="cup" class="on">錦標賽</button><button data-t="garage">車庫</button><button data-t="status">狀態</button><button data-t="board">排行榜</button></div>
       <div id="rbody"></div></div></main>`;
   const cv = root.querySelector('#rc') as HTMLCanvasElement, x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
   // v24：整數倍縮放（裝置像素），置中；k<2 時維持填滿寬度
@@ -61,7 +63,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   const shop = newShop();
   let mode: 'menu' | 'lobby' | 'race' | 'results' = 'menu';
   let attract: RaceState | null = null, frame = 0, raf = 0, dead = false;
-  let race: { id: string; inst: string; track: string; laps: number; len: number; cars: any[]; snaps: Snap[]; ended: any | null; pickups: [number, number, number][] } | null = null;
+  let race: { id: string; inst: string; track: string; laps: number; len: number; cars: any[]; snaps: Snap[]; ended: any | null; pickups: [number, number, number, number?][] } | null = null;
   const keys = { gas: false, brake: false, left: false, right: false, nitro: false };
   let seq = 0, lastSent = '', sendTimer = 0; let lobbyPlayers: string[] = [], lobbyStarts = 0;
   /** 單人出發的賽道跟著目前錦標賽站（手動點了別條賽道就不跟） */
@@ -106,6 +108,8 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
         <h3>車款 <span class="muted">外觀，免費隨意換</span></h3><ul>${CARS.map((c) => `<li><span><canvas class="mini" data-car="${c.id}" width="34" height="22"></canvas> <b>${esc(c.name)}</b> <span class="muted">${esc(c.desc ?? '')}</span></span>${prof.car === c.id ? '<span>使用中</span>' : `<button data-car-buy="${c.id}">換這台</button>`}</li>`).join('')}</ul>`;
       body.querySelectorAll('canvas.mini').forEach((c) => { const cx = (c as HTMLCanvasElement).getContext('2d')!; cx.fillStyle = G[0]; cx.fillRect(0, 0, 34, 22); cx.drawImage(carCanvas((c as HTMLElement).dataset.car!, prof.paint, {}, 1), 1, 1); });
       body.querySelectorAll('[data-car-buy]').forEach((b) => (b as HTMLElement).onclick = () => buy({ car: (b as HTMLElement).dataset.carBuy }));
+    } else if (tab === 'status') {
+      body.innerHTML = head + statusHtml(prof); mountStatus(body, prof);
     } else {
       body.innerHTML = head + `<select id="rlbt">${TRACKS.map((t) => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${esc(t.country)}・${esc(t.name)}</option>`).join('')}</select><div id="rlb" class="muted">載入中…</div>`;
       const sl = body.querySelector('#rlbt') as HTMLSelectElement; sl.onchange = () => loadBoard(sl.value); void loadBoard(sel);
@@ -246,7 +250,8 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       if (meCar && (meCar.evT ?? 0) > lastHitT) { if (lastHitT >= 0) hitSound(meCar.evK === 5 ? 12 : meCar.evS ?? 2); lastHitT = meCar.evT!; }
       const stt = prof ? carStats(prof.parts, prof.car) : null;
       const taken = new Set(last.pk ?? []);
-      const pickups = race.pickups.filter((p) => !taken.has(p[0]) && Math.abs(p[1] - (meCar?.z ?? 0)) < race!.len / 2).map((p) => ({ z: p[1], x: p[2] }));
+      const share = meCar ? pickupShare(ranked.indexOf(meCar) + 1, cars.length) : 1; // v26：依自己名次只畫看得到的道具（伺服器同一套判定）
+      const pickups = race.pickups.filter((p) => !taken.has(p[0]) && (p[3] ?? 0) < share && Math.abs(p[1] - (meCar?.z ?? 0)) < race!.len / 2).map((p) => ({ z: p[1], x: p[2] }));
       drawRace(x, { pickups, gears: [4, 5, 5, 6][prof?.parts?.gearbox ?? 0], top: stt?.topSpeed, track: t, me: meCar, cars, tick: last.tick, countdown: last.countdown, laps: race.laps, len: race.len, rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash });
       if (mode === 'results') drawResultsOverlay(); return;
     }

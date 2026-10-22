@@ -17,7 +17,11 @@ export const SEG_LEN = 20;
 export const RACE_SLOTS = 20;
 export const NITRO_PER_RACE = 3;
 /** v11：車與車的橫向碰撞寬度（半路寬＝1）。畫面上車寬 ≈ 0.44 半路寬（TG2 比例：車 ≈ 路寬 1/4.5），碰撞取畫面車寬的約 80%（0.38），比較好閃。 */
-export const COLLIDE_DX = 0.38;
+/** v26：路寬 ×1.3（車不變大）→ 以「半路寬」為單位的車寬、碰撞、道具判定都 ÷1.3；仍是 3 車道 */
+export const ROAD_WIDEN = 1.3;
+export const COLLIDE_DX = 0.38 / ROAD_WIDEN;
+/** v26：差一整圈以上（套圈）的兩台車彼此沒有碰撞，AI 也不跟車／讓車 */
+export const lapped = (a: { z: number }, b: { z: number }, len: number) => Math.abs(a.z - b.z) >= len;
 export const QUALIFY_RANK = 10;
 export const RACES_PER_COUNTRY = 4;
 export const RACE_ENGINE_VERSION = 2;
@@ -240,23 +244,31 @@ export function createRace(seed: number, trackId: string, entrants: Entrant[], d
 /** 每圈 1–2 個（前半圈必有、後半圈 50%）；隨機車道；不放在彎道（前後 4 段內彎度 ≥ PICKUP_MAX_CURVE）與起終點前後 PICKUP_START_GAP 公尺。
  *  只有玩家能吃（電腦車直接穿過）；同一 tick 碰到的玩家全部都拿到；吃到＝立刻 PICKUP_TICKS 氮氣（玩家自己的推力），不佔原廠 3 次；
  *  正在噴氮氣時＝加 PICKUP_TICKS，上限為這台車一次完整氮氣的長度（推力不疊加）。位置由種子決定（伺服器、所有客戶端同一份）。 */
-export interface Pickup { id: number; lap: number; /** 絕對距離（含圈數） */ z: number; x: number; /** 被吃掉的 tick（null＝還在） */ taken: number | null }
-export const PICKUP_TICKS = RACE_TICK_RATE * 5, PICKUP_DX = 0.3, PICKUP_MAX_CURVE = 1.2, PICKUP_START_GAP = 150, PICKUP_LANES = [-0.6, 0, 0.6];
+export interface Pickup { id: number; lap: number; /** 絕對距離（含圈數） */ z: number; x: number; /** v26 追趕門檻 0–1：名次份額 pickupShare(rank) > q 的玩家才看得到、吃得到 */ q: number; /** 被吃掉的 tick（null＝還在） */ taken: number | null }
+export const PICKUP_TICKS = RACE_TICK_RATE * 5, PICKUP_DX = 0.3 / ROAD_WIDEN, PICKUP_MAX_CURVE = 1.2, PICKUP_START_GAP = 150, PICKUP_LANES = [-0.6, 0, 0.6];
 export function pickupSpotOk(trackId: string, zLap: number, len: number) {
   if (zLap < PICKUP_START_GAP || zLap > len - PICKUP_START_GAP) return false;
   const segs = trackSegs(trackId), n = segs.length, i = Math.floor(zLap / SEG_LEN);
   for (let k = -4; k <= 4; k++) if (Math.abs(segs[(((i + k) % n) + n) % n].curve) >= PICKUP_MAX_CURVE) return false;
   return true;
 }
+/** v26 追趕道具：每圈 4 個候選（每 1/4 圈一個），各帶種子決定的門檻 q。
+ *  每位玩家依「目前名次」只看得到／吃得到 q < pickupShare(名次) 的那些 → 落後越多看到越多（最後一名全部 4 個），第一名幾乎沒有（約 5%）。
+ *  位置照舊隨機（不會刻意放在落後玩家前面），只是頻率不同；所有客戶端與伺服器同一份清單，不需要額外訊息。 */
+export const PICKUPS_PER_LAP = 4, PICKUP_SHARE_FIRST = 0.05;
+export function pickupShare(rank: number, n: number) { return n <= 1 ? 1 : PICKUP_SHARE_FIRST + (1 - PICKUP_SHARE_FIRST) * Math.max(0, Math.min(1, (rank - 1) / (n - 1))); }
+/** 名次：已完賽的在前，其餘依距離 */
+export function rankOf(cars: { z: number; finishedTick: number | null }[], c: { z: number; finishedTick: number | null }) {
+  let r = 1; for (const o of cars) if (o !== c && (c.finishedTick === null ? (o.finishedTick !== null || o.z > c.z) : (o.finishedTick !== null && o.finishedTick < c.finishedTick))) r++; return r;
+}
 export function racePickups(seed: number, trackId: string, laps: number): Pickup[] {
   const len = trackLength(trackSegs(trackId)), r = createRng((seed ^ 0x5bd1e995) >>> 0), out: Pickup[] = [];
-  const a = PICKUP_START_GAP, half = (len - 2 * a) / 2;
-  for (let lap = 0; lap < laps; lap++) for (let h = 0; h < 2; h++) {
-    const want = h === 0 || nextFloat(r) < 0.5;
-    const tries = Array.from({ length: 24 }, () => [a + h * half + nextFloat(r) * half, PICKUP_LANES[Math.floor(nextFloat(r) * 3)]]);
-    if (!want) continue;
+  const a = PICKUP_START_GAP, part = (len - 2 * a) / PICKUPS_PER_LAP;
+  for (let lap = 0; lap < laps; lap++) for (let h = 0; h < PICKUPS_PER_LAP; h++) {
+    const q = nextFloat(r);
+    const tries = Array.from({ length: 24 }, () => [a + h * part + nextFloat(r) * part, PICKUP_LANES[Math.floor(nextFloat(r) * 3)]]);
     const ok = tries.find(([z]) => pickupSpotOk(trackId, z, len)); if (!ok) continue;
-    out.push({ id: out.length, lap, z: lap * len + Math.round(ok[0]), x: ok[1], taken: null });
+    out.push({ id: out.length, lap, z: lap * len + Math.round(ok[0]), x: ok[1], q: +q.toFixed(3), taken: null });
   }
   return out;
 }
@@ -282,14 +294,14 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
   let target = c.aiLane * 0.8, blocked = false, follow = false;
   let ahead: RaceCar | null = null;
   for (const o of s.cars) {
-    if (o === c || o.finishedTick !== null) continue;
+    if (o === c || o.finishedTick !== null || lapped(o, c, s.len)) continue;
     const dz = o.z - c.z;
-    if (dz > 0 && dz < 12 * X && Math.abs(o.x - c.x) < COLLIDE_DX + 0.08 && (!ahead || dz < ahead.z - c.z)) ahead = o;
+    if (dz > 0 && dz < 12 * X && Math.abs(o.x - c.x) < COLLIDE_DX + 0.08 / ROAD_WIDEN && (!ahead || dz < ahead.z - c.z)) ahead = o;
   }
   if (ahead) { blocked = true; if (c.speed > ahead.speed - X) follow = true; } // 前面同車道有車：收油跟車，不切出去
   // 讓車：後面有明顯更快的車在同一條線上逼近 → 選一邊（離對方遠的那邊）靠過去，至少維持 3 秒，不來回換
-  if (!c.aiYieldT) for (const o of s.cars) { if (o === c || o.finishedTick !== null) continue; const dz = c.z - o.z;
-    if (dz > 0 && dz < 30 * X && o.speed > c.speed + 3 * X && Math.abs(o.x - c.x) < COLLIDE_DX + 0.15) { c.aiYield = o.x > c.x ? -1 : 1; if (Math.abs(c.x + c.aiYield * 0.55) > 0.9) c.aiYield = -c.aiYield; c.aiYieldT = 60; break; } }
+  if (!c.aiYieldT) for (const o of s.cars) { if (o === c || o.finishedTick !== null || lapped(o, c, s.len)) continue; const dz = c.z - o.z;
+    if (dz > 0 && dz < 30 * X && o.speed > c.speed + 3 * X && Math.abs(o.x - c.x) < COLLIDE_DX + 0.15 / ROAD_WIDEN) { c.aiYield = o.x > c.x ? -1 : 1; if (Math.abs(c.x + c.aiYield * 0.55) > 0.9) c.aiYield = -c.aiYield; c.aiYieldT = 60; break; } }
   if (c.aiYieldT) { c.aiYieldT--; target = Math.max(-0.85, Math.min(0.85, c.aiLane * 0.8 + (c.aiYield ?? 0) * 0.55)); }
   if (c.aiRecover > 0) { c.aiRecover--; target = c.aiLane * -0.6; }
   // v14：目標線平滑（換線、彎道切線慢慢移過去，不會一下左一下右）
@@ -383,6 +395,7 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
     }
     if (!c.ai) for (const p of s.pickups) { // 路上氮氣道具：同一 tick 碰到的玩家都拿得到
       if ((p.taken !== null && p.taken !== s.tick) || !(p.z > z0 && p.z <= c.z) || Math.abs(c.x - p.x) > PICKUP_DX) continue;
+      if (p.q >= pickupShare(rankOf(s.cars, c), s.cars.length)) continue; // v26：名次太前面看不到這個
       p.taken = s.tick; applyPickup(c); c.pkT = s.tick; c.pkN = (c.pkN ?? 0) + 1;
     }
     c.lap = Math.max(0, Math.floor(c.z / s.len));
@@ -392,7 +405,7 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
   const live = s.cars.filter((c) => c.finishedTick === null && !c.flip).sort((a, b) => a.z - b.z);
   for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
     const a = live[i], b = live[j], dz = b.z - a.z; if (dz > 5) break;
-    const dx = Math.abs(a.x - b.x); if (dx >= COLLIDE_DX) continue;
+    if (lapped(a, b, s.len)) continue; const dx = Math.abs(a.x - b.x); if (dx >= COLLIDE_DX) continue;
     if (dz > 1.5 && a.speed > b.speed) { // a 從後面撞上 b
       const rel = (a.speed - b.speed) / (30 * X);
       if (a.speed - b.speed < 1.5 * X) { a.speed = b.speed; continue; } // 輕輕貼上：不算撞

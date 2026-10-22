@@ -1,5 +1,5 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
-import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, type Track } from '@chick/engine';
+import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, ROAD_WIDEN, lapped as isLapped, type Track } from '@chick/engine';
 import { carBodyH, carPixels, LODS, PLAYER_W, exhaustsOf, DESIGN_W, EXHAUST_Y, type CarLook } from './race-cars';
 import { pickupDims } from './race-pickup';
 import { frontSprite, ensureComposite, S as PET_S } from './sprites';
@@ -39,7 +39,7 @@ export function lodFor(targetW: number) { for (let i = LODS.length - 1; i >= 0; 
 /** 依照畫面上應有的寬度挑 LOD：挑「不超過目標寬度」的最大一張，原尺寸畫，不縮放。 */
 export function pickLod(targetW: number) { for (let i = 0; i < LODS.length; i++) if (LODS[i] <= targetW + 0.5) return i; return LODS.length - 1; }
 /** 車寬（以半個路寬為 1）：玩家在 PLAYER_DZ 時剛好 24px，所以同深度的車都一樣大。 */
-export const CAR_W = 0.44; // v11：車寬／半路寬（= PLAYER_W ÷ 玩家深度半路寬），和引擎 COLLIDE_DX 對齊
+export const CAR_W = 0.44 / ROAD_WIDEN; // v11：車寬／半路寬（= PLAYER_W ÷ 玩家深度半路寬），和引擎 COLLIDE_DX 對齊
 export const PLAYER_DZ = 2.75; // 玩家車在攝影機前方的距離（m）
 
 // ---------- 路邊物 ----------
@@ -165,7 +165,7 @@ export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick:
 
 /** v13：彎道視覺強度（每公尺彎度係數）、攝影機橫向跟車比例。 */
 const CURVE_K = 0.0004, CAM_FOLLOW = 0.4;
-const ROAD_W = 2.4, CAM_H = 7.5, DEPTH = 0.9, DRAW = 60, HORIZON = 116; // v11：路寬照 TG2（車底那一列路寬 ≈ 0.9 畫面寬、車 ≈ 路寬 0.24）、攝影機較高，地平線 58%
+const ROAD_W = 2.4 * ROAD_WIDEN, CAM_H = 7.5, DEPTH = 0.9, DRAW = 60, HORIZON = 116; // v11：路寬照 TG2（車底那一列路寬 ≈ 0.9 畫面寬、車 ≈ 路寬 0.24）、攝影機較高，地平線 58%
 /** 玩家深度的半路寬（px）。車寬一律 = CAR_W × 半路寬 × 2 再乘同一個常數，所以只跟深度有關。 */
 const playerPw = () => ROAD_W * (DEPTH * 6 / (PLAYER_DZ + 4)) * (W / 2);
 /** v16：路面上跟 40%，衝出路面後平滑加到 85%，翻車／撞路邊物時車還在畫面裡。 */
@@ -360,7 +360,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   role('fx');
   for (const pk of v.pickups ?? []) { // 路上氮氣道具：跟車同一套投影
     if (Math.abs(pk.z - camZ) > v.len / 2) continue;
-    const p0 = place({ z: pk.z } as ViewCar); if (!p0 || (p0.clip < H && p0.py > p0.clip + 2) || (t.weather === 'fog' && p0.k > 13)) continue;
+    const p0 = place({ z: pk.z } as ViewCar); if (!p0 || (p0.clip < H && p0.py > p0.clip + 2) || (t.weather === 'fog' && p0.k > 18)) continue;
     // 跟車一樣：比底線近就貼底線那一列（用那一列的路寬），尺寸只隨那一列路寬變大，不設上限
     const row = p0.py > GROUND ? rowAt(GROUND) : null, lat = row ? row.w : p0.pw, cxp = row ? row.x : p0.pxc, py = row ? GROUND : p0.py;
     const img = pickupCanvas(night ? NIGHT.map((c, i) => (i === 0 ? G[0] : c)) : Q), dm = pickupDims(lat, gw, PLAYER_W);
@@ -382,6 +382,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     const scale = isMe ? 1 : target / LODS[lod];
     const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
     const sx = Math.round(p.pxc + c.x * p.lat - dw / 2 + shake), sy = (isMe ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.min(H - 6 - Math.round(bh * scale), Math.round(p.py - bh * scale))) - bob; // v14：和玩家並排的車也貼同一條底線，不會掉出畫面
+    const ghost = !isMe && !!v.me && isLapped(c, v.me, v.len); // v26：差一圈以上＝沒有碰撞，畫成半透明（棋盤點陣）
     sprites.push({ k: p.k + (isMe ? -0.5 : 0), draw: () => {
       const fp = c.flip ? 1 - c.flip / FLIP_TICKS : 0;
       if (fp > 0) { // v16 翻車：拋起來翻滾兩圈半、往外側飄，落地前壓扁（像 TG2 撞樹翻車）
@@ -390,7 +391,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
         x.save(); x.translate(Math.round(sx + dw / 2 + dir * fp * dw * 0.35), Math.round(sy + dh / 2 - lift)); x.rotate(Math.round(ang / (Math.PI / 8)) * (Math.PI / 8)); x.scale(1, squash);
         x.drawImage(img, -dw / 2, -dh / 2, dw, dh); if (fp < 0.08) x.drawImage(flashOf(img), -dw / 2, -dh / 2, dw, dh); x.restore();
         x.fillStyle = Q[3]; const shw = Math.round(dw * (0.5 + 0.5 * (1 - lift / (dh * 1.6)))); x.fillRect(Math.round(sx + dw / 2 - shw / 2 + dir * fp * dw * 0.35), sy + dh - 2, shw, 2); // 地上影子
-      } else { const fire = isMe && c.nitroT > 0 && !c.fin; if (fire) drawFlameBack(x, c.car, sx, sy, dw, bh, v.frame); x.drawImage(img, sx, sy, dw, dh); if (fire) drawBigFlame(x, c.car, sx, sy, dw, v.frame); if (c.pet && !c.ai) drawPetRider(x, c.pet, petMood(c, now), sx + dw / 2, sy + Math.round(bh * 0.4 * scale), v.frame, c.speed > 5, scale, night ? PET_NIGHT : Q); }
+      } else { const fire = isMe && c.nitroT > 0 && !c.fin; if (fire) drawFlameBack(x, c.car, sx, sy, dw, bh, v.frame); if (ghost) drawGhost(x, img, sx, sy, dw, dh); else x.drawImage(img, sx, sy, dw, dh); if (fire) drawBigFlame(x, c.car, sx, sy, dw, v.frame); if (c.pet && !c.ai && !ghost) drawPetRider(x, c.pet, petMood(c, now), sx + dw / 2, sy + Math.round(bh * 0.4 * scale), v.frame, c.speed > 5, scale, night ? PET_NIGHT : Q); }
       const fl = hitAge(c.id, now, 90 + 90 * (fxHit.get(c.id)?.k ?? 0)); if (fl && Math.floor(fl.a * 4) % 2 === 0) x.drawImage(flashOf(img), sx, sy, dw, dh); // 閃白
       for (const p of sparks) { if (p.id !== c.id) continue; const age = now - p.t0; if (age < 0 || age > p.life) continue; const ts = age / 1000;
         const sc = dw / 48; x.fillStyle = Q[p.c]; x.fillRect(Math.round(sx + dw / 2 + p.ox * dw + p.vx * ts * sc), Math.round(sy + p.oy * dh + (p.vy * ts + 160 * ts * ts) * sc), p.sz, p.sz); }
@@ -454,6 +455,17 @@ function drawFlameBack(x: CanvasRenderingContext2D, model: string, sx: number, s
       if (ci !== run) { if (run >= 0) { x.fillStyle = Q[run]; x.fillRect(rs, py, px - rs, 1); } run = ci; rs = px; }
     }
   }
+}
+/** 套圈車：棋盤格點陣半透明（只畫一半像素，維持點陣風格、不用 alpha 混色） */
+let ghostCv: HTMLCanvasElement | null = null;
+function drawGhost(x: CanvasRenderingContext2D, img: CanvasImageSource, sx: number, sy: number, dw: number, dh: number) {
+  if (dw <= 0 || dh <= 0) return;
+  const c = (ghostCv ??= document.createElement('canvas')); if (c.width < dw + 1) c.width = dw + 1; if (c.height < dh) c.height = dh;
+  const g = c.getContext('2d')!; g.imageSmoothingEnabled = false; g.globalCompositeOperation = 'copy'; g.drawImage(img, 0, 0, dw, dh);
+  g.globalCompositeOperation = 'destination-in'; g.fillStyle = '#000'; g.beginPath();
+  const o = (sx + sy) & 1; for (let yy = 0; yy < dh; yy++) for (let xx = (yy + o) & 1; xx < dw; xx += 2) g.rect(xx, yy, 1, 1);
+  g.fill(); g.globalCompositeOperation = 'source-over';
+  x.drawImage(c, 0, 0, dw, dh, sx, sy, dw, dh);
 }
 /** Bayer 4×4 有序抖動遮罩：中間（消失點附近）完全透明，越往邊緣越密 → 疊上放大的畫面＝放射狀拖影，但仍只有 4 種綠 */
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];

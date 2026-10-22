@@ -1,7 +1,7 @@
 // 開發用：賽車美術設計稿與畫面模擬（不進正式頁面）。/race-preview.html?v=sheet|grid|pack|nitro|rain|night（v3：240×200）
 import { drawRace, elevTable, elevAt, carCanvas, G, W, H, text, setColorMode, type ViewCar } from './race-gfx';
 import { CAR_MODELS, LODS, LIVERIES, LIVERY_NAMES } from './race-cars';
-import { trackById, trackSegs, SEG_LEN, CARS } from '@chick/engine';
+import { trackById, trackSegs, SEG_LEN, CARS, pickupShare, rankOf } from '@chick/engine';
 
 const root = document.getElementById('root')!;
 const v = new URLSearchParams(location.search).get('v') ?? 'sheet';
@@ -145,7 +145,7 @@ async function simv() {
     sub = (sub + 1) % 3; const f = sub === 0 ? 1 : sub / 3; frame++;
     const cars = sim.cars.map((c) => { const p = prev.get(c.id)!; return { id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, pet: c.ai ? null : pets[c.id] ?? null, z: p[0] + (c.z - p[0]) * f, x: p[1] + (c.x - p[1]) * f, speed: c.speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT, fin: c.finishedTick, hit: c.hit, evT: c.evT, evK: c.evK, evS: c.evS, evSide: c.evSide, zd: c.zd, pkT: c.pkT ?? 0, flip: c.flip ? (prev.get(c.id)![2] || c.flip) + (c.flip - (prev.get(c.id)![2] || c.flip)) * f : 0 } as ViewCar; });
     const t0 = performance.now();
-    drawRace(x, { pickups: sim.pickups.filter((p) => p.taken === null).map((p) => ({ z: p.z, x: p.x })), now: frame * 1000 / 60, track, me: cars.find((c) => c.id === 'me')!, cars, tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len, rank: 1, frame: Math.floor(frame / 3), hud: true, gears: 5, top: 160 });
+    drawRace(x, { pickups: sim.pickups.filter((p) => p.taken === null && p.q < pickupShare(rankOf(sim.cars, sim.cars.find((c: any) => c.id === 'me')!), sim.cars.length)).map((p) => ({ z: p.z, x: p.x })), now: frame * 1000 / 60, track, me: cars.find((c) => c.id === 'me')!, cars, tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len, rank: 1, frame: Math.floor(frame / 3), hud: true, gears: 5, top: 160 });
     (window as any).__drawMs = performance.now() - t0;
     return sim.cars.find((c) => c.id === 'me')!.x;
   };

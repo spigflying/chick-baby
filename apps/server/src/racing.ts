@@ -292,7 +292,7 @@ export function capRaceTicks(maxTicks: number, countdown: number, closesAt: numb
   if (closesAt === null) return maxTicks;
   return Math.max(countdown, Math.min(maxTicks, Math.floor(((closesAt - now - 10_000) * RACE_TICK_RATE) / 1000)));
 }
-const startedMsg = (r: Room) => ({ t: 'rrace.started', inst: r.inst, track: r.track, seed: r.state.seed, laps: r.state.laps, len: r.state.len, tick_rate: RACE_TICK_RATE, users: r.seats.map((s) => s.userId), solo: !r.home, pickups: r.state.pickups.map((p) => [p.id, p.z, p.x]),
+const startedMsg = (r: Room) => ({ t: 'rrace.started', inst: r.inst, track: r.track, seed: r.state.seed, laps: r.state.laps, len: r.state.len, tick_rate: RACE_TICK_RATE, users: r.seats.map((s) => s.userId), solo: !r.home, pickups: r.state.pickups.map((p) => [p.id, p.z, p.x, p.q]),
   cars: r.state.cars.map((c) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, pet: c.ai ? null : r.seats.find((x) => x.userId === c.id)?.pet ?? null })) });
 function raceInput(r: Room, userId: string, msg: any) {
   const s = r.seats.find((x) => x.userId === userId); if (!s || s.left) return;

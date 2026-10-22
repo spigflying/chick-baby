@@ -226,3 +226,15 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .shop-pad button{min-width:44px;padding:0 6px}
 .race-pad[hidden],.race-keys[hidden]{display:none}
 .race-panel .race-top-btn{display:block;width:100%;min-height:44px;margin:0 0 8px;position:sticky;top:0;z-index:1}
+/* v26 賽車狀態分頁 */
+.rs-speeds{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:flex-end;background:#9bbc0f;border:2px solid #0f380f;padding:6px 8px}
+.rs-num{display:flex;flex-direction:column;align-items:flex-start;color:#0f380f}
+.rs-num canvas{image-rendering:pixelated;display:block}
+.rs-num.main canvas{height:105px}
+.rs-num.sub canvas{height:48px}
+.rs-cap{font-size:12px;font-weight:bold}
+.rs-unit{font-size:11px;align-self:flex-end;margin-top:-4px}
+.rs-parts{list-style:none;padding:0;margin:0}
+.rs-parts li{display:flex;gap:8px;align-items:center;border-bottom:1px dotted #bba;padding:4px 0;font-size:13px}
+.rs-parts canvas{image-rendering:pixelated;width:48px;height:48px;flex:none;border:1px solid #306230}
+.rs-parts.stock li{opacity:.65}
