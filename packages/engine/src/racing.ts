@@ -9,6 +9,10 @@
 import { createRng, nextFloat, type Rng } from './rng';
 
 export const RACE_TICK_RATE = 20;
+/** v20：整體速度倍率（極速、加速、煞車、碰撞門檻都乘這個；操控用「速度／(70×SPEED_X)」正規化） */
+export const SPEED_X = 2;
+/** 每 tick 物理子步數（速度變快後避免碰撞穿過去） */
+export const SUBSTEPS = 2;
 export const SEG_LEN = 20;
 export const RACE_SLOTS = 20;
 export const NITRO_PER_RACE = 3;
@@ -68,8 +72,8 @@ export function carStats(partsIn: Partial<Parts>, carId = 'falcon'): CarStats {
   const tough = (c.tough - 1) * 0.4;
   const arm = (lv: number) => Math.max(0, Math.min(0.75, lv * 0.2 + tough));
   return {
-    topSpeed: (64 + p.engine * 2 + p.gearbox * 3) * c.top,   // 引擎、變速箱各自加極速、直接相加（不互相卡）；全滿 79 m/s ≈ 284 km/h
-    accel: (13 + p.engine * 2.5 + (p.gearbox >= 2 ? 1 : 0)) * c.accel,
+    topSpeed: (64 + p.engine * 2 + p.gearbox * 3) * c.top * SPEED_X,   // 引擎、變速箱各自加極速、直接相加（不互相卡）；全滿 79 m/s ≈ 284 km/h
+    accel: (13 + p.engine * 2.5 + (p.gearbox >= 2 ? 1 : 0)) * c.accel * SPEED_X,
     grip: (1 + p.dry * 0.18) * c.grip,
     wetGrip: WET_GRIP[Math.max(0, Math.min(3, p.wet | 0))] * c.grip,
     nitroBoost: 1.22 + p.nitro * 0.09,
@@ -220,7 +224,7 @@ export function createRace(seed: number, trackId: string, entrants: Entrant[], d
   const cars: RaceCar[] = order.map(({ e, form }, i) => {
     const st = carStats(e.parts ?? STOCK_PARTS, e.ai ? 'falcon' : e.car);
     const skill = t.ai * difficulty * form;
-    if (e.ai) { st.topSpeed = AI_TOP * skill; st.accel = AI_ACCEL * skill; st.grip = 1.15 + 0.1 * form; st.wetGrip = 1.0 + 0.1 * form; st.nitroBoost = 1.3; st.armor = { F: 0.3, S: 0.3, R: 0.3 }; }
+    if (e.ai) { st.topSpeed = AI_TOP * SPEED_X * skill; st.accel = AI_ACCEL * SPEED_X * skill; st.grip = 1.15 + 0.1 * form; st.wetGrip = 1.0 + 0.1 * form; st.nitroBoost = 1.3; st.armor = { F: 0.3, S: 0.3, R: 0.3 }; }
     return { id: e.id, name: e.name, ai: !!e.ai, car: e.ai ? 'ai' : (e.car ?? 'falcon'), color: e.color ?? i % PAINTS,
       z: -(Math.floor(i / 2) * 10) - 6, x: i % 2 ? 0.45 : -0.45, speed: 0, damage: 0, nitro: NITRO_PER_RACE, nitroT: 0, lap: 0,
       finishedTick: null, stats: st, input: { ...NO_INPUT }, prevNitro: false, nitroQ: false,
@@ -241,34 +245,34 @@ export function setRaceInput(s: RaceState, id: string, inp: Partial<RaceInput>) 
 }
 /** 電腦駕駛：走線（彎內側）、超車、入彎前煞車、直線用氮氣、被撞後收油閃避。 */
 function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
-  const near = segAt(s, c.z + 40), far = segAt(s, c.z + 90);
+  const X = SPEED_X, near = segAt(s, c.z + 40 * X), far = segAt(s, c.z + 90 * X);
   const curve = Math.abs(near.curve) > Math.abs(far.curve) ? near.curve : far.curve;
   let target = c.aiLane * 0.8 + Math.max(-0.6, Math.min(0.6, curve * 0.15)); // 走彎內側
   let blocked = false, follow = false;
   for (const o of s.cars) {
     if (o === c || o.finishedTick !== null) continue;
     const dz = o.z - c.z;
-    if (dz > 0 && dz < 28 && Math.abs(o.x - c.x) < COLLIDE_DX + 0.08 && o.speed < c.speed + 2) { // 前面有慢車：往空的那邊超
+    if (dz > 0 && dz < 28 * X && Math.abs(o.x - c.x) < COLLIDE_DX + 0.08 && o.speed < c.speed + 2 * X) { // 前面有慢車：往空的那邊超
       blocked = true; const left = o.x - 0.65, right = o.x + 0.65;
       target = Math.abs(left) < Math.abs(right) ? (left > -0.95 ? left : right) : (right < 0.95 ? right : left);
-      if (dz < 9 && c.speed > o.speed - 1) follow = true; // 太近：先收油跟車，別追撞
+      if (dz < 9 * X && c.speed > o.speed - X) follow = true; // 太近：先收油跟車，別追撞
     }
   }
   // v19：不擋車 —— 後面 25m 內有更快的車逼近時，維持目前位置（不切進對方的線），讓對方好超
-  for (const o of s.cars) { if (o === c || o.finishedTick !== null) continue; const dz = c.z - o.z; if (dz > 0 && dz < 25 && o.speed > c.speed + 3 && Math.abs(target - o.x) < Math.abs(c.x - o.x)) { target = c.x; break; } }
+  for (const o of s.cars) { if (o === c || o.finishedTick !== null) continue; const dz = c.z - o.z; if (dz > 0 && dz < 25 * X && o.speed > c.speed + 3 * X && Math.abs(target - o.x) < Math.abs(c.x - o.x)) { target = c.x; break; } }
   if (c.aiRecover > 0) { c.aiRecover--; target = c.aiLane * -0.6; }
   // v14：目標線平滑（換線、彎道切線慢慢移過去，不會一下左一下右）
   c.aiT = (c.aiT ?? c.x) + (target - (c.aiT ?? c.x)) * 0.08;
   const dx = c.aiT - c.x;
   // 安全彎速：讓離心滑出量不超過方向盤修正能力的 75%（抓地差的 AI 也得在彎前收油，公平）
-  const slideSafe = Math.abs(curve) < 0.3 ? Infinity : 70 * Math.sqrt(STEER_RATE * 0.75 / (Math.abs(curve) * slideFactor(grip) * CORNER_PULL));
+  const slideSafe = Math.abs(curve) < 0.3 ? Infinity : 70 * X * Math.sqrt(STEER_RATE * 0.75 / (Math.abs(curve) * slideFactor(grip) * CORNER_PULL));
   const safe = Math.min(slideSafe, c.stats.topSpeed * Math.min(1, 1.05 - Math.max(0, Math.abs(curve) - 2) * 0.09 / grip));
   const tooFast = c.speed > safe;
   const straight = Math.abs(near.curve) < 1.2 && Math.abs(far.curve) < 1.8;
   const nitro = c.nitro > 0 && c.nitroT === 0 && straight && c.z >= c.aiNitroAt[NITRO_PER_RACE - c.nitro] && !blocked;
   // v14：AI 用比例式方向盤（偏多少轉多少，最大仍是 STEER_RATE），不再「全左／全右」來回修 → 不會左右抖
   const steerAmt = Math.max(-1, Math.min(1, dx / 0.18));
-  return { gas: !tooFast && !follow && c.aiRecover < 14, brake: tooFast && c.speed > safe + 4, left: steerAmt < 0, right: steerAmt > 0, nitro, steer: steerAmt };
+  return { gas: !tooFast && !follow && c.aiRecover < 14, brake: tooFast && c.speed > safe + 4 * X, left: steerAmt < 0, right: steerAmt > 0, nitro, steer: steerAmt };
 }
 /**
  * 過彎離心力（v12）：每秒往彎外滑 = 彎度 × (速度/70)² × slideFactor(抓地)。
@@ -278,7 +282,7 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
 /** v14（steer）：固定速率轉向（每秒最多橫移幾個半路寬），從 1.6 降到 0.75：點一下只動一點、按住穩定平移。AI 也用同一個值。 */
 export const STEER_RATE = 0.75;
 /** 外甩跟著轉向一起縮放（v13 的 0.5 × 0.75/1.6），過彎守線難度與 v13 相同，只是整體橫向動作變慢。 */
-export const CORNER_PULL = 0.5 * STEER_RATE / 1.6;
+export const CORNER_PULL = 0.5 * STEER_RATE / 1.6 * 1.2; // v20：速度 ×2 後彎道時間減半，外甩 ×1.2 讓出路面比例和 1 倍速時差不多
 export const slideFactor = (grip: number) => Math.min(1.4, 0.35 * Math.pow(1.4 / Math.max(0.3, grip), 2.5));
 export function gripOf(c: RaceCar, w: Weather) { return w === 'rain' ? c.stats.wetGrip : w === 'snow' ? c.stats.wetGrip * 0.85 : w === 'fog' ? c.stats.grip * 0.95 : c.stats.grip; }
 /** 碰撞：依部位扣完美度（裝甲減免）。每次撞擊都算。 */
@@ -292,49 +296,58 @@ export function stepRace(s: RaceState) {
   if (s.over) return;
   s.tick++;
   if (s.countdown > 0) { s.countdown--; return; }
-  const t = trackById(s.track)!, dt = 1 / RACE_TICK_RATE, total = s.len * s.laps;
+  // v20：速度 ×2，每個 tick 拆成 SUBSTEPS 次物理（碰撞不會穿過去）；計時器（nitroT／hit／flip）每 tick 只減一次
+  const inputs = new Map<RaceCar, RaceInput>();
+  for (let sub = 0; sub < SUBSTEPS; sub++) physics(s, sub, inputs);
+  const humans = s.cars.filter((c) => !c.ai);
+  if (s.tick >= s.maxTicks || (humans.length > 0 && humans.every((c) => c.finishedTick !== null)) || s.cars.every((c) => c.finishedTick !== null)) s.over = true;
+}
+function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
+  const t = trackById(s.track)!, dt = 1 / RACE_TICK_RATE / SUBSTEPS, total = s.len * s.laps, first = sub === 0, X = SPEED_X;
   for (const c of s.cars) {
-    if (c.finishedTick !== null) { c.speed = Math.max(0, c.speed - 20 * dt); c.z += c.speed * dt; continue; }
+    if (c.finishedTick !== null) { c.speed = Math.max(0, c.speed - 20 * X * dt); c.z += c.speed * dt; continue; }
     if (c.flip) { // 翻車中：不能操作，快速減速；翻完放回路邊、低速
-      c.flip--; c.speed = Math.max(0, c.speed - 60 * dt); c.z += c.speed * dt;
-      if (c.flip === 0) { c.x = Math.sign(c.x || 1) * 0.85; c.speed = 10; c.hit = 10; }
+      if (first) c.flip--; c.speed = Math.max(0, c.speed - 60 * X * dt); c.z += c.speed * dt;
+      if (c.flip === 0) { c.x = Math.sign(c.x || 1) * 0.85; c.speed = 10 * X; c.hit = 10; }
       c.lap = Math.max(0, Math.floor(c.z / s.len)); continue;
     }
     const seg = segAt(s, c.z), grip = gripOf(c, t.weather);
-    const inp = c.ai ? aiInput(s, c, grip) : c.input;
-    if (c.ai && inp.nitro) c.nitroQ = true;
-    if (c.nitroQ) { if (c.nitro > 0 && c.nitroT === 0) { c.nitro--; c.nitroT = Math.round(c.stats.nitroTicks); } c.nitroQ = false; }
+    let inp = inputs.get(c); if (!inp) { inp = c.ai ? aiInput(s, c, grip) : c.input; inputs.set(c, inp); }
+    if (first) {
+      if (c.ai && inp.nitro) c.nitroQ = true;
+      if (c.nitroQ) { if (c.nitro > 0 && c.nitroT === 0) { c.nitro--; c.nitroT = Math.round(c.stats.nitroTicks); } c.nitroQ = false; }
+    }
     const off = Math.abs(c.x) > 1;
     let vmax = c.stats.topSpeed * condFactor(c.damage) * (off ? 0.45 : 1);
     let acc = c.stats.accel;
-    if (c.nitroT > 0) { c.nitroT--; vmax *= c.stats.nitroBoost; acc *= 2; }
+    if (c.nitroT > 0) { if (first) c.nitroT--; vmax *= c.stats.nitroBoost; acc *= 2; }
     if (inp.gas) c.speed += acc * Math.max(0.1, 1 - c.speed / vmax) * dt * (c.speed > vmax ? -2 : 1);
-    else c.speed -= 6 * dt;
-    if (inp.brake) c.speed -= 45 * dt;
+    else c.speed -= 6 * X * dt;
+    if (inp.brake) c.speed -= 45 * X * dt;
     if (c.speed > vmax) c.speed -= (c.speed - vmax) * 2 * dt;
     c.speed = Math.max(0, c.speed);
-    const sp = c.speed / 70;
+    const sp = c.speed / (70 * X);
     const steer = c.ai && inp.steer !== undefined ? inp.steer : (inp.left ? -1 : 0) + (inp.right ? 1 : 0);
     c.x += steer * STEER_RATE * Math.min(1, sp + 0.15) * dt;
     c.x -= seg.curve * sp * sp * slideFactor(grip) * CORNER_PULL * dt;
-    if (Math.abs(c.x) > 1.55) { // 撞上路邊物
+    if (Math.abs(c.x) > 1.55) { // 撞上路邊護欄
       if (c.hit <= 0) { hurt(c, 6 * (0.3 + sp), 'S', s.tick, HIT_WALL, Math.sign(c.x)); c.speed *= 0.35; c.hit = 16; }
       c.x = Math.sign(c.x) * 1.15;
     }
-    if (c.hit > 0) c.hit--;
+    if (first && c.hit > 0) c.hit--;
     const z0 = c.z;
     c.z += c.speed * dt;
-    if (Math.abs(c.x) > 1.05 && c.speed > 8) { // v16：衝出路面撞到路邊硬物 → 翻車
+    if (Math.abs(c.x) > 1.05 && c.speed > 8 * X) { // v16：衝出路面撞到路邊硬物 → 翻車
       const L = s.len, a = ((z0 % L) + L) % L, b = a + (c.z - z0);
       for (const o of roadside(s.track)) {
         if (!o.solid || Math.abs(c.x - o.x) > PROP_HIT_DX) continue;
         if (!((o.z > a && o.z <= b) || (o.z + L > a && o.z + L <= b))) continue;
-        const sp2 = c.speed / 70; hurt(c, 10 * (0.4 + sp2), 'F', s.tick, HIT_OBJECT, Math.sign(c.x));
+        hurt(c, 10 * (0.4 + sp), 'F', s.tick, HIT_OBJECT, Math.sign(c.x));
         c.flip = FLIP_TICKS; c.nitroT = 0; break;
       }
     }
     c.lap = Math.max(0, Math.floor(c.z / s.len));
-    if (c.z >= total) c.finishedTick = s.tick;
+    if (c.z >= total && c.finishedTick === null) c.finishedTick = s.tick;
   }
   // 車與車：追撞（前／後裝甲）與並排擦撞（側裝甲）
   const live = s.cars.filter((c) => c.finishedTick === null && !c.flip).sort((a, b) => a.z - b.z);
@@ -342,9 +355,9 @@ export function stepRace(s: RaceState) {
     const a = live[i], b = live[j], dz = b.z - a.z; if (dz > 5) break;
     const dx = Math.abs(a.x - b.x); if (dx >= COLLIDE_DX) continue;
     if (dz > 1.5 && a.speed > b.speed) { // a 從後面撞上 b
-      const rel = (a.speed - b.speed) / 30;
-      if (a.speed - b.speed < 1.5) { a.speed = b.speed; continue; } // 輕輕貼上：不算撞
-      a.speed = b.speed * 0.85; b.speed += 2;
+      const rel = (a.speed - b.speed) / (30 * X);
+      if (a.speed - b.speed < 1.5 * X) { a.speed = b.speed; continue; } // 輕輕貼上：不算撞
+      a.speed = b.speed * 0.85; b.speed += 2 * X;
       hurt(a, 3 * (0.3 + rel), 'F', s.tick, HIT_REAR_END, 0); hurt(b, 2 * (0.3 + rel), 'R', s.tick, HIT_REARED, 0);
       a.hit = Math.max(a.hit, 8); b.hit = Math.max(b.hit, 6);
       const push = a.x < b.x ? -0.12 : 0.12; a.x += push; b.x -= push;
@@ -353,8 +366,6 @@ export function stepRace(s: RaceState) {
       const push = a.x < b.x ? -0.2 : 0.2; a.x += push; b.x -= push;
     }
   }
-  const humans = s.cars.filter((c) => !c.ai);
-  if (s.tick >= s.maxTicks || (humans.length > 0 && humans.every((c) => c.finishedTick !== null)) || s.cars.every((c) => c.finishedTick !== null)) s.over = true;
 }
 export function raceRanking(s: RaceState): RaceCar[] {
   return [...s.cars].sort((a, b) => (a.finishedTick ?? Infinity) - (b.finishedTick ?? Infinity) || b.z - a.z);
