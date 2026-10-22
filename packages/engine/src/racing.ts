@@ -30,7 +30,7 @@ const tiers = (tg2: number[], price?: number[]): PartTier[] => [0, ...tg2].map((
 export const PARTS: Record<PartKind, { label: string; desc: string; tiers: PartTier[] }> = {
   engine: { label: '引擎', desc: '加速＋極速（每階 +2.5 加速、+7 km/h）', tiers: tiers([30000, 50000, 80000], [20000, 50000, 70000]) },
   gearbox: { label: '變速箱', desc: '極速（每階 +11 km/h，跟引擎各自相加）', tiers: tiers([10000, 30000, 50000], [20000, 40000, 60000]) },
-  nitro: { label: '氮氣', desc: '氮氣更猛、噴更久（每場一律 3 次）', tiers: tiers([5000, 15000, 30000]) },
+  nitro: { label: '氮氣', desc: '噴更久：原廠 5 秒，每階 +2 秒（7／9／11 秒）；推力不變，每場一律 3 次', tiers: tiers([5000, 15000, 30000]) },
   dry: { label: '乾地胎', desc: '晴天、夜晚、霧天的抓地與過彎', tiers: tiers([1000, 2000, 4000]) },
   wet: { label: '雨胎', desc: '下雨、下雪時自動換上', tiers: tiers([1000, 2000, 3000]) },
   armorF: { label: '前裝甲', desc: '追撞前車時少掉完美度', tiers: tiers([5000, 10000, 20000]) },
@@ -71,7 +71,7 @@ export function carStats(partsIn: Partial<Parts>, carId = 'falcon'): CarStats {
     grip: (1 + p.dry * 0.18) * c.grip,
     wetGrip: WET_GRIP[Math.max(0, Math.min(3, p.wet | 0))] * c.grip,
     nitroBoost: 1.22 + p.nitro * 0.09,
-    nitroTicks: RACE_TICK_RATE * (3 + p.nitro * 0.4),
+    nitroTicks: RACE_TICK_RATE * (5 + p.nitro * 2), // v18：氮氣持續 5／7／9／11 秒
     armor: { F: arm(p.armorF), S: arm(p.armorS), R: arm(p.armorR) },
   };
 }
@@ -85,10 +85,10 @@ export interface Track { id: string; name: string; country: string; countryId: s
 export interface Country { id: string; name: string; tracks: string[] }
 type TrackDef = [string, string, Scenery, Weather, number, number]; // id 名稱 景色 天氣 圈數 路線種子
 const COUNTRY_DEFS: [string, string, TrackDef[]][] = [
-  ['tw', '台灣', [['tw1', '河濱大道', 'city', 'clear', 4, 11], ['tw2', '陽明山霧道', 'forest', 'fog', 3, 12], ['tw3', '港都夜景', 'city', 'night', 4, 13], ['tw4', '東海岸雨線', 'coast', 'rain', 3, 14]]],
-  ['jp', '日本', [['jp1', '箱根山道', 'forest', 'clear', 3, 21], ['jp2', '首都高夜行', 'city', 'night', 4, 22], ['jp3', '雨中賽道', 'farm', 'rain', 3, 23], ['jp4', '北國雪原', 'snow', 'snow', 3, 24]]],
-  ['us', '美國', [['us1', '沙漠直線', 'desert', 'clear', 4, 31], ['us2', '紅岩峽谷', 'desert', 'clear', 3, 32], ['us3', '霓虹賭城', 'city', 'night', 4, 33], ['us4', '一號公路霧', 'coast', 'fog', 3, 34]]],
-  ['de', '德國', [['de1', '黑森林', 'forest', 'rain', 3, 41], ['de2', '北環霧中', 'forest', 'fog', 3, 42], ['de3', '阿爾卑斯雪', 'snow', 'snow', 3, 43], ['de4', '無限速公路', 'farm', 'clear', 5, 44]]],
+  ['tw', '台灣', [['tw1', '河濱大道', 'city', 'clear', 3, 11], ['tw2', '陽明山霧道', 'forest', 'fog', 3, 12], ['tw3', '港都夜景', 'city', 'night', 3, 13], ['tw4', '東海岸雨線', 'coast', 'rain', 3, 14]]],
+  ['jp', '日本', [['jp1', '箱根山道', 'forest', 'clear', 3, 21], ['jp2', '首都高夜行', 'city', 'night', 3, 22], ['jp3', '雨中賽道', 'farm', 'rain', 3, 23], ['jp4', '北國雪原', 'snow', 'snow', 3, 24]]],
+  ['us', '美國', [['us1', '沙漠直線', 'desert', 'clear', 3, 31], ['us2', '紅岩峽谷', 'desert', 'clear', 3, 32], ['us3', '霓虹賭城', 'city', 'night', 3, 33], ['us4', '一號公路霧', 'coast', 'fog', 3, 34]]],
+  ['de', '德國', [['de1', '黑森林', 'forest', 'rain', 3, 41], ['de2', '北環霧中', 'forest', 'fog', 3, 42], ['de3', '阿爾卑斯雪', 'snow', 'snow', 3, 43], ['de4', '無限速公路', 'farm', 'clear', 3, 44]]],
 ];
 /** 用種子產生路線：直線、左右彎、坡；越後面的國家彎越急。 */
 function makePieces(seed: number, hard: number): Piece[] {
