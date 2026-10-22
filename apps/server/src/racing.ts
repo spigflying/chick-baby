@@ -90,7 +90,7 @@ export async function raceLeaderboard(db: Db, track: string) {
 // ---------- 一起賽車（家裡邀請，同多人下樓梯）＋單人 ----------
 interface Seat { userId: string; name: string; car: string; paint: number; parts: any; left: boolean }
 interface Room { id: string; home: string | null; host: string; inst: string; track: string; seats: Seat[]; state: RaceState; startAt: number; ended: boolean; seq: Map<string, number> }
-interface Lobby { home: string; invite: Invite; track: string }
+interface Lobby { home: string; invite: Invite; track: string; createdAt: number }
 interface Deps {
   db: Db; bus: Bus; presence: PresenceStore; instance: () => string;
   /** 送給本機連線（ws.ts 轉發）；只有自己一個執行個體或單人賽時直接用 */
@@ -155,7 +155,7 @@ async function invite(home: string, user: string, name?: string, now = Date.now(
   const others = users.filter((u) => u.id !== user && !byUser.has(u.id) && !deps!.userBusy?.(home, u.id)).map((u) => u.id).slice(0, MAX_HUMANS - 1);
   if (!others.length) return void start(home, user, [user], track, null);
   const inv = createInvite(randomUUID(), user, others, now, RACE_INVITE_MS);
-  lobbies.set(home, { home, invite: inv, track });
+  lobbies.set(home, { home, invite: inv, track, createdAt: Date.now() });
   outHome({ t: 'rrace.event', home, kind: 'invite', invite: inv.id, from: user, from_name: label(me) ?? name, to: inv.to, left_ms: RACE_INVITE_MS, track, max: MAX_HUMANS });
 }
 function reply(home: string, user: string, id: string, accept: boolean) {
@@ -227,7 +227,13 @@ function raceInput(r: Room, userId: string, msg: any) {
   setRaceInput(r.state, userId, msg);
 }
 /** 比賽中離開：車子放開油門，結束時照樣結算。 */
-function quit(r: Room, userId: string) { const s = r.seats.find((x) => x.userId === userId); if (s) { s.left = true; setRaceInput(r.state, userId, {}); } }
+function quit(r: Room, userId: string) {
+  const s = r.seats.find((x) => x.userId === userId); if (!s) return;
+  s.left = true; setRaceInput(r.state, userId, {});
+  // 離開的人馬上可以再開一場（不用等這場跑完，最多 9 分鐘）；真人都走光 → 這場直接結算
+  if (byUser.get(userId) === r.id) byUser.delete(userId);
+  settleIfDone(r);
+}
 /** 家裡在場名單變了：報名中不在家的人退出；負責者換人 → 邀請取消（比賽本身不受影響）。 */
 export function onRacePresence(home: string) {
   if (!deps) return;
@@ -236,14 +242,25 @@ export function onRacePresence(home: string) {
   const here = new Set(deps.presence.users(home).map((u) => u.id));
   for (const u of [lb.invite.from, ...lb.invite.to]) if (!here.has(u)) leaveLobby(home, u);
 }
+/** 真人都跑完或離開 → 這場就結束（不再等電腦車跑完，家裡的「正在賽車」鎖跟著解開）。 */
+function settleIfDone(r: Room) {
+  if (r.state.over) return;
+  if (r.seats.every((x) => x.left || r.state.cars.find((c) => c.id === x.userId)?.finishedTick != null)) r.state.over = true;
+}
+/** 安全網：比賽最長 9 分鐘＋倒數；超過還沒結束就強制結算，避免鎖卡住。 */
+const STALE_RACE_MS = 10 * 60 * 1000;
+const STALE_LOBBY_MS = 2 * 60 * 1000;
 const snap = (r: Room) => ({ t: 'rrace.snap', tick: r.state.tick, countdown: r.state.countdown, cars: r.state.cars.map(snapCar) });
 export function stepRaces(now = Date.now()) {
   if (!deps) return;
+  for (const lb of [...lobbies.values()]) if (now - lb.createdAt > STALE_LOBBY_MS) { console.warn('race lobby stale', lb.home); cancelLobby(lb, 'CANCELLED'); }
   for (const lb of [...lobbies.values()]) { if (!isAuthority(lb.home)) onRacePresence(lb.home); else resolveLobby(lb, now); }
   for (const r of rooms.values()) {
     if (r.ended) continue;
     const target = Math.floor(((now - r.startAt) * RACE_TICK_RATE) / 1000);
     while (r.state.tick < target && !r.state.over) { stepRace(r.state); if (r.state.tick % 2 === 0) outRace(r, snap(r)); }
+    settleIfDone(r);
+    if (now - r.startAt > STALE_RACE_MS) { console.warn('race stale, force finish', r.id); r.state.over = true; }
     if (r.state.over) void finish(r);
   }
 }
