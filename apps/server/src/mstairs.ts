@@ -259,7 +259,7 @@ export async function finish(m: MMatch, reason: 'over' | 'quit') {
         const row = await lockPet(tx, s.petId);
         const { state } = await settle(tx, row);
         let coins = 0;
-        if (state.status === 'alive') { applyStairsResult(state, r.floor, undefined, m.state.tick); coins = m.room ? (ROOM_PRIZES[r.rank - 1] ?? 0) : multiStairsCoins(n, r.rank); }
+        if (state.status === 'alive') { applyStairsResult(state, r.floor, undefined, m.state.tick); coins = m.room ? roomPrize(n, r.rank) : multiStairsCoins(n, r.rank); }
         await savePet(tx, s.petId, state);
         if (coins > 0) await changeBalance(tx, s.userId, coins, 'stairs_match', { type: 'stair_match', id: m.id });
         await insertEvents(tx, s.petId, [{ type: 'stairs_match', actor: s.userId, payload: { match_id: m.id, floors: r.floor, rank: r.rank, players: n, coins, reason, cause: r.cause } }]);
@@ -297,6 +297,9 @@ export async function abortMStairs() {
 export const _lobbies = lobbies;
 /** v27 房間獎勵（賽車房、下樓梯房共用）：前三名 ◎150／100／50 */
 export const ROOM_PRIZES = [150, 100, 50];
+/** 只有 1 位真人的房間（單人房）：完賽給 50（防刷） */
+export const ROOM_SOLO_PRIZE = 50;
+export const roomPrize = (humans: number, pos: number) => humans <= 1 ? (pos === 1 ? ROOM_SOLO_PRIZE : 0) : (ROOM_PRIZES[pos - 1] ?? 0);
 export const STAIRS_ROOM_MAX = STAIRS_MULTI.maxPlayers, STAIRS_ROOM_MIN = STAIRS_MULTI.minPlayers;
 /**
  * v27 下樓梯房開局：沒有「家」與在場名單，名字／精靈直接查資料庫；虛擬 home 鍵 'room:<房間 id>'，

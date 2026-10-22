@@ -3,6 +3,7 @@ import { carStats, PARTS, PART_KINDS, STOCK_PARTS, NITRO_PER_RACE, RACE_TICK_RAT
 import { G, kmhShown } from './race-gfx';
 import { bigDigit } from './race-shop';
 import { partIcon } from './race-icons';
+import { speedCanvas } from './speed-font';
 
 export interface Speeds { dry: number; wet: number; nitroDry: number; nitroWet: number }
 /** 顯示用 km/h（速度表同一套：真實 ÷3），四捨五入 */
@@ -44,6 +45,7 @@ export function statusHtml(prof: any): string {
 }
 export function mountStatus(el: HTMLElement, prof: any) {
   const sp = topSpeeds(prof.parts, prof.car), val: Record<string, number> = { dry: sp.dry, wet: sp.wet, nd: sp.nitroDry, nw: sp.nitroWet };
-  el.querySelectorAll('canvas[data-big]').forEach((c) => { const src = bigNumber(val[(c as HTMLElement).dataset.big!]), cv = c as HTMLCanvasElement; cv.width = src.width; cv.height = src.height; cv.getContext('2d')!.drawImage(src, 0, 0); });
+  el.querySelector('.rs-speeds')?.setAttribute('data-sf', 'A');
+  el.querySelectorAll('canvas[data-big]').forEach((c) => { const src = speedCanvas(val[(c as HTMLElement).dataset.big!]), cv = c as HTMLCanvasElement; cv.width = src.width; cv.height = src.height; cv.getContext('2d')!.drawImage(src, 0, 0); });
   el.querySelectorAll('canvas[data-icon]').forEach((c) => { const [k, lv] = (c as HTMLElement).dataset.icon!.split(':'), x = (c as HTMLCanvasElement).getContext('2d')!; x.fillStyle = G[1]; x.fillRect(0, 0, 48, 48); x.drawImage(partIcon(k as PartKind, Number(lv)), 0, 0); });
 }

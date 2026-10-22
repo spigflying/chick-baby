@@ -152,7 +152,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   function renderRoomForm(head: string) {
     body.innerHTML = `<div class="race-top-row"><button id="rmk" class="big race-top-btn">建立房間</button><button id="rmx" class="big race-top-btn">取消</button></div>` + head +
       `<h3>開房間</h3><label class="room-field">賽道 <select id="rmt">${trackOpts(roomTrack)}</select></label><label class="room-field">圈數 <select id="rml">${lapOpts(roomLaps)}</select></label>
-      <p class="muted">建立後，好友（去過彼此家裡、或在邀請名單裡的人）不管在哪個畫面都會收到邀請。最多 ${8} 位玩家，其餘由電腦車補滿。房間比賽獎金：真人前三名 ◎150／100／50（取代一般獎金）；圈數跟賽道預設不同時不算積分、錦標賽與最快時間。</p>`;
+      <p class="muted">建立後，好友（去過彼此家裡、或在邀請名單裡的人）不管在哪個畫面都會收到邀請。最多 ${8} 位玩家，其餘由電腦車補滿。房間比賽獎金：2 位以上真人時前三名 ◎150／100／50、只有自己一人時完賽 ◎50（取代一般獎金）；圈數跟賽道預設不同時不算積分、錦標賽與最快時間。</p>`;
     (body.querySelector('#rmt') as HTMLSelectElement).onchange = (e) => { roomTrack = (e.target as HTMLSelectElement).value; };
     (body.querySelector('#rml') as HTMLSelectElement).onchange = (e) => { roomLaps = Number((e.target as HTMLSelectElement).value); };
     (body.querySelector('#rmx') as HTMLElement).onclick = () => { roomForm = false; renderPanel(); };
@@ -169,7 +169,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       ${left !== null ? `<div class="room-cd"><span>全員準備！</span><b id="rcd">${left}</b><span>秒後開跑</span></div>` : ''}
       <div class="room-cfg">${host ? `<label class="room-field">賽道 <select id="rct">${trackOpts(r.track)}</select></label><label class="room-field">圈數 <select id="rcl">${lapOpts(r.laps)}</select></label>`
         : `<p>賽道：<b>${esc(t.country)}・${esc(t.name)}</b>（${WEATHER[t.weather]}）・<b>${r.laps}</b> 圈 <span class="muted">（房主決定）</span></p>`}
-        <p class="muted">房間獎金：真人前三名 ◎150／100／50${r.laps !== t.laps ? '；圈數跟賽道預設不同，不算積分、錦標賽與最快時間' : ''}</p></div>
+        <p class="muted">房間獎金：2 位以上真人時前三名 ◎150／100／50；只有自己一人時完賽 ◎50${r.laps !== t.laps ? '；圈數跟賽道預設不同，不算積分、錦標賽與最快時間' : ''}</p></div>
       <h3>成員 <span class="muted">準備 ${ready}/${r.members.length}</span></h3>
       <ul class="room-members">${r.members.map((m: any) => `<li class="${m.ready ? 'ok' : ''} ${m.online ? '' : 'off'}"><span>${esc(m.name)}${m.host ? ' <span class="room-tag">房主</span>' : ''}${m.user === me.user.id ? ' <span class="muted">（你）</span>' : ''}</span><span class="room-st">${!m.online ? '斷線中…' : m.ready ? '✔ 準備好了' : '等待中'}</span></li>`).join('')}</ul>
       <p class="muted">房間 ${Math.ceil(r.expires_ms / 60000)} 分鐘內沒有動作會自動關閉。房主離開時交給最早加入的人。</p>`;
@@ -312,7 +312,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     // 選單標題（原生 240×200）
     panel(x, 0, 0, W, 24); text(x, 'GRAND PRIX', 6, 5, 0, 2); zh(x, `${t.country}・${t.name}`, W - 6 - zhW(x, `${t.country}・${t.name}`), 6, 1);
     panel(x, 4, H - 40, 120, 36); zh(x, `${t.country} 第 ${t.raceIdx + 1} 站 / ${RACES_PER_COUNTRY}`, 10, H - 36, 0); const rr = live?.room?.game === 'race' && live.room.track === t.id ? live.room : null; // v27：在賽車房裡顯示房間設定的圈數與房間獎金
-    zh(x, rr ? `${WEATHER[t.weather]}・${rr.laps} 圈・冠軍 ${coinTxt(150)}` : `${WEATHER[t.weather]}・${t.laps} 圈・冠軍 ${coinTxt(prizeFor(1))}`, 10, H - 21, 1);
+    zh(x, rr ? `${WEATHER[t.weather]}・${rr.laps} 圈・冠軍 ${coinTxt(rr.members.length > 1 ? 150 : 50)}` : `${WEATHER[t.weather]}・${t.laps} 圈・冠軍 ${coinTxt(prizeFor(1))}`, 10, H - 21, 1);
     drawMinimap(x, { track: t, me: null, cars: [], tick: 0, countdown: 0, laps: t.laps, len: attract!.len, rank: 0, frame, hud: false }, W - 72, H - 64, 68, 60);
     if (frame % 20 < 13) { panel(x, W / 2 - 52, 84, 104, 22); text(x, 'PRESS GO', W / 2 - 46, 88, 0, 2); }
   }

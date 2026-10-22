@@ -18,7 +18,7 @@ import type { Bus } from './bus';
 import type { PresenceStore } from './presence';
 import { env } from './env';
 import { petLook, spriteKey } from './pets';
-import { ROOM_PRIZES, startRoomStairs, STAIRS_ROOM_MAX, STAIRS_ROOM_MIN } from './mstairs';
+import { roomPrize, startRoomStairs, STAIRS_ROOM_MAX, STAIRS_ROOM_MIN } from './mstairs';
 import { newRoom, roomConfig, roomDrop, roomJoin, roomLeave, roomReady, roomTick, roomView, type RaceRoom } from './race-rooms';
 
 export const CLOSING_GUARD_MS = 8 * 60_000; // 關門前 8 分鐘不開新比賽（最長比賽＋等待時間）
@@ -380,7 +380,7 @@ async function finish(r: Room) {
     const car = st.cars.find((c) => c.id === s.userId)!; const pos = rank.indexOf(car) + 1;
     const finished = car.finishedTick !== null, counts = !r.room || r.room.fullLaps;
     const humanPos = humanRank.indexOf(s.userId) + 1; // 房間獎金看「真人之間」的名次（完賽才有）
-    const prize = !finished ? 0 : r.room ? (ROOM_PRIZES[humanPos - 1] ?? 0) : prizeFor(pos), pts = finished && counts ? pointsFor(pos) : 0, time = counts ? raceTimeMs(st, car) : null;
+    const prize = !finished ? 0 : r.room ? roomPrize(humans, humanPos) : prizeFor(pos), pts = finished && counts ? pointsFor(pos) : 0, time = counts ? raceTimeMs(st, car) : null;
     // 錦標賽積分榜：自己＝ME，電腦用名字，其他真人用 user:id
     const ranking = rank.map((c, i) => ({ key: c.id === s.userId ? ME : c.ai ? c.name : `user:${c.id}`, rank: c.finishedTick === null && c.id === s.userId ? RACE_SLOTS : i + 1 }));
     try {

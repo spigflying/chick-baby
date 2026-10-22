@@ -80,6 +80,15 @@ describe('race rooms over the race authority (real schema)', () => {
     const rows = await sql<{ time_ms: number | null; private: boolean }>`SELECT time_ms, private FROM race_results WHERE race_id = ${raceId}`.execute(db);
     expect(rows.rows.every((r) => r.time_ms === null && r.private)).toBe(true);
   });
+  it('solo room race (1 human) pays 50 to the finisher', async () => {
+    const a = await user('S1', '雞');
+    const id = await createRoom(a, 'tw1', 1);
+    onRaceBus({ t: 'rrace.rready', inst: 'i1', room: id, user: a, ready: true });
+    stepRaces(Date.now() + ROOM_COUNTDOWN_MS + 10); await new Promise((r) => setTimeout(r, 300));
+    const raceId = last('rrace.started').race_id;
+    await fastForwardRace(raceId, (s) => { for (const c of s.cars) if (!c.ai) { c.speed = 400; } });
+    const res = last('rrace.ended').results; expect(res.find((x: any) => x.user_id === a).prize).toBe(50);
+  });
   it('stairs room: 2 ready → multiplayer stairs starts (room match, NOTIFY to members) and pays 150/100', async () => {
     const a = await user('S1', '雞'), b = await user('S2', '鴨');
     const id = await createRoom(a, null, null, Date.now(), 'stairs');
