@@ -356,7 +356,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
       const u = dz - a.d, wx = a.wx + a.h * u + a.c * u * u / 2, wy = elevAt(el, camZ + dz), pr = proj(dz, wx, wy);
       const py = pr.py, pxc = pr.pxc, pw = ROAD_W * pr.scale * (W / 2);
       if (a.clip < H && py > a.clip + 2) continue;
-      sprites.push({ k: k + 1, draw: () => drawFinishGate(x, pxc, Math.min(H - 2, Math.round(py)), pw, night, t.country, t.name) });
+      sprites.push({ k: k + 1, draw: () => drawFinishGate(x, pxc, Math.min(H - 2, Math.round(py)), pw, night) });
     }
   }
   // 所有車（含自己）用同一套投影：同深度同尺寸，自己最近所以最大
@@ -433,8 +433,8 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   Q = G;
 }
 /** 氮氣：不出字，用畫面本身表現——下半部微微拉寬（FOV 感）、從消失點往外的速度線、左右邊緣一閃一閃的亮色描邊。 */
-/** 起點／終點同一道黑白格門（每圈都畫，含發車時在前方可見）；樑上標國家＋賽道名。純四階綠像素。 */
-function drawFinishGate(x: CanvasRenderingContext2D, cx: number, groundY: number, halfW: number, night: boolean, country: string, trackName: string) {
+/** 起點／終點同一道黑白格門（每圈都畫，含發車時在前方可見）；只留格子門柱＋樑，不標賽道名以免擋視線。純四階綠像素。 */
+function drawFinishGate(x: CanvasRenderingContext2D, cx: number, groundY: number, halfW: number, night: boolean) {
   role('prop');
   const P = night ? NIGHT : G;
   const hw = Math.max(10, Math.round(halfW * 1.02));
@@ -460,16 +460,6 @@ function drawFinishGate(x: CanvasRenderingContext2D, cx: number, groundY: number
       x.fillStyle = on ? P[0] : P[3];
       x.fillRect(px, top + row * cell, Math.min(cell, right + postW - px), Math.min(cell, beamH - row * cell));
     }
-  }
-  // 國家＋賽道名：貼在門樑下方（近處可讀）；字太寬就只寫賽道名
-  role('hud');
-  let label = `${country}·${trackName}`, fsz = Math.max(8, Math.min(12, Math.round(hw * 0.2)));
-  let tw = zhW(x, label, fsz);
-  if (tw > hw * 1.8) { label = trackName; tw = zhW(x, label, fsz); }
-  const tx = Math.round(cx - tw / 2), ty = Math.round(top + beamH + 2);
-  if (hw >= 18 && ty + fsz < groundY - 2) {
-    x.fillStyle = P[3]; x.fillRect(tx - 2, ty - 1, tw + 4, fsz + 3);
-    zh(x, label, tx, ty, 0, fsz);
   }
 }
 
@@ -617,6 +607,14 @@ export function drawMinimap(x: CanvasRenderingContext2D, v: View, mx: number, my
   // 粗線賽道：先畫最暗外框，再畫亮色
   for (const [c, wd] of [[3, 2], [0, 1]] as const) { x.fillStyle = Q[c]; for (let i = 0; i < n; i++) { const a = m.pts[i], b = m.pts[(i + 1) % n]; for (let oy = -wd + 1; oy < wd; oy++) for (let ox = -wd + 1; ox < wd; ox++) line(x, mx + a[0] + ox, my + a[1] + oy, mx + b[0] + ox, my + b[1] + oy); } }
   const at = (z: number) => m.pts[((Math.floor(((z % v.len) + v.len) % v.len / SEG_LEN)) % n + n) % n];
+  // 起終點（z%len≈0，同門位置）：棋盤格方塊，四階綠
+  {
+    const p = at(0);
+    for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
+      x.fillStyle = Q[((dx + 3) + (dy + 3)) & 1 ? 0 : 3];
+      x.fillRect(mx + p[0] + dx, my + p[1] + dy, 1, 1);
+    }
+  }
   const dot = (p: [number, number], c: number) => { x.fillStyle = Q[3]; x.fillRect(mx + p[0] - 2, my + p[1] - 2, 5, 5); x.fillStyle = Q[c]; x.fillRect(mx + p[0] - 1, my + p[1] - 1, 3, 3); };
   // v21：每台車都畫點（名次跟 HUD 一樣：先跑完的在前）。電腦＝小暗點；真人＝大點；前 3 名和真人標名次；自己閃爍＋P名次
   const order = raceOrder(v.cars), placed: [number, number, number][] = [];
