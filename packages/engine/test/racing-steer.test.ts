@@ -6,7 +6,7 @@ describe('racing v14 steering', () => {
     const s = createRace(1, 'tw1', fillField([{ id: 'me', name: 'me' }])); s.cars.splice(0, s.cars.length, ...s.cars.filter((c) => c.id === 'me'));
     const me = s.cars[0]; for (let i = 0; i < 160; i++) { setRaceInput(s, 'me', { gas: true }); stepRace(s); }
     const x0 = me.x; setRaceInput(s, 'me', { gas: true, right: true }); stepRace(s); setRaceInput(s, 'me', { gas: true }); 
-    expect(Math.abs(me.x - x0)).toBeLessThan(0.05); expect(me.x - x0).toBeGreaterThan(0.02);
+    expect(Math.abs(me.x - x0)).toBeLessThan(0.05); expect(me.x - x0).toBeGreaterThan(0.01); // race-feel-pc：加油時 STEER_AUTH_GAS=0.75，單 tick 位移略降
   });
   it('AI holds a steady line at 4x speed (v22): < 0.3 lateral direction reversals (>0.015) per car-second on every track', () => {
     for (const tr of TRACKS) {

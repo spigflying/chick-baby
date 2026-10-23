@@ -323,14 +323,29 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
   return { gas: !tooFast && !follow && c.aiRecover < 14, brake: tooFast && c.speed > safe + 4 * X, left: steerAmt < 0, right: steerAmt > 0, nitro, steer: steerAmt };
 }
 /**
- * 過彎離心力（v12）：每秒往彎外滑 = 彎度 × (速度/70)² × slideFactor(抓地)。
+ * 過彎離心力（v12）：每秒往彎外滑 = 彎度 × (速度/70)² × slideFactor(抓地) ×（高速加成）。
  * slideFactor 隨抓地力 2.5 次方下降：原廠胎在快彎明顯被甩出去，3 階胎幾乎貼著線走（雨天用雨胎抓地）。
+ *
+ * 手感目標（race-feel-pc）：
+ * - 約 90° 級彎（中等 curve 路段）：油門＋轉向仍可控。
+ * - 更急／髮夾（大 curve 或高速）：持續加油容易甩出；收油（coast）提升轉向權限、較好過彎。
+ * - 公式含速度：sp² 為主，sp 超過 PULL_SP_HI 再乘 PULL_HI_MUL。
  */
 /** v13（curves）：過彎外甩整體減半（所有胎、乾濕地一律 ×0.5，相對差異不變）。 */
 /** v14（steer）：固定速率轉向（每秒最多橫移幾個半路寬），從 1.6 降到 0.75：點一下只動一點、按住穩定平移。AI 也用同一個值。 */
 export const STEER_RATE = 0.75 * SPEED_X / 4; // v25：轉向、外甩都依 SPEED_X/4 縮放 → 每公尺路的操控跟 4 倍時一樣
-/** 外甩跟著轉向一起縮放（v13 的 0.5 × 0.75/1.6），過彎守線難度與 v13 相同，只是整體橫向動作變慢。 */
-export const CORNER_PULL = 0.5 * STEER_RATE / 1.6 * 1.4; // v21：速度 ×4（相對 v19），彎道時間再減半，外甩 ×1.4 讓原廠胎仍偶爾衝出、3 階胎守住
+/** 外甩跟著轉向一起縮放（v13 的 0.5 × 0.75/1.6）。race-feel-pc：1.4→1.65 加強離心，搭配收油轉向加成。 */
+export const CORNER_PULL = 0.5 * STEER_RATE / 1.6 * 1.65; // was *1.4 (~0.246 → ~0.290)
+/** 高速外甩加成：sp = speed/(70×SPEED_X)，超過門檻再乘倍率（含速度於公式）。 */
+export const PULL_SP_HI = 0.88;
+export const PULL_HI_MUL = 1.25;
+/**
+ * 轉向權限倍率（乘在 STEER_RATE×speedAuth 上；STEER_RATE／CORNER_PULL 仍依 SPEED_X/4，避免飄）。
+ * 加油時橫向變鈍、收油時更靈 → 急彎收油較好過。
+ */
+export const STEER_AUTH_GAS = 0.75;
+export const STEER_AUTH_NITRO = 0.68; // 氮氣中再鈍一點
+export const STEER_AUTH_COAST = 1.2;
 export const slideFactor = (grip: number) => Math.min(1.4, 0.35 * Math.pow(1.4 / Math.max(0.3, grip), 2.5));
 export function gripOf(c: RaceCar, w: Weather) { return w === 'rain' ? c.stats.wetGrip : w === 'snow' ? c.stats.wetGrip * 0.85 : w === 'fog' ? c.stats.grip * 0.95 : c.stats.grip; }
 /** 碰撞：依部位扣完美度（裝甲減免）。每次撞擊都算。 */
@@ -377,9 +392,15 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
     if (c.speed > vmax) c.speed -= (c.speed - vmax) * 2 * dt;
     c.speed = Math.max(0, c.speed);
     const sp = c.speed / (70 * X);
-    const pull = seg.curve * sp * sp * slideFactor(grip) * CORNER_PULL, auth = STEER_RATE * Math.min(1, sp + 0.15);
+    // 離心：curve × sp² × grip × CORNER_PULL；高速再 × PULL_HI_MUL（急彎加油易甩、收油較穩）
+    const pullSp = sp * sp * (sp > PULL_SP_HI ? PULL_HI_MUL : 1);
+    const pull = seg.curve * pullSp * slideFactor(grip) * CORNER_PULL;
+    // 轉向權限：基礎仍 STEER_RATE×速度；加油／氮氣打折、收油加成（見 STEER_AUTH_*）
+    let auth = STEER_RATE * Math.min(1, sp + 0.15);
+    if (inp.gas) auth *= (c.nitroT > 0 ? STEER_AUTH_NITRO : STEER_AUTH_GAS);
+    else auth *= STEER_AUTH_COAST;
     // v22：AI 在每個子步依目前路段先抵銷離心外甩（前饋），比例方向盤只修小偏差 → 過彎穩定、不左右擺（總轉向仍限 ±1）
-    const steer = c.ai && inp.steer !== undefined ? Math.max(-1, Math.min(1, inp.steer + pull / auth)) : (inp.left ? -1 : 0) + (inp.right ? 1 : 0);
+    const steer = c.ai && inp.steer !== undefined ? Math.max(-1, Math.min(1, inp.steer + pull / Math.max(1e-6, auth))) : (inp.left ? -1 : 0) + (inp.right ? 1 : 0);
     c.x += steer * auth * dt;
     c.x -= pull * dt;
     if (Math.abs(c.x) > 1.55) { // 撞上路邊護欄

@@ -343,6 +343,22 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
       sprites.push({ k, draw: () => { x.drawImage(img, Math.round(wx - ww / 2), Math.round(p.y - hh), Math.max(1, Math.round(ww)), Math.max(1, Math.round(hh))); } });
     }
   }
+  // 起終點門：同一道（z = k×len），每圈可見；發車時 z=0 在前方
+  {
+    const L = v.len;
+    const lap0 = Math.floor(camZ / L) - 1;
+    for (let lap = lap0; lap <= lap0 + 3; lap++) {
+      const gz = lap * L;
+      let dz = gz - camZ;
+      if (dz < 0.8 || dz > (DRAW - 3) * SEG_LEN) continue;
+      let k = 0; while (k + 1 < pts.length && pts[k + 1].d <= dz) k++;
+      const a = pts[k]; if (!a || !pts[k + 1]) continue;
+      const u = dz - a.d, wx = a.wx + a.h * u + a.c * u * u / 2, wy = elevAt(el, camZ + dz), pr = proj(dz, wx, wy);
+      const py = pr.py, pxc = pr.pxc, pw = ROAD_W * pr.scale * (W / 2);
+      if (a.clip < H && py > a.clip + 2) continue;
+      sprites.push({ k: k + 1, draw: () => drawFinishGate(x, pxc, Math.min(H - 2, Math.round(py)), pw, night, t.country, t.name) });
+    }
+  }
   // 所有車（含自己）用同一套投影：同深度同尺寸，自己最近所以最大
   const place = (c: ViewCar) => {
     let dz = c.z - camZ; const L = v.len; dz = ((dz % L) + L) % L; if (dz > L / 2) dz -= L;
@@ -417,6 +433,47 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   Q = G;
 }
 /** 氮氣：不出字，用畫面本身表現——下半部微微拉寬（FOV 感）、從消失點往外的速度線、左右邊緣一閃一閃的亮色描邊。 */
+/** 起點／終點同一道黑白格門（每圈都畫，含發車時在前方可見）；樑上標國家＋賽道名。純四階綠像素。 */
+function drawFinishGate(x: CanvasRenderingContext2D, cx: number, groundY: number, halfW: number, night: boolean, country: string, trackName: string) {
+  role('prop');
+  const P = night ? NIGHT : G;
+  const hw = Math.max(10, Math.round(halfW * 1.02));
+  // 尺寸跟「半路寬 px」成正比（不要用 pw/ROAD_W 當倍率，那會到數十倍把拱門撐出畫面）
+  const postW = Math.max(2, Math.round(hw * 0.07));
+  const archH = Math.max(16, Math.min(Math.round(H * 0.42), Math.round(hw * 0.7)));
+  const beamH = Math.max(5, Math.round(hw * 0.14));
+  const left = Math.round(cx - hw), right = Math.round(cx + hw);
+  const top = Math.round(groundY - archH);
+  const cell = Math.max(2, Math.min(6, Math.round(hw * 0.09)));
+  // 兩側立柱（黑白格）
+  for (const px0 of [left - postW, right]) {
+    for (let yy = top; yy < groundY; yy += cell) for (let xx = 0; xx < postW; xx += cell) {
+      const on = (((yy - top) / cell | 0) + (xx / cell | 0)) & 1;
+      x.fillStyle = on ? P[0] : P[3];
+      x.fillRect(px0 + xx, yy, Math.min(cell, postW - xx), Math.min(cell, groundY - yy));
+    }
+  }
+  // 門樑黑白格
+  for (let px = left - postW; px < right + postW; px += cell) {
+    for (let row = 0; row < Math.max(1, Math.ceil(beamH / cell)); row++) {
+      const on = (((px - (left - postW)) / cell | 0) + row) & 1;
+      x.fillStyle = on ? P[0] : P[3];
+      x.fillRect(px, top + row * cell, Math.min(cell, right + postW - px), Math.min(cell, beamH - row * cell));
+    }
+  }
+  // 國家＋賽道名：貼在門樑下方（近處可讀）；字太寬就只寫賽道名
+  role('hud');
+  let label = `${country}·${trackName}`, fsz = Math.max(8, Math.min(12, Math.round(hw * 0.2)));
+  let tw = zhW(x, label, fsz);
+  if (tw > hw * 1.8) { label = trackName; tw = zhW(x, label, fsz); }
+  const tx = Math.round(cx - tw / 2), ty = Math.round(top + beamH + 2);
+  if (hw >= 18 && ty + fsz < groundY - 2) {
+    x.fillStyle = P[3]; x.fillRect(tx - 2, ty - 1, tw + 4, fsz + 3);
+    zh(x, label, tx, ty, 0, fsz);
+  }
+}
+
+
 // ---------------- v25 氮氣特效：大火焰＋放射狀動態模糊（4 綠、像素風） ----------------
 /** 強度（0 關…1 預設…1.5 強）：flame＝火焰長度倍率、blur＝邊緣模糊密度倍率 */
 export const NITRO_FX = { flame: 1, blur: 1 };
@@ -496,15 +553,17 @@ function drawNitroFx(x: CanvasRenderingContext2D, v: View, now: number) {
   // 1) 拉伸：地平線以下左右各外擴 3~5%
   const st = 0.03 + 0.02 * pulse, sy = HORIZON, sh = H - HORIZON;
   if (x.canvas && (x.canvas as any).width) x.drawImage(x.canvas, 0, sy, W, sh, -W * st / 2, sy, W * (1 + st), sh);
-  // 2) 速度線：從消失點往外，越外面越長，最亮／最暗交錯
-  for (let i = 0; i < 52; i++) { // 手動氮氣與路上道具共用（都是 nitroT > 0）；v23 線數 ×2、更長更粗
-    const a = hash(i + 300) * Math.PI * 2, sp = (t * (2.2 + hash(i + 400)) + hash(i + 500)) % 1;
-    const r0 = 24 + sp * 140, r1 = r0 + 22 + sp * 70;
+  // 2) 速度線／streak：race-feel-pc 加強可見度（線數 52→88、更長更粗、步距更密）
+  //    before: n=52, rect 3×2, r0=24+sp*140, len=22+sp*70, step=1.5
+  //    after:  n=88, rect 4×2, r0=18+sp*150, len=28+sp*90, step=1.15
+  for (let i = 0; i < 88; i++) {
+    const a = hash(i + 300) * Math.PI * 2, sp = (t * (2.4 + hash(i + 400)) + hash(i + 500)) % 1;
+    const r0 = 18 + sp * 150, r1 = r0 + 28 + sp * 90;
     x.fillStyle = Q[i % 3 ? 0 : 3];
-    for (let r = r0; r < r1; r += 1.5) { const px = Math.round(cx + Math.cos(a) * r * 1.3), py = Math.round(cy + Math.sin(a) * r * 0.8); if (px < 0 || px >= W || py < 0 || py >= H) break; if (Math.abs(px - cx) < 40 && py > H - 70) continue; x.fillRect(px, py, 3, 2); }
+    for (let r = r0; r < r1; r += 1.15) { const px = Math.round(cx + Math.cos(a) * r * 1.35), py = Math.round(cy + Math.sin(a) * r * 0.85); if (px < 0 || px >= W || py < 0 || py >= H) break; if (Math.abs(px - cx) < 36 && py > H - 70) continue; x.fillRect(px, py, 4, 2); }
   }
-  // 3) 邊緣色調脈動：左右兩條抖動的亮色網點
-  const bw = 6 + Math.round(pulse * 6); x.fillStyle = Q[0];
+  // 3) 邊緣色調脈動：左右兩條抖動的亮色網點（加寬）
+  const bw = 8 + Math.round(pulse * 8); x.fillStyle = Q[0];
   for (let yy = 0; yy < H; yy += 2) for (let xx = 0; xx < bw; xx += 2) { const o = (yy >> 1) & 1; if ((xx + o + v.frame) & 2) { x.fillRect(xx + o, yy, 1, 1); x.fillRect(W - 1 - xx - o, yy, 1, 1); } }
 }
 function drawSkyline(x: CanvasRenderingContext2D, scene: string, bend: number, P: string[]) {

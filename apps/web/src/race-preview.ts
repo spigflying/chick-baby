@@ -151,5 +151,34 @@ async function simv() {
   };
   const d = document.createElement('div'); d.id = 'shots'; d.append(cv); root.append(d); (window as any).__ok = 1;
 }
-if (v === 'sim') void simv(); else if (v === 'at') at(); else if (v === 'icons') void icons(); else if (v === 'sheet') sheet(); else if (v === 'page') void page(); else scene(v);
+/** 起終點門預覽：發車前方／接近終點／中距（給 Benson 審核用，不上線）。?t=tw1 */
+async function gate() {
+  const q = new URLSearchParams(location.search);
+  const track = trackById(q.get('t') ?? 'tw1')!;
+  const len = trackSegs(track.id).length * SEG_LEN;
+  try { await (document as any).fonts?.load?.("12px 'Cubic 11'"); await (document as any).fonts?.ready; } catch { /* ignore */ }
+  await new Promise((r) => setTimeout(r, 200));
+  const mk = (i: number, z: number, xx: number, extra: Partial<ViewCar> = {}): ViewCar => ({ id: 'c' + i, name: 'c' + i, ai: true, car: 'ai', color: 0, z, x: xx, speed: 40, damage: 0, nitro: 3, nitroT: 0, fin: null, hit: 0, ...extra });
+  const shots: { label: string; z: number }[] = [
+    { label: 'start', z: -70 },          // 發車後方：門在 z=0 前方（約一排車位距離）
+    { label: 'approach', z: len - 45 },  // 接近本圈終點門
+    { label: 'mid', z: len - 110 },      // 中距
+  ];
+  const d = document.createElement('div'); d.id = 'shots'; root.append(d);
+  const out: HTMLCanvasElement[] = [];
+  shots.forEach(({ label, z }, si) => {
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H; cv.dataset.label = label;
+    cv.style.width = W * 3 + 'px'; cv.style.height = H * 3 + 'px'; cv.style.imageRendering = 'pixelated';
+    const x = cv.getContext('2d')!; x.imageSmoothingEnabled = false;
+    const me = mk(0, z, 0.1, { id: 'me', car: 'falcon', color: 0, ai: false, speed: 55 });
+    const cars = [me, mk(1, z + 25, -0.4), mk(2, z + 70, 0.35)];
+    // start 預覽不蓋倒數大字，方便看門
+    drawRace(x, { track, me, cars, tick: 200, countdown: 0, laps: track.laps, len, rank: 12, frame: 10 + si, hud: true, gears: 5, top: 84 });
+    const cap = document.createElement('p'); cap.textContent = `${label}: ${track.country} ${track.name} z=${z}`;
+    d.append(cap, cv); out.push(cv);
+  });
+  (window as any).__gateCanvases = out;
+  (window as any).__ok = 1;
+}
+if (v === 'sim') void simv(); else if (v === 'at') at(); else if (v === 'icons') void icons(); else if (v === 'sheet') sheet(); else if (v === 'page') void page(); else if (v === 'gate') void gate(); else scene(v);
 (window as any).__ready = v !== 'page' || true;

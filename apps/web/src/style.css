@@ -188,7 +188,7 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .stathelp p{margin:0}
 /* ---- 賽車模式 ---- */
 .race-page{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:center}
-.race-dev{width:min(100%,480px);display:flex;flex-direction:column;gap:8px}
+.race-dev{width:min(100%,720px);display:flex;flex-direction:column;gap:8px}
 .race-lcd canvas{display:block;width:100%;aspect-ratio:240/200;image-rendering:pixelated;background:var(--g3)}
 .race-pad{display:flex;gap:6px;align-items:stretch;user-select:none;-webkit-user-select:none;touch-action:none}
 .race-pad .sp{flex:1}
