@@ -313,7 +313,7 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
   c.aiT = (c.aiT ?? c.x) + (target - (c.aiT ?? c.x)) * 0.08;
   const dx = c.aiT - c.x;
   // 安全彎速：讓離心滑出量不超過方向盤修正能力的 75%（抓地差的 AI 也得在彎前收油，公平）
-  const slideSafe = Math.abs(curve) < 0.3 ? Infinity : 70 * X * Math.sqrt(STEER_RATE * 0.75 / (Math.abs(curve) * slideFactor(grip) * CORNER_PULL));
+  const slideSafe = Math.abs(curve) < 0.3 ? Infinity : 70 * X * Math.sqrt(STEER_RATE * 0.75 / (Math.abs(curve) * slideFactor(grip) * CORNER_PULL * hairpinPullMul(Math.abs(curve))));
   const safe = Math.min(slideSafe, c.stats.topSpeed * Math.min(1, 1.05 - Math.max(0, Math.abs(curve) - 2) * 0.09 / grip));
   const tooFast = c.speed > safe;
   const straight = Math.abs(near.curve) < 1.2 && Math.abs(far.curve) < 1.8;
@@ -323,22 +323,34 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
   return { gas: !tooFast && !follow && c.aiRecover < 14, brake: tooFast && c.speed > safe + 4 * X, left: steerAmt < 0, right: steerAmt > 0, nitro, steer: steerAmt };
 }
 /**
- * 過彎離心力（v12）：每秒往彎外滑 = 彎度 × (速度/70)² × slideFactor(抓地) ×（高速加成）。
+ * 過彎離心力（v12）：每秒往彎外滑 = 彎度 × (速度/70)² × slideFactor(抓地) × CORNER_PULL × hairpinPullMul ×（高速加成）。
  * slideFactor 隨抓地力 2.5 次方下降：原廠胎在快彎明顯被甩出去，3 階胎幾乎貼著線走（雨天用雨胎抓地）。
  *
- * 手感目標（race-feel-pc）：
- * - 約 90° 級彎（中等 curve 路段）：油門＋轉向仍可控。
- * - 更急／髮夾（大 curve 或高速）：持續加油容易甩出；收油（coast）提升轉向權限、較好過彎。
+ * 手感目標（race-feel-pc / race-hairpin-pull）：
+ * - 約 90° 級彎（|curve| ≲ HAIRPIN_CURVE）：油門＋轉向仍可控（不加髮夾倍率）。
+ * - 更急／髮夾（|curve| 超過門檻）：外甩隨彎度額外加碼；持續加油易飛出，收油（coast）較好過。
  * - 公式含速度：sp² 為主，sp 超過 PULL_SP_HI 再乘 PULL_HI_MUL。
+ * Benson：「髮夾灣還是太容易過了」→ 用彎度依賴倍率，而非只全局拉高 CORNER_PULL。
  */
 /** v13（curves）：過彎外甩整體減半（所有胎、乾濕地一律 ×0.5，相對差異不變）。 */
 /** v14（steer）：固定速率轉向（每秒最多橫移幾個半路寬），從 1.6 降到 0.75：點一下只動一點、按住穩定平移。AI 也用同一個值。 */
 export const STEER_RATE = 0.75 * SPEED_X / 4; // v25：轉向、外甩都依 SPEED_X/4 縮放 → 每公尺路的操控跟 4 倍時一樣
 /** 外甩跟著轉向一起縮放（v13 的 0.5 × 0.75/1.6）。race-feel-pc：1.4→1.65 加強離心，搭配收油轉向加成。 */
-export const CORNER_PULL = 0.5 * STEER_RATE / 1.6 * 1.65; // was *1.4 (~0.246 → ~0.290)
+export const CORNER_PULL = 0.5 * STEER_RATE / 1.6 * 1.65; // ~0.290；髮夾再靠 hairpinPullMul，不全局狂拉
 /** 高速外甩加成：sp = speed/(70×SPEED_X)，超過門檻再乘倍率（含速度於公式）。 */
 export const PULL_SP_HI = 0.88;
 export const PULL_HI_MUL = 1.25;
+/**
+ * |curve| ≤ HAIRPIN_CURVE：倍率 1（約 90° 可加油過）。
+ * 超過後每單位彎度 × HAIRPIN_PULL_EXTRA（例 |c|=4 → 1+2×0.55 = 2.1）。
+ * 路段 piece curve 常見 1～3.5（tw）、急彎可到 5～6（de）。
+ */
+export const HAIRPIN_CURVE = 2.0;
+export const HAIRPIN_PULL_EXTRA = 0.55;
+/** 髮夾外甩倍率：1 + max(0, |curve| − HAIRPIN_CURVE) × HAIRPIN_PULL_EXTRA */
+export function hairpinPullMul(absCurve: number): number {
+  return 1 + Math.max(0, absCurve - HAIRPIN_CURVE) * HAIRPIN_PULL_EXTRA;
+}
 /**
  * 轉向權限倍率（乘在 STEER_RATE×speedAuth 上；STEER_RATE／CORNER_PULL 仍依 SPEED_X/4，避免飄）。
  * 加油時橫向變鈍、收油時更靈 → 急彎收油較好過。
@@ -392,9 +404,9 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
     if (c.speed > vmax) c.speed -= (c.speed - vmax) * 2 * dt;
     c.speed = Math.max(0, c.speed);
     const sp = c.speed / (70 * X);
-    // 離心：curve × sp² × grip × CORNER_PULL；高速再 × PULL_HI_MUL（急彎加油易甩、收油較穩）
+    // 離心：curve × sp² × grip × CORNER_PULL × hairpinPullMul；高速再 × PULL_HI_MUL（急彎加油易甩、收油較穩）
     const pullSp = sp * sp * (sp > PULL_SP_HI ? PULL_HI_MUL : 1);
-    const pull = seg.curve * pullSp * slideFactor(grip) * CORNER_PULL;
+    const pull = seg.curve * pullSp * slideFactor(grip) * CORNER_PULL * hairpinPullMul(Math.abs(seg.curve));
     // 轉向權限：基礎仍 STEER_RATE×速度；加油／氮氣打折、收油加成（見 STEER_AUTH_*）
     let auth = STEER_RATE * Math.min(1, sp + 0.15);
     if (inp.gas) auth *= (c.nitroT > 0 ? STEER_AUTH_NITRO : STEER_AUTH_GAS);

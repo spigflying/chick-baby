@@ -8,7 +8,7 @@ import {
 describe('race-feel-pc: coast steer + stronger curve pull', () => {
   it('documents STEER_AUTH and CORNER_PULL targets', () => {
     expect(STEER_RATE).toBeCloseTo(0.75 * SPEED_X / 4, 6);
-    // before: CORNER_PULL ≈ 0.246 (*1.4); after ≈ 0.290 (*1.65)
+    // race-feel-pc: CORNER_PULL ≈ 0.290 (*1.65); race-hairpin-pull keeps base, adds hairpinPullMul
     expect(CORNER_PULL).toBeGreaterThan(0.27);
     expect(CORNER_PULL).toBeLessThan(0.32);
     expect(STEER_AUTH_GAS).toBeLessThan(1);

@@ -18,10 +18,14 @@ describe('racing v12: tire grip is clearly felt in corners', () => {
   });
   it('flat-out driver: stock tires run wide off the road, Lv3 holds the line (dry and wet)', () => {
     const base = { engine: 3, gearbox: 3, armorF: 0, armorR: 0, armorS: 0, nitro: 0 };
-    // race-feel-pc：CORNER_PULL 加強＋加油轉向打折 → 全油門更容易偏出；3 階乾地仍可守 de2，雨胎差距仍清楚
-    expect(drive('de2', { ...base, dry: 0 })).toBeGreaterThan(0.08); expect(drive('de2', { ...base, dry: 0 })).toBeLessThan(0.35); expect(drive('de2', { ...base, dry: 3 })).toBe(0);
-    expect(drive('jp3', { ...base, wet: 0 })).toBeGreaterThan(0.1); expect(drive('jp3', { ...base, wet: 0 })).toBeLessThan(0.45); expect(drive('jp3', { ...base, wet: 3 })).toBeLessThan(0.12);
-    expect(drive('tw4', { ...base, wet: 0 })).toBeLessThan(0.22);
+    // race-hairpin-pull：髮夾外甩加碼後全油門更容易偏出；3 階仍明顯優於原廠（急彎可有少量偏出）
+    const de2stock = drive('de2', { ...base, dry: 0 }), de2lv3 = drive('de2', { ...base, dry: 3 });
+    expect(de2stock).toBeGreaterThan(0.12); expect(de2stock).toBeLessThan(0.45);
+    expect(de2lv3).toBeLessThan(0.12); expect(de2lv3).toBeLessThan(de2stock * 0.55);
+    const jp3stock = drive('jp3', { ...base, wet: 0 }), jp3lv3 = drive('jp3', { ...base, wet: 3 });
+    expect(jp3stock).toBeGreaterThan(0.2); expect(jp3stock).toBeLessThan(0.55);
+    expect(jp3lv3).toBeLessThan(0.30); expect(jp3lv3).toBeLessThan(jp3stock * 0.75);
+    expect(drive('tw4', { ...base, wet: 0 })).toBeLessThan(0.28);
   });
   it('AI is affected too but stays fair: all 19 AI finish a rain race and rarely leave the road', () => {
     const s = createRace(4, 'tw4', fillField([])); let off = 0, n = 0;
