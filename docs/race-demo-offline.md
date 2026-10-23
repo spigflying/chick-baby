@@ -13,6 +13,8 @@ cd apps/web && pnpm dev
 
 也可：`http://localhost:5173/race-demo.html?t=tw1`（換賽道 id）。
 
+正式環境：`https://chick.thesilvertrees.com/race-demo`（或 `/race-demo.html`）。靜態檔，關門／DB 停機也能開。
+
 獨立 HTML 入口，**不經過** `main.ts` 的開放時段／睡覺畫面，關門時也能開。
 
 ## 有什麼
@@ -29,7 +31,7 @@ cd apps/web && pnpm dev
 - 無錦標賽進度、金幣、排行榜、房間
 - 無存檔／斷線重連
 - **不改**正式 `/race` 路徑與 production 架構
-- **不上線／不 deploy**（除非另請）
+- 已掛正式 `/race-demo`（純靜態）
 
 ## 預覽圖
 

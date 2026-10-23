@@ -175,7 +175,12 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
       setHeaders: (res, file) => res.setHeader('cache-control', file.includes(assets) ? 'public, max-age=31536000, immutable' : 'no-cache'),
     });
     app.setNotFoundHandler((req, reply) => {
-      if (req.method === 'GET' && !req.url.startsWith('/api') && !req.url.startsWith('/ws')) return reply.sendFile('index.html');
+      if (req.method === 'GET' && !req.url.startsWith('/api') && !req.url.startsWith('/ws')) {
+        // 離線賽車試玩：獨立 HTML，不走 SPA；關門／DB 停機也能開（靜態檔不經 API 閘門）
+        const pathOnly = req.url.split('?')[0];
+        if (pathOnly === '/race-demo' || pathOnly === '/race-demo/') return reply.sendFile('race-demo.html');
+        return reply.sendFile('index.html');
+      }
       return reply.status(404).send({ error: 'NOT_FOUND' });
     });
   }

@@ -23,6 +23,7 @@ const put = (rel: string, body: string) => {
 
 beforeAll(async () => {
   put('index.html', '<!doctype html><title>chick</title>' + 'x'.repeat(2000));
+  put('race-demo.html', '<!doctype html><title>race-demo</title>' + 'y'.repeat(2000));
   writeFileSync(path.join(dist, 'build.json'), JSON.stringify({ build: 'abc1234-deadbeef', notes: ['丟大便可以無限丟了', '下樓梯排行榜'] }));
   put('assets/index-abc123.js', 'console.log(1);'.repeat(200));
   env.webDist = dist; env.secureCookies = true;
@@ -60,6 +61,16 @@ describe('static files', () => {
       const r = await app.inject({ url, headers: { 'accept-encoding': 'br' } });
       expect(r.statusCode, url).toBe(200);
       expect(r.headers['content-type'], url).toMatch(/text\/html/);
+      expect(r.headers['cache-control'], url).toBe('no-cache');
+    }
+  });
+  it('serves offline race-demo as static HTML (alias + .html), not the SPA shell', async () => {
+    for (const url of ['/race-demo', '/race-demo.html']) {
+      const r = await app.inject({ url });
+      expect(r.statusCode, url).toBe(200);
+      expect(r.headers['content-type'], url).toMatch(/text\/html/);
+      expect(r.body, url).toContain('race-demo');
+      expect(r.body, url).not.toContain('<title>chick</title>');
       expect(r.headers['cache-control'], url).toBe('no-cache');
     }
   });
