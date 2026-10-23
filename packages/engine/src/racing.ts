@@ -14,6 +14,27 @@ export const SPEED_X = 3; // v25：4 → 3（玩家覺得太快）；操控、�
 /** 每 tick 物理子步數（速度變快後避免碰撞穿過去） */
 export const SUBSTEPS = 4;
 export const SEG_LEN = 20;
+/**
+ * 賽道彎曲統一（race-curve-unify）：`segment.curve` 是設計單位（buildTrack／pieces）。
+ * `segTurn(curve)`＝走完一段 SEG_LEN 的航向轉角（弧度）——小地圖、路面投影、外甩都只用這一套。
+ * SEG_TURN_K＝舊畫面 CURVE_K(0.0004)×SEG_LEN → 視覺彎率不變；舊小地圖 k=0.045＋強迫湊滿 2π 已廢除。
+ * 外甩仍用 CORNER_PULL（對 curve 單位校準），公式寫成 segTurn×(CORNER_PULL/SEG_TURN_K) 以明示同源。
+ */
+export const SEG_TURN_K = 0.0004 * SEG_LEN; // 0.008 rad／curve／段
+export function segTurn(curve: number): number { return curve * SEG_TURN_K; }
+/** 曲率（rad/m），路面偽 3D 投影用（取代 web 端獨立 CURVE_K）。 */
+export function segCurvature(curve: number): number { return segTurn(curve) / SEG_LEN; }
+/**
+ * 把路段積分成平面軌跡（單位長／段）。只依 segTurn，不強迫總轉角 2π。
+ * softClose：線性修正端點閉合，方便小地圖畫成環，不改 segment.curve／物理。
+ */
+export function trackPathXY(segs: { curve: number }[], softClose = true): [number, number][] {
+  let th = 0, px = 0, py = 0; const raw: [number, number][] = [];
+  for (const s of segs) { raw.push([px, py]); th += segTurn(s.curve); px += Math.sin(th); py -= Math.cos(th); }
+  if (!softClose || !raw.length) return raw;
+  const n = raw.length, ex = px / n, ey = py / n;
+  return raw.map(([x0, y0], i) => [x0 - ex * i, y0 - ey * i] as [number, number]);
+}
 export const RACE_SLOTS = 20;
 export const NITRO_PER_RACE = 3;
 /** v11：車與車的橫向碰撞寬度（半路寬＝1）。畫面上車寬 ≈ 0.44 半路寬（TG2 比例：車 ≈ 路寬 1/4.5），碰撞取畫面車寬的約 80%（0.38），比較好閃。 */
@@ -124,6 +145,7 @@ export const TRACKS: Track[] = COUNTRY_DEFS.flatMap(([cid, cname, ts], ci) => ts
 export const trackById = (id: string) => TRACKS.find((t) => t.id === id) ?? null;
 export interface Segment { curve: number; y: number }
 export function buildTrack(t: Track): Segment[] {
+  // 地圖設計（pieces→curve）是唯一幾何來源；高度閉合在此處理。航向不強迫 2π（小地圖用 softClose，不另改 curve）。
   const segs: Segment[] = []; let y = 0;
   for (const [n, curve, hill] of t.pieces) for (let i = 0; i < n; i++) {
     const e = Math.min(1, i / 5, (n - 1 - i) / 5 + 0.2);
@@ -313,7 +335,7 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
   c.aiT = (c.aiT ?? c.x) + (target - (c.aiT ?? c.x)) * 0.08;
   const dx = c.aiT - c.x;
   // 安全彎速：讓離心滑出量不超過方向盤修正能力的 75%（抓地差的 AI 也得在彎前收油，公平）
-  const slideSafe = Math.abs(curve) < 0.3 ? Infinity : 70 * X * Math.sqrt(STEER_RATE * 0.75 / (Math.abs(curve) * slideFactor(grip) * CORNER_PULL * hairpinPullMul(Math.abs(curve))));
+  const slideSafe = Math.abs(curve) < 0.3 ? Infinity : 70 * X * Math.sqrt(STEER_RATE * 0.75 / (Math.abs(segTurn(curve)) * cornerPullPerRad() * slideFactor(grip) * hairpinPullMul(Math.abs(curve))));
   const safe = Math.min(slideSafe, c.stats.topSpeed * Math.min(1, 1.05 - Math.max(0, Math.abs(curve) - 2) * 0.09 / grip));
   const tooFast = c.speed > safe;
   const straight = Math.abs(near.curve) < 1.2 && Math.abs(far.curve) < 1.8;
@@ -323,7 +345,9 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
   return { gas: !tooFast && !follow && c.aiRecover < 14, brake: tooFast && c.speed > safe + 4 * X, left: steerAmt < 0, right: steerAmt > 0, nitro, steer: steerAmt };
 }
 /**
- * 過彎離心力（v12）：每秒往彎外滑 = 彎度 × (速度/70)² × slideFactor(抓地) × CORNER_PULL × hairpinPullMul ×（高速加成）。
+ * 過彎離心力（v12／curve-unify）：每秒往彎外滑 =
+ *   segTurn(彎度) × (CORNER_PULL/SEG_TURN_K) × (速度/70)² × slideFactor(抓地) × hairpinPullMul ×（高速加成）。
+ * 與小地圖／路面同一套 segTurn；CORNER_PULL 仍以 curve 單位校準（≈0.290），手感與 unify 前一致。
  * slideFactor 隨抓地力 2.5 次方下降：原廠胎在快彎明顯被甩出去，3 階胎幾乎貼著線走（雨天用雨胎抓地）。
  *
  * 手感目標（race-feel-pc / race-hairpin-pull）：
@@ -331,12 +355,15 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
  * - 更急／髮夾（|curve| 超過門檻）：外甩隨彎度額外加碼；持續加油易飛出，收油（coast）較好過。
  * - 公式含速度：sp² 為主，sp 超過 PULL_SP_HI 再乘 PULL_HI_MUL。
  * Benson：「髮夾灣還是太容易過了」→ 用彎度依賴倍率，而非只全局拉高 CORNER_PULL。
+ * Benson：「地圖設計出來後，再套外甩參數」→ 幾何（segTurn）先，外甩係數後。
  */
 /** v13（curves）：過彎外甩整體減半（所有胎、乾濕地一律 ×0.5，相對差異不變）。 */
 /** v14（steer）：固定速率轉向（每秒最多橫移幾個半路寬），從 1.6 降到 0.75：點一下只動一點、按住穩定平移。AI 也用同一個值。 */
 export const STEER_RATE = 0.75 * SPEED_X / 4; // v25：轉向、外甩都依 SPEED_X/4 縮放 → 每公尺路的操控跟 4 倍時一樣
 /** 外甩跟著轉向一起縮放（v13 的 0.5 × 0.75/1.6）。race-feel-pc：1.4→1.65 加強離心，搭配收油轉向加成。 */
-export const CORNER_PULL = 0.5 * STEER_RATE / 1.6 * 1.65; // ~0.290；髮夾再靠 hairpinPullMul，不全局狂拉
+export const CORNER_PULL = 0.5 * STEER_RATE / 1.6 * 1.65; // ~0.290（curve 單位）；髮夾再靠 hairpinPullMul
+/** 把 CORNER_PULL 換成「每弧度」係數，與 segTurn 相乘（= CORNER_PULL/SEG_TURN_K）。 */
+export const cornerPullPerRad = () => CORNER_PULL / SEG_TURN_K;
 /** 高速外甩加成：sp = speed/(70×SPEED_X)，超過門檻再乘倍率（含速度於公式）。 */
 export const PULL_SP_HI = 0.88;
 export const PULL_HI_MUL = 1.25;
@@ -350,6 +377,10 @@ export const HAIRPIN_PULL_EXTRA = 0.55;
 /** 髮夾外甩倍率：1 + max(0, |curve| − HAIRPIN_CURVE) × HAIRPIN_PULL_EXTRA */
 export function hairpinPullMul(absCurve: number): number {
   return 1 + Math.max(0, absCurve - HAIRPIN_CURVE) * HAIRPIN_PULL_EXTRA;
+}
+/** 離心外甩速率（半路寬／秒）：segTurn 同源幾何 × 速度² × 抓地 × 髮夾倍率。 */
+export function cornerPullRate(curve: number, pullSp: number, grip: number): number {
+  return segTurn(curve) * cornerPullPerRad() * pullSp * slideFactor(grip) * hairpinPullMul(Math.abs(curve));
 }
 /**
  * 轉向權限倍率（乘在 STEER_RATE×speedAuth 上；STEER_RATE／CORNER_PULL 仍依 SPEED_X/4，避免飄）。
@@ -404,9 +435,9 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
     if (c.speed > vmax) c.speed -= (c.speed - vmax) * 2 * dt;
     c.speed = Math.max(0, c.speed);
     const sp = c.speed / (70 * X);
-    // 離心：curve × sp² × grip × CORNER_PULL × hairpinPullMul；高速再 × PULL_HI_MUL（急彎加油易甩、收油較穩）
+    // 離心：segTurn(curve)×(CORNER_PULL/SEG_TURN_K)×sp²×grip×hairpin；與小地圖／路面同一幾何
     const pullSp = sp * sp * (sp > PULL_SP_HI ? PULL_HI_MUL : 1);
-    const pull = seg.curve * pullSp * slideFactor(grip) * CORNER_PULL * hairpinPullMul(Math.abs(seg.curve));
+    const pull = cornerPullRate(seg.curve, pullSp, grip);
     // 轉向權限：基礎仍 STEER_RATE×速度；加油／氮氣打折、收油加成（見 STEER_AUTH_*）
     let auth = STEER_RATE * Math.min(1, sp + 0.15);
     if (inp.gas) auth *= (c.nitroT > 0 ? STEER_AUTH_NITRO : STEER_AUTH_GAS);

@@ -1,5 +1,5 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
-import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, ROAD_WIDEN, lapped as isLapped, type Track } from '@chick/engine';
+import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, ROAD_WIDEN, lapped as isLapped, segCurvature, trackPathXY, type Track } from '@chick/engine';
 import { carBodyH, carPixels, LODS, PLAYER_W, exhaustsOf, DESIGN_W, EXHAUST_Y, type CarLook } from './race-cars';
 import { pickupDims } from './race-pickup';
 import { frontSprite, ensureComposite, S as PET_S } from './sprites';
@@ -163,8 +163,8 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number; /** 前／側／後 分區損傷 0–100 */ zd?: number[]; /** 最後吃到路上氮氣道具的 tick */ pkT?: number; /** 坐在車上的寵物精靈鍵（伺服器給；電腦車沒有） */ pet?: string | null }
 export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[] }
 
-/** v13：彎道視覺強度（每公尺彎度係數）、攝影機橫向跟車比例。 */
-const CURVE_K = 0.0004, CAM_FOLLOW = 0.4;
+/** v13／curve-unify：彎道用引擎 segCurvature（與小地圖／外甩同一套）；攝影機橫向跟車比例。 */
+const CAM_FOLLOW = 0.4;
 const ROAD_W = 2.4 * ROAD_WIDEN, CAM_H = 7.5, DEPTH = 0.9, DRAW = 60, HORIZON = 116; // v11：路寬照 TG2（車底那一列路寬 ≈ 0.9 畫面寬、車 ≈ 路寬 0.24）、攝影機較高，地平線 58%
 /** 玩家深度的半路寬（px）。車寬一律 = CAR_W × 半路寬 × 2 再乘同一個常數，所以只跟深度有關。 */
 const playerPw = () => ROAD_W * (DEPTH * 6 / (PLAYER_DZ + 4)) * (W / 2);
@@ -301,7 +301,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   const proj = (d: number, wx: number, wy: number) => { const zRel = d + 4, scale = DEPTH * 6 / zRel; return { zRel, scale, py: HORIZON - (wy - camY) * scale * (W / 2) / 6, pxc: W / 2 + (wx - camXw) * scale * (W / 2) }; };
   for (let k = 0; k < DRAW; k++) {
     const d = k === 0 ? 0 : (k - frac) * SEG_LEN, i = base + Math.max(0, k - 1);
-    const c = segs[(((base + k) % n) + n) % n].curve * CURVE_K; // 下一段（d → d+L）的彎度
+    const c = segCurvature(segs[(((base + k) % n) + n) % n].curve); // 下一段（d → d+L）曲率 rad/m＝segTurn/SEG_LEN
     const wy = elevAt(el, camZ + d), p = proj(d, lx, wy);
     pts.push({ y: p.py, x: p.pxc, w: ROAD_W * p.scale * (W / 2), scale: p.scale, i, clip: maxy, wx: lx, wy, z: p.zRel, d, h: lh, c });
     if (p.py < maxy) maxy = p.py;
@@ -576,15 +576,11 @@ function drawSkyline(x: CanvasRenderingContext2D, scene: string, bend: number, P
     x.fillStyle = Wp === P ? P[2] : Wp[2]; x.fillRect(0, HORIZON - 1, W, 1);
   }
 }
-// ---------- 迷你地圖：把路段彎度積分成平面軌跡，線性修正讓它閉合 ----------
+// ---------- 迷你地圖：引擎 trackPathXY（segTurn 同源幾何）；只做框內縮放，不再強迫湊滿 360° ----------
 const mapCache = new Map<string, { pts: [number, number][]; box: [number, number] }>();
 export function trackMap(id: string, bw: number, bh: number) {
   const key = `${id}:${bw}:${bh}`; let m = mapCache.get(key); if (m) return m;
-  const segs = trackSegs(id), n = segs.length; let th = 0, px = 0, py = 0; const raw: [number, number][] = [];
-  // 彎度換算成轉角，再平均補上一點固定轉角，讓總轉角剛好一圈（環狀賽道看起來像真的賽道）
-  const k = 0.045, total = segs.reduce((a, s) => a + s.curve, 0) * k, base = (Math.PI * 2 - total) / n;
-  for (const s of segs) { raw.push([px, py]); th += s.curve * k + base; px += Math.sin(th); py -= Math.cos(th); }
-  const ex = px / n, ey = py / n; const fixed = raw.map(([x0, y0], i) => [x0 - ex * i, y0 - ey * i] as [number, number]);
+  const fixed = trackPathXY(trackSegs(id), true);
   const xs = fixed.map((p) => p[0]), ys = fixed.map((p) => p[1]);
   const minx = Math.min(...xs), maxx = Math.max(...xs), miny = Math.min(...ys), maxy = Math.max(...ys);
   const sc = Math.min((bw - 6) / (maxx - minx || 1), (bh - 6) / (maxy - miny || 1));
