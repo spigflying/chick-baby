@@ -161,7 +161,7 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
 }
 
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number; /** 前／側／後 分區損傷 0–100 */ zd?: number[]; /** 最後吃到路上氮氣道具的 tick */ pkT?: number; /** 坐在車上的寵物精靈鍵（伺服器給；電腦車沒有） */ pet?: string | null }
-export interface View { /** 試玩頁（地圖先）：真實幾何投影（前方每段用自己的轉角，平面轉向、真深度），細分 5m 取樣 */ exact?: boolean; track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[]; /** race-demo-hitbox：畫每台車的碰撞盒（地面投影，寬 dx 路寬單位、長 dz 公尺，以車中心為準） */ hitbox?: { dx: number; dz: number } }
+export interface View { /** 試玩頁（地圖先）：真實幾何投影（前方每段用自己的轉角，平面轉向、真深度），細分 5m 取樣 */ exact?: boolean; /** exact 模式攝影機高度（m），預設 CAM_H_EXACT */ camH?: number; track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[]; /** race-demo-hitbox：畫每台車的碰撞盒（地面投影，寬 dx 路寬單位、長 dz 公尺，以車中心為準） */ hitbox?: { dx: number; dz: number } }
 
 /** v13／curve-unify：彎道用引擎 segCurvature（與小地圖／外甩同一套）；攝影機橫向跟車比例。 */
 const CAM_FOLLOW = 0.4;
@@ -280,7 +280,11 @@ function drawPetRider(x: CanvasRenderingContext2D, key: string, m: Mood, cx: num
  *  每段細分 EXACT_SUB 步，第 j 段的起點正好是 pts[j*EXACT_SUB]。轉超過 ~78° 或往回折（前向深度不再增加）就停止畫。 */
 export const EXACT_SUB = 4;
 /** exact 模式攝影機較高：1/z 透視下 7.5m 高時 100m 外整段只剩地平線下 ~8 列，彎的形狀全擠在一起看不出差別；抬高後前方 50–250m 的路面有足夠列數顯示各彎真正的曲率 */
-export const CAM_H_EXACT = 16;
+export const CAM_H_EXACT = 10;
+/** 舊渲染器（CAM_H 7.5）底線那一列的半路寬 px（直路）：PLAYER_W 52px 是對這個寬度校準的 */
+export const OLD_GROUND_HALF_W = ROAD_W * ((H - 6 - HORIZON) * 6 / (CAM_H * (W / 2))) * (W / 2);
+/** 底線半路寬（px）＝ ROAD_W·(GROUND−HORIZON)·6/camH：只跟攝影機高度有關（與 FOV/DEPTH 無關） */
+export const groundHalfW = (camH: number) => ROAD_W * ((H - 6 - HORIZON) * 6 / (camH * (W / 2))) * (W / 2);
 export interface RoadPt { y: number; x: number; w: number; scale: number; i: number; clip: number; wx: number; wy: number; z: number; d: number; h: number; c: number; fw: number }
 export function exactRoadPts(segs: { curve: number }[], camZ: number, camXw: number, wyAt: (d: number) => number, camY: number, maxSegs = DRAW): RoadPt[] {
   const n = segs.length, base = Math.floor(camZ / SEG_LEN), frac = (camZ % SEG_LEN + SEG_LEN) % SEG_LEN / SEG_LEN;
@@ -337,7 +341,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   // v13：攝影機跟著車橫移一部分（世界單位：半路寬 = ROAD_W），全部用小數，不先取整
   const camXw = v.camX !== undefined ? v.camX * ROAD_W : (v.me ? v.me.x * ROAD_W * camFollow(v.me.x) : 0);
   const base = Math.floor(camZ / SEG_LEN), frac = (camZ % SEG_LEN + SEG_LEN) % SEG_LEN / SEG_LEN;
-  const el = elevTable(t), camY = elevAt(el, camZ + PLAYER_DZ) + (v.exact ? CAM_H_EXACT : CAM_H);
+  const el = elevTable(t), camY = elevAt(el, camZ + PLAYER_DZ) + (v.exact ? (v.camH ?? CAM_H_EXACT) : CAM_H);
   // 天空與遠景（隨彎道視差移動）：累積彎度＋本段小數部分，連續不跳格
   const bend = curvePrefix(t)[((base % n) + n) % n] * 0.8 + segs[((base % n) + n) % n].curve * frac * 0.8;
   role('sky'); x.fillStyle = night ? Q[3] : Q[0]; x.fillRect(0, 0, W, H);
@@ -428,13 +432,15 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   const GROUND = H - 6;
   const rowAt = (y: number) => rowAtPts(pts, y);
   const gw = rowAt(GROUND)?.w ?? playerPw(); // 底線那一列的半路寬：玩家車寬 PLAYER_W 對應這個路寬
+  // exact：PLAYER_W(52px) 是對舊底線半路寬校準的；攝影機較高時底線那一列離得更遠、路變窄，車要跟著等比例縮，車寬/路寬才會和物理一致
+  const carK = EX ? gw / OLD_GROUND_HALF_W : 1, PW = PLAYER_W * carK;
   role('fx');
   for (const pk of v.pickups ?? []) { // 路上氮氣道具：跟車同一套投影
     if (Math.abs(pk.z - camZ) > v.len / 2) continue;
     const p0 = place({ z: pk.z } as ViewCar); if (!p0 || (p0.clip < H && p0.py > p0.clip + 2) || (t.weather === 'fog' && p0.k > 18)) continue;
     // 跟車一樣：比底線近就貼底線那一列（用那一列的路寬），尺寸只隨那一列路寬變大，不設上限
     const row = p0.py > GROUND ? rowAt(GROUND) : null, lat = row ? row.w : p0.pw, cxp = row ? row.x : p0.pxc, py = row ? GROUND : p0.py;
-    const img = pickupCanvas(night ? NIGHT.map((c, i) => (i === 0 ? G[0] : c)) : Q), dm = pickupDims(lat, gw, PLAYER_W);
+    const img = pickupCanvas(night ? NIGHT.map((c, i) => (i === 0 ? G[0] : c)) : Q), dm = pickupDims(lat, gw, PW);
     if (dm.h < 2) continue;
     const ww = Math.max(2, Math.round(dm.w)), hh = Math.max(2, Math.round(dm.h));
     sprites.push({ k: p0.k + 0.1, draw: () => x.drawImage(img, Math.round(cxp + pk.x * lat - ww / 2), Math.round(py - hh), ww, hh) });
@@ -444,15 +450,15 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     const row = p0.py > GROUND ? rowAt(GROUND) : null, p = row ? { ...p0, pxc: EX && isMe ? exactMeCenter(pts, row.w, camXw) : row.x, lat: row.w } : { ...p0, lat: p0.pw };
     if (!isMe && p.clip < H && p.py > p.clip + 2) continue; // 被坡頂擋住
     if (!isMe && t.weather === 'fog' && p.k > 13) continue; // 霧裡看不到遠方的車
-    const target = PLAYER_W * p.lat / gw; /* v14：車寬跟畫在那一列的路寬成正比 */ if (!isMe && target < 5) continue; const lod = isMe ? -1 : lodFor(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
+    const target = PW * p.lat / gw; /* v14：車寬跟畫在那一列的路寬成正比 */ if (!isMe && target < 5) continue; const lod = isMe && carK === 1 ? -1 : lodFor(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
     const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 60 && v.frame % 20 < 2), frame: v.frame }, lod);
     const bh = (img as any).bodyH as number;
     const bob = isMe && c.speed > 5 && c.speed < 15 * SPEED_X && Math.floor(now / 160) % 2 ? 1 : 0, /* v24：只在低速輕輕晃（依毫秒），高速不晃 */ shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
     // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
     // v14：AI 與玩家同比例 —— 挑「不小於目標寬度」的 LOD 再縮到剛好目標寬（以前挑較小的 LOD 不放大，遠一點就小一截）
-    const scale = isMe ? 1 : target / LODS[lod];
+    const scale = lod === -1 ? 1 : target / LODS[lod];
     const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
-    const sx = Math.round(p.pxc + c.x * p.lat - dw / 2 + shake), sy = (isMe ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.min(H - 6 - Math.round(bh * scale), Math.round(p.py - bh * scale))) - bob; // v14：和玩家並排的車也貼同一條底線，不會掉出畫面
+    const sx = Math.round(p.pxc + c.x * p.lat - dw / 2 + shake), sy = (lod === -1 ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.min(H - 6 - Math.round(bh * scale), Math.round(p.py - bh * scale))) - bob; // v14：和玩家並排的車也貼同一條底線，不會掉出畫面
     const ghost = !isMe && !!v.me && isLapped(c, v.me, v.len); // v26：差一圈以上＝沒有碰撞，畫成半透明（棋盤點陣）
     if (v.hitbox) { const hb = v.hitbox, lift = (row ? GROUND : p0.py) - p0.py, kx = row ? row.w / p0.pw : 1, cx0 = p.pxc - p0.pxc; // 與車同一個抬升／縮放
       const edge = (dzm: number) => { const q = place({ ...c, z: c.z + dzm }); return q ? { y: q.py + lift, l: q.pxc + cx0 + (c.x - hb.dx / 2) * q.pw * kx, r: q.pxc + cx0 + (c.x + hb.dx / 2) * q.pw * kx } : null; };

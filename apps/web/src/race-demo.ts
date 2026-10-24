@@ -19,6 +19,7 @@ const fmtMs = (ms: number | null) => ms === null ? '—' : `${Math.floor(ms / 60
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 
 const q = new URLSearchParams(location.search);
+const camH = Number(q.get('cam')) > 0 ? Number(q.get('cam')) : undefined; // ?cam=7.5／16：比較攝影機高度
 let showHitbox = q.get('hitbox') === '1'; // race-demo-hitbox：?hitbox=1 或按 H 切換
 const ME_ID = 'me';
 const ME_NAME = '試玩';
@@ -213,7 +214,7 @@ function boot() {
       drawRace(x, {
         pickups, gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
         tick: sim.tick, countdown: sim.countdown, laps: sim.laps, len: sim.len,
-        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash, now, exact: true, hitbox: showHitbox ? DEMO_HITBOX : undefined,
+        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash, now, exact: true, camH, hitbox: showHitbox ? DEMO_HITBOX : undefined,
       });
       return;
     }
@@ -225,7 +226,7 @@ function boot() {
       drawRace(x, {
         gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
         tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len,
-        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash: 'FINISH!',  exact: true,
+        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash: 'FINISH!',  exact: true, camH,
       });
       const meC = sim.cars.find((c) => c.id === ME_ID)!;
       const pos = raceRanking(sim).indexOf(meC) + 1;
