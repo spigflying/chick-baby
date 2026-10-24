@@ -41,6 +41,12 @@ export const NITRO_PER_RACE = 3;
 /** v26：路寬 ×1.3（車不變大）→ 以「半路寬」為單位的車寬、碰撞、道具判定都 ÷1.3；仍是 3 車道 */
 export const ROAD_WIDEN = 1.3;
 export const COLLIDE_DX = 0.38 / ROAD_WIDEN;
+/** race-demo-hitbox：試玩頁用、照畫出來的車精靈量的碰撞盒（正式 /race 不設 → 沿用 COLLIDE_DX／dz≤5／1.5）。
+ *  車精靈寬 48–52px（PLAYER_W 52 含 1px 透明邊），底線那列半路寬 gw ≈ 194.8px → 車寬 0.246–0.267 路寬單位（≈0.80 m）。
+ *  dx：兩車中心橫向距離 < dx 才算碰（=兩個盒子各寬 dx 相疊），取 0.24（比精靈平均 0.257 小約 3px，擦邊不算）。
+ *  dz：車長以 2× 車寬 ≈ 1.6 m 估，取 1.5 m；中心縱向距離 < dz 才算碰。dz > dz/2 ＝追撞、≤ dz/2 ＝並排擦撞。 */
+export interface Hitbox { dx: number; dz: number }
+export const DEMO_HITBOX: Hitbox = { dx: 0.24, dz: 1.5 };
 /** v26：差一整圈以上（套圈）的兩台車彼此沒有碰撞，AI 也不跟車／讓車 */
 export const lapped = (a: { z: number }, b: { z: number }, len: number) => Math.abs(a.z - b.z) >= len;
 export const QUALIFY_RANK = 10;
@@ -236,7 +242,7 @@ export interface RaceCar {
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
 /** 完美度對極速的影響：每少 1% 就少 0.4% 極速（最低 60%） */
 export const condFactor = (damage: number) => Math.max(0.6, 1 - 0.004 * damage);
-export interface RaceState { seed: number; track: string; tick: number; laps: number; len: number; cars: RaceCar[]; pickups: Pickup[]; rng: Rng; over: boolean; maxTicks: number; countdown: number; difficulty: number }
+export interface RaceState { seed: number; track: string; tick: number; laps: number; len: number; cars: RaceCar[]; pickups: Pickup[]; rng: Rng; over: boolean; maxTicks: number; countdown: number; difficulty: number; /** race-demo-hitbox：只有試玩頁設 */ hitbox?: Hitbox }
 export interface Entrant { id: string; name: string; ai?: boolean; car?: string; parts?: Partial<Parts>; color?: number; skill?: number }
 const NO_INPUT: RaceInput = { gas: false, brake: false, left: false, right: false, nitro: false };
 
@@ -488,17 +494,19 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
   }
   // 車與車：追撞（前／後裝甲）與並排擦撞（側裝甲）
   const live = s.cars.filter((c) => c.finishedTick === null && !c.flip).sort((a, b) => a.z - b.z);
+  const cdx = s.hitbox?.dx ?? COLLIDE_DX, czMax = s.hitbox?.dz ?? 5, cside = s.hitbox ? s.hitbox.dz / 2 : 1.5;
   for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
-    const a = live[i], b = live[j], dz = b.z - a.z; if (dz > 5) break;
-    if (lapped(a, b, s.len)) continue; const dx = Math.abs(a.x - b.x); if (dx >= COLLIDE_DX) continue;
-    if (dz > 1.5 && a.speed > b.speed) { // a 從後面撞上 b
+    const a = live[i], b = live[j], dz = b.z - a.z; if (dz > czMax) break;
+    if (lapped(a, b, s.len)) continue; const dx = Math.abs(a.x - b.x); if (dx >= cdx) continue;
+    if (s.hitbox && dz >= czMax) continue; // 盒子剛好貼齊＝沒碰
+    if (dz > cside && a.speed > b.speed) { // a 從後面撞上 b
       const rel = (a.speed - b.speed) / (30 * X);
       if (a.speed - b.speed < 1.5 * X) { a.speed = b.speed; continue; } // 輕輕貼上：不算撞
       a.speed = b.speed * 0.85; b.speed += 2 * X;
       hurt(a, 3 * (0.3 + rel), 'F', s.tick, HIT_REAR_END, 0); hurt(b, 2 * (0.3 + rel), 'R', s.tick, HIT_REARED, 0);
       a.hit = Math.max(a.hit, 8); b.hit = Math.max(b.hit, 6);
       const push = a.x < b.x ? -0.12 : 0.12; a.x += push; b.x -= push;
-    } else if (dz <= 1.5 && a.hit <= 0 && b.hit <= 0) { // 並排擦撞
+    } else if (dz <= cside && a.hit <= 0 && b.hit <= 0) { // 並排擦撞
       hurt(a, 1, 'S', s.tick, HIT_SWIPE, a.x < b.x ? 1 : -1); hurt(b, 1, 'S', s.tick, HIT_SWIPE, a.x < b.x ? -1 : 1); // v23：輕擦 ≈ −1% a.hit = b.hit = 8; a.speed *= 0.92; b.speed *= 0.92;
       const push = a.x < b.x ? -0.2 : 0.2; a.x += push; b.x -= push;
     }
