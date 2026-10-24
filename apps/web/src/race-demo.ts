@@ -5,9 +5,12 @@
 import './style.css';
 import {
   createRace, stepRace, setRaceInput, fillField, raceRanking, raceTimeMs, condition,
-  trackById, TRACKS, COUNTRIES, STOCK_PARTS, carStats, pickupShare, rankOf,
-  RACE_TICK_RATE, RACE_SLOTS, NITRO_PER_RACE, type RaceState,
+  trackById, TRACKS, STOCK_PARTS, carStats, pickupShare, rankOf,
+  RACE_TICK_RATE, RACE_SLOTS, NITRO_PER_RACE, registerMapFirstTracks, type RaceState,
 } from '@chick/engine';
+
+// race-demo-mapfirst：試玩頁只用「地圖先」賽道（佈局→路段；小地圖／路面／外甩同一份轉角）。正式 /race 不註冊。
+const DEMO_TRACKS = registerMapFirstTracks();
 import { drawRace, raceOrder, text, textW, zh, zhW, panel, W, H, G, type ViewCar } from './race-gfx';
 import { fitScale } from './race-fit';
 
@@ -54,7 +57,7 @@ function boot() {
   const body = root.querySelector('#rbody') as HTMLElement;
   const msg = root.querySelector('#rmsg') as HTMLElement;
 
-  let sel = trackById(q.get('t') ?? 'tw1')?.id ?? 'tw1';
+  let sel = DEMO_TRACKS.find((t) => t.id === q.get('t'))?.id ?? DEMO_TRACKS[0].id;
   let mode: 'menu' | 'race' | 'results' = 'menu';
   let sim: RaceState | null = null;
   let frame = 0, raf = 0, dead = false;
@@ -87,11 +90,9 @@ function boot() {
       return;
     }
     body.innerHTML = `<button id="rgo" class="big race-top-btn">開始試玩：${esc(trackById(sel)!.name)}</button>
-      ${COUNTRIES.map((c) => `<h3>${esc(c.name)}</h3><ul class="tracks">${c.tracks.map((id) => {
-        const t = trackById(id)!;
-        return `<li class="${t.id === sel ? 'sel' : ''}" data-tr="${t.id}"><span>${t.raceIdx + 1}. <b>${esc(t.name)}</b> <span class="muted">${WEATHER[t.weather]}・${t.laps} 圈</span></span></li>`;
-      }).join('')}</ul>`).join('')}
-      <p class="muted">賽道共 ${TRACKS.length} 條可選。正式帳號進度／改裝店請走平常的賽車頁。</p>`;
+      <h3>地圖先設計的試玩賽道</h3><ul class="tracks">${DEMO_TRACKS.map((t) =>
+        `<li class="${t.id === sel ? 'sel' : ''}" data-tr="${t.id}"><span>${t.raceIdx + 1}. <b>${esc(t.name)}</b> <span class="muted">${WEATHER[t.weather]}・${t.laps} 圈</span></span></li>`).join('')}</ul>
+      <p class="muted">賽道先畫成封閉平面圖（直線＋90° 彎、髮夾、S 彎），再切成路段；小地圖、路面彎、外甩全用同一份轉角。正式 ${TRACKS.length} 條賽道請走平常的賽車頁。</p>`;
     body.querySelectorAll('li[data-tr]').forEach((li) => {
       (li as HTMLElement).onclick = () => { sel = (li as HTMLElement).dataset.tr!; renderPanel(); };
     });

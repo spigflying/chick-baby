@@ -8,3 +8,4 @@ export * from './hours';
 export * from './arena';
 export * from './bao';
 export * from './racing';
+export * from './racing-mapfirst';

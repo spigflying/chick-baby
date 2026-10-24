@@ -115,7 +115,7 @@ export type Scenery = 'city' | 'coast' | 'desert' | 'forest' | 'snow' | 'farm';
 export type Weather = 'clear' | 'rain' | 'night' | 'snow' | 'fog';
 /** 路段：[段數, 彎度（正＝右彎）, 坡度（正＝上坡）] */
 export type Piece = [number, number, number];
-export interface Track { id: string; name: string; country: string; countryId: string; countryIdx: number; raceIdx: number; scenery: Scenery; weather: Weather; laps: number; ai: number; pieces: Piece[] }
+export interface Track { id: string; name: string; country: string; countryId: string; countryIdx: number; raceIdx: number; scenery: Scenery; weather: Weather; laps: number; ai: number; pieces: Piece[]; /** race-demo-mapfirst：路段由 2D 佈局推導（registerTrack 注入），外甩用真實曲率×速度² */ mapFirst?: boolean }
 export interface Country { id: string; name: string; tracks: string[] }
 type TrackDef = [string, string, Scenery, Weather, number, number]; // id 名稱 景色 天氣 圈數 路線種子
 const COUNTRY_DEFS: [string, string, TrackDef[]][] = [
@@ -142,7 +142,11 @@ export const COUNTRIES: Country[] = COUNTRY_DEFS.map(([id, name, ts]) => ({ id, 
 export const TRACKS: Track[] = COUNTRY_DEFS.flatMap(([cid, cname, ts], ci) => ts.map(([id, name, scenery, weather, laps, seed], ri) => ({
   id, name, country: cname, countryId: cid, countryIdx: ci, raceIdx: ri, scenery, weather, laps, ai: 0.78 + ci * AI_COUNTRY + ri * 0.01, pieces: makePieces(seed, ci),
 })));
-export const trackById = (id: string) => TRACKS.find((t) => t.id === id) ?? null;
+/** race-demo-mapfirst：試玩頁額外註冊的賽道（正式 /race 不呼叫 → 不受影響）。 */
+const EXTRA_TRACKS = new Map<string, Track>();
+export const trackById = (id: string) => TRACKS.find((t) => t.id === id) ?? EXTRA_TRACKS.get(id) ?? null;
+/** 註冊一條「地圖先」賽道與它推導出的路段（只供試玩頁）。 */
+export function registerTrack(t: Track, segs: Segment[]) { EXTRA_TRACKS.set(t.id, t); segCache.set(t.id, segs); sideCache.delete(t.id); }
 export interface Segment { curve: number; y: number }
 export function buildTrack(t: Track): Segment[] {
   // 地圖設計（pieces→curve）是唯一幾何來源；高度閉合在此處理。航向不強迫 2π（小地圖用 softClose，不另改 curve）。
@@ -248,7 +252,7 @@ export const MAX_LAPS = 5;
 export function createRace(seed: number, trackId: string, entrants: Entrant[], difficulty = 1, lapsIn?: number): RaceState {
   const t0 = trackById(trackId); if (!t0) throw new Error('bad track');
   const t = lapsIn ? { ...t0, laps: Math.max(1, Math.min(MAX_LAPS, Math.floor(lapsIn))) } : t0;
-  const segs = buildTrack(t), len = trackLength(segs), rng = createRng(seed);
+  const segs = trackSegs(trackId), len = trackLength(segs), rng = createRng(seed);
   // 發車：電腦依實力排（最強在最前），玩家全部在最後（TG2 規則）
   const ai = entrants.filter((e) => e.ai).map((e) => ({ e, form: (e.skill ?? 1) * (0.94 + nextFloat(rng) * 0.12) })).sort((a, b) => b.form - a.form);
   const hum = entrants.filter((e) => !e.ai);
@@ -335,8 +339,11 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
   c.aiT = (c.aiT ?? c.x) + (target - (c.aiT ?? c.x)) * 0.08;
   const dx = c.aiT - c.x;
   // 安全彎速：讓離心滑出量不超過方向盤修正能力的 75%（抓地差的 AI 也得在彎前收油，公平）
-  const slideSafe = Math.abs(curve) < 0.3 ? Infinity : 70 * X * Math.sqrt(STEER_RATE * 0.75 / (Math.abs(segTurn(curve)) * cornerPullPerRad() * slideFactor(grip) * hairpinPullMul(Math.abs(curve))));
-  const safe = Math.min(slideSafe, c.stats.topSpeed * Math.min(1, 1.05 - Math.max(0, Math.abs(curve) - 2) * 0.09 / grip));
+  const mf = !!trackById(s.track)?.mapFirst;
+  const slideSafe = Math.abs(curve) < 0.3 ? Infinity : mf
+    ? 70 * X * Math.sqrt(STEER_RATE * STEER_AUTH_GAS * 0.85 / (segCurvature(Math.abs(curve)) * MAPFIRST_PULL_K * slideFactor(grip)))
+    : 70 * X * Math.sqrt(STEER_RATE * 0.75 / (Math.abs(segTurn(curve)) * cornerPullPerRad() * slideFactor(grip) * hairpinPullMul(Math.abs(curve))));
+  const safe = mf ? slideSafe : Math.min(slideSafe, c.stats.topSpeed * Math.min(1, 1.05 - Math.max(0, Math.abs(curve) - 2) * 0.09 / grip));
   const tooFast = c.speed > safe;
   const straight = Math.abs(near.curve) < 1.2 && Math.abs(far.curve) < 1.8;
   const nitro = false; // v21：電腦車不能用氮氣
@@ -381,6 +388,15 @@ export function hairpinPullMul(absCurve: number): number {
 /** 離心外甩速率（半路寬／秒）：segTurn 同源幾何 × 速度² × 抓地 × 髮夾倍率。 */
 export function cornerPullRate(curve: number, pullSp: number, grip: number): number {
   return segTurn(curve) * cornerPullPerRad() * pullSp * slideFactor(grip) * hairpinPullMul(Math.abs(curve));
+}
+/**
+ * race-demo-mapfirst 外甩：真實曲率 κ（rad/m＝segCurvature）× (速度/70X)² × MAPFIRST_PULL_K × slideFactor（無髮夾倍率、無另外的彎度單位）。
+ * 校準（原廠車、乾地、極速 ≈192 m/s）：R≈450m 的 90° 彎 pull≈0.36 < 加油轉向 0.42 → 加油可過；
+ * R≈220m 髮夾 pull≈0.74 > 0.42 → 要收油（收油轉向 0.675，掉速後 pull 降到 <0.5）。
+ */
+export const MAPFIRST_PULL_K = 192;
+export function mapFirstPullRate(curve: number, pullSp: number, grip: number): number {
+  return segCurvature(curve) * MAPFIRST_PULL_K * pullSp * slideFactor(grip);
 }
 /**
  * 轉向權限倍率（乘在 STEER_RATE×speedAuth 上；STEER_RATE／CORNER_PULL 仍依 SPEED_X/4，避免飄）。
@@ -437,7 +453,7 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
     const sp = c.speed / (70 * X);
     // 離心：segTurn(curve)×(CORNER_PULL/SEG_TURN_K)×sp²×grip×hairpin；與小地圖／路面同一幾何
     const pullSp = sp * sp * (sp > PULL_SP_HI ? PULL_HI_MUL : 1);
-    const pull = cornerPullRate(seg.curve, pullSp, grip);
+    const pull = t.mapFirst ? mapFirstPullRate(seg.curve, pullSp, grip) : cornerPullRate(seg.curve, pullSp, grip);
     // 轉向權限：基礎仍 STEER_RATE×速度；加油／氮氣打折、收油加成（見 STEER_AUTH_*）
     let auth = STEER_RATE * Math.min(1, sp + 0.15);
     if (inp.gas) auth *= (c.nitroT > 0 ? STEER_AUTH_NITRO : STEER_AUTH_GAS);
