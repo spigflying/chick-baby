@@ -4,7 +4,7 @@
  */
 import './style.css';
 import {
-  createRace, stepRace, setRaceInput, fillField, raceRanking, raceTimeMs, condition,
+  createRace, stepRace, DEMO_HITBOX, setRaceInput, fillField, raceRanking, raceTimeMs, condition,
   trackById, TRACKS, STOCK_PARTS, carStats, pickupShare, rankOf,
   RACE_TICK_RATE, RACE_SLOTS, NITRO_PER_RACE, registerMapFirstTracks, type RaceState,
 } from '@chick/engine';
@@ -19,6 +19,7 @@ const fmtMs = (ms: number | null) => ms === null ? '—' : `${Math.floor(ms / 60
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 
 const q = new URLSearchParams(location.search);
+let showHitbox = q.get('hitbox') === '1'; // race-demo-hitbox：?hitbox=1 或按 H 切換
 const ME_ID = 'me';
 const ME_NAME = '試玩';
 const STOCK_CAR = 'falcon';
@@ -104,6 +105,7 @@ function boot() {
     sim = createRace(seed, sel, fillField([{
       id: ME_ID, name: ME_NAME, car: STOCK_CAR, color: STOCK_COLOR, parts: STOCK_PARTS,
     }]));
+    sim.hitbox = DEMO_HITBOX; // 試玩頁專用：照精靈量的碰撞盒
     mode = 'race';
     prevSnap = snapCars(sim);
     acc = 0; lastNow = performance.now();
@@ -158,6 +160,7 @@ function boot() {
   };
   const kd = onKey(true), ku = onKey(false);
   window.addEventListener('keydown', kd);
+  window.addEventListener('keydown', (e) => { if (e.key === 'h' || e.key === 'H') showHitbox = !showHitbox; }); // 碰撞盒除錯
   window.addEventListener('keyup', ku);
 
   function viewCars(f: number): ViewCar[] {
@@ -210,7 +213,7 @@ function boot() {
       drawRace(x, {
         pickups, gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
         tick: sim.tick, countdown: sim.countdown, laps: sim.laps, len: sim.len,
-        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash, now,
+        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash, now, hitbox: showHitbox ? DEMO_HITBOX : undefined,
       });
       return;
     }
