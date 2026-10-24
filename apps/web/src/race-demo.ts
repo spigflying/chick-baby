@@ -210,7 +210,7 @@ function boot() {
       drawRace(x, {
         pickups, gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
         tick: sim.tick, countdown: sim.countdown, laps: sim.laps, len: sim.len,
-        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash, now,
+        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash, now, exact: true,
       });
       return;
     }
@@ -222,7 +222,7 @@ function boot() {
       drawRace(x, {
         gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
         tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len,
-        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash: 'FINISH!',
+        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash: 'FINISH!',  exact: true,
       });
       const meC = sim.cars.find((c) => c.id === ME_ID)!;
       const pos = raceRanking(sim).indexOf(meC) + 1;

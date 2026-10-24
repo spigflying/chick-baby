@@ -161,7 +161,7 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
 }
 
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number; /** 前／側／後 分區損傷 0–100 */ zd?: number[]; /** 最後吃到路上氮氣道具的 tick */ pkT?: number; /** 坐在車上的寵物精靈鍵（伺服器給；電腦車沒有） */ pet?: string | null }
-export interface View { track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[] }
+export interface View { /** 試玩頁（地圖先）：真實幾何投影（前方每段用自己的轉角，平面轉向、真深度），細分 5m 取樣 */ exact?: boolean; track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[] }
 
 /** v13／curve-unify：彎道用引擎 segCurvature（與小地圖／外甩同一套）；攝影機橫向跟車比例。 */
 const CAM_FOLLOW = 0.4;
@@ -275,6 +275,56 @@ function drawPetRider(x: CanvasRenderingContext2D, key: string, m: Mood, cx: num
   x.drawImage(img, 0, 0, img.width, shp, Math.round(cx - dw / 2) + jit, top, dw, dh);
   drawMoodFx(x, m, cx + jit, top, dw, frame, k);
 }
+/** 前方道路取樣點（試玩頁 exact 模式）：從攝影機所在弧長 camZ 起，每段用「自己的」曲率做真實平面積分
+ *  （圓弧解析解，不是二次近似），再用攝影機座標（航向＝攝影機所在點切線）的真實前向深度投影。
+ *  每段細分 EXACT_SUB 步，第 j 段的起點正好是 pts[j*EXACT_SUB]。轉超過 ~78° 或往回折（前向深度不再增加）就停止畫。 */
+export const EXACT_SUB = 4;
+/** exact 模式攝影機較高：1/z 透視下 7.5m 高時 100m 外整段只剩地平線下 ~8 列，彎的形狀全擠在一起看不出差別；抬高後前方 50–250m 的路面有足夠列數顯示各彎真正的曲率 */
+export const CAM_H_EXACT = 16;
+export interface RoadPt { y: number; x: number; w: number; scale: number; i: number; clip: number; wx: number; wy: number; z: number; d: number; h: number; c: number; fw: number }
+export function exactRoadPts(segs: { curve: number }[], camZ: number, camXw: number, wyAt: (d: number) => number, camY: number, maxSegs = DRAW): RoadPt[] {
+  const n = segs.length, base = Math.floor(camZ / SEG_LEN), frac = (camZ % SEG_LEN + SEG_LEN) % SEG_LEN / SEG_LEN;
+  const pts: RoadPt[] = [];
+  let lat = 0, fw = 0, h = 0, d = 0, maxy = H, lastFw = -1;
+  for (let k = 0; k < maxSegs; k++) {
+    const c = segCurvature(segs[(((base + k) % n) + n) % n].curve), Lk = k === 0 ? (1 - frac) * SEG_LEN : SEG_LEN, l = Lk / EXACT_SUB;
+    for (let q = 0; q < EXACT_SUB; q++) {
+      const ch = Math.cos(h);
+      if (ch < 0.2 || fw < lastFw - 1e-9) return pts; // 轉成側向／往回折：後面被遮住或已不在前方
+      lastFw = fw;
+      const wy = wyAt(d), zRel = fw + 4, scale = DEPTH * 6 / zRel;
+      const py = HORIZON - (wy - camY) * scale * (W / 2) / 6, pxc = W / 2 + (lat - camXw) * scale * (W / 2);
+      pts.push({ y: py, x: pxc, w: ROAD_W * scale * (W / 2) / ch, scale, i: base + k, clip: maxy, wx: lat, wy, z: zRel, d, h, c, fw });
+      if (py < maxy) maxy = py;
+      // 圓弧解析步進（c→0 時退回直線）
+      if (Math.abs(c) < 1e-9) { lat += Math.sin(h) * l; fw += Math.cos(h) * l; }
+      else { lat += (Math.cos(h) - Math.cos(h + c * l)) / c; fw += (Math.sin(h + c * l) - Math.sin(h)) / c; }
+      h += c * l; d += l;
+    }
+  }
+  return pts;
+}
+/** exact 模式：弧長 dz 處的真實投影（車、門、道具用），跟 exactRoadPts 同一套幾何 */
+export function exactPlace(pts: RoadPt[], dz: number, camXw: number, wy: number, camY: number) {
+  let k = 0; while (k + 1 < pts.length && pts[k + 1].d <= dz) k++;
+  const a = pts[k]; if (!a || !pts[k + 1]) return null;
+  const u = dz - a.d, c = a.c;
+  const lat = Math.abs(c) < 1e-9 ? a.wx + Math.sin(a.h) * u : a.wx + (Math.cos(a.h) - Math.cos(a.h + c * u)) / c;
+  const fw = Math.abs(c) < 1e-9 ? a.fw + Math.cos(a.h) * u : a.fw + (Math.sin(a.h + c * u) - Math.sin(a.h)) / c;
+  const zRel = fw + 4, scale = DEPTH * 6 / zRel;
+  return { k: k + 1, a, scale, py: HORIZON - (wy - camY) * scale * (W / 2) / 6, pxc: W / 2 + (lat - camXw) * scale * (W / 2), pw: ROAD_W * scale * (W / 2) / Math.max(0.2, Math.cos(a.h + c * u)) };
+}
+/** 某一列（螢幕 y）的路中心 x 與半路寬：在相鄰取樣點間線性內插（玩家車貼底線就用這個） */
+export function rowAtPts(pts: RoadPt[], y: number) { for (let k = 1; k < pts.length; k++) { const a = pts[k - 1], b = pts[k]; if (b.y <= y && a.y >= y && a.y > b.y) { const f = (y - b.y) / (a.y - b.y); return { x: b.x + (a.x - b.x) * f, w: b.w + (a.w - b.w) * f }; } } return null; }
+export const GROUND_Y = H - 6, RACE_ROAD_W = ROAD_W, RACE_DEPTH = DEPTH, RACE_HORIZON = HORIZON, RACE_CAM_H = CAM_H, RACE_DRAW = DRAW;
+export { camFollow as raceCamFollow };
+/** exact 模式：自己的車貼底線時，橫向位置用「車所在那一點」的路中心（PLAYER_DZ 處，真實幾何），
+ *  不用底線那一列（~18m 前方）的路中心——後者在進彎時會隨前方的彎滑過去，且舊版在相鄰取樣點間線性內插、
+ *  第一段長度隨 frac 變，車身每 tick 左右跳（不按方向也晃）。 */
+export function exactMeCenter(pts: RoadPt[], rowW: number, camXw: number) {
+  const c = pts[0]?.c ?? 0, u = PLAYER_DZ, lat = Math.abs(c) < 1e-9 ? 0 : (1 - Math.cos(c * u)) / c;
+  return W / 2 + (lat - camXw) * rowW / ROAD_W;
+}
 export function drawRace(x: CanvasRenderingContext2D, v: View) {
   const t = v.track, segs = trackSegs(t.id), n = segs.length, now = v.now ?? performance.now();
   fxUpdate(v.cars, now);
@@ -287,7 +337,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   // v13：攝影機跟著車橫移一部分（世界單位：半路寬 = ROAD_W），全部用小數，不先取整
   const camXw = v.camX !== undefined ? v.camX * ROAD_W : (v.me ? v.me.x * ROAD_W * camFollow(v.me.x) : 0);
   const base = Math.floor(camZ / SEG_LEN), frac = (camZ % SEG_LEN + SEG_LEN) % SEG_LEN / SEG_LEN;
-  const el = elevTable(t), camY = elevAt(el, camZ + PLAYER_DZ) + CAM_H;
+  const el = elevTable(t), camY = elevAt(el, camZ + PLAYER_DZ) + (v.exact ? CAM_H_EXACT : CAM_H);
   // 天空與遠景（隨彎道視差移動）：累積彎度＋本段小數部分，連續不跳格
   const bend = curvePrefix(t)[((base % n) + n) % n] * 0.8 + segs[((base % n) + n) % n].curve * frac * 0.8;
   role('sky'); x.fillStyle = night ? Q[3] : Q[0]; x.fillRect(0, 0, W, H);
@@ -296,19 +346,22 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   role('city'); drawSkyline(x, t.scenery, bend, night ? NIGHT : Q);
   // 道路（v13，Outrun/TG2 式路段投影）：從攝影機往前逐段積分彎度
   // 每段彎度固定 → 航向 h 線性、橫移 x 二次，且對 camZ 連續（不會隨段落邊界跳格）。
-  const pts: { y: number; x: number; w: number; scale: number; i: number; clip: number; wx: number; wy: number; z: number; d: number; h: number; c: number }[] = [];
+  const pts: RoadPt[] = [];
   let lx = 0, lh = 0, maxy = H;
+  const EX = !!v.exact, SUB = EX ? EXACT_SUB : 1;
+  if (EX) pts.push(...exactRoadPts(segs, camZ, camXw, (d) => elevAt(el, camZ + d), camY));
   const proj = (d: number, wx: number, wy: number) => { const zRel = d + 4, scale = DEPTH * 6 / zRel; return { zRel, scale, py: HORIZON - (wy - camY) * scale * (W / 2) / 6, pxc: W / 2 + (wx - camXw) * scale * (W / 2) }; };
-  for (let k = 0; k < DRAW; k++) {
+  for (let k = 0; k < (EX ? 0 : DRAW); k++) {
     const d = k === 0 ? 0 : (k - frac) * SEG_LEN, i = base + Math.max(0, k - 1);
     const c = segCurvature(segs[(((base + k) % n) + n) % n].curve); // 下一段（d → d+L）曲率 rad/m＝segTurn/SEG_LEN
     const wy = elevAt(el, camZ + d), p = proj(d, lx, wy);
-    pts.push({ y: p.py, x: p.pxc, w: ROAD_W * p.scale * (W / 2), scale: p.scale, i, clip: maxy, wx: lx, wy, z: p.zRel, d, h: lh, c });
+    pts.push({ y: p.py, x: p.pxc, w: ROAD_W * p.scale * (W / 2), scale: p.scale, i, clip: maxy, wx: lx, wy, z: p.zRel, d, h: lh, c, fw: d });
     if (p.py < maxy) maxy = p.py;
     const L = k === 0 ? (1 - frac) * SEG_LEN : SEG_LEN;
     lx += lh * L + c * L * L / 2; lh += c * L;
   }
-  for (let k = DRAW - 1; k > 0; k--) {
+  const ND = pts.length;
+  for (let k = ND - 1; k > 0; k--) {
     const a = pts[k - 1], b = pts[k]; if (b.scale === 0 || a.scale === 0) continue;
     if (b.y >= a.y) continue; // 被坡擋住
     const alt = Math.floor(b.i / 5) % 2 === 0; // v24：路邊紅白／車道虛線每 100m 換一次（原 40m：高速時 2–3 幀就閃一次）
@@ -333,9 +386,9 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   // v16：路邊物位置來自引擎 roadside()（伺服器用同一份做碰撞）；pts[k] 正好在第 base+k 段的起點
   const side = roadside(t.id), bySeg = new Map<number, typeof side>(); for (const o of side) { const l = bySeg.get(o.seg); if (l) l.push(o); else bySeg.set(o.seg, [o]); }
   for (let k = Math.min(DRAW - 1, 26); k >= 1; k--) {
-    const p = pts[k]; if (!p.scale || p.w < 4) continue;
+    const p = pts[k * SUB]; if (!p || !p.scale || p.w < 4) continue;
     const segIdx = (((base + k) % n) + n) % n, os = bySeg.get(segIdx); if (!os) continue;
-    if (p.y > pts[k].clip + 1) continue;
+    if (p.y > p.clip + 1) continue;
     for (const o of os) {
       role('prop'); const img = propCanvas(o.name, night);
       const wx = p.x + o.x * p.w, sc = p.w / ROAD_W * 0.75 / 14 * (o.name === 'tower' ? 2.2 : 1.6);
@@ -351,6 +404,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
       const gz = lap * L;
       let dz = gz - camZ;
       if (dz < 0.8 || dz > (DRAW - 3) * SEG_LEN) continue;
+      if (EX) { const e = exactPlace(pts, dz, camXw, elevAt(el, camZ + dz), camY); if (!e || (e.a.clip < H && e.py > e.a.clip + 2)) continue; sprites.push({ k: e.k / SUB, draw: () => drawFinishGate(x, e.pxc, Math.min(H - 2, Math.round(e.py)), e.pw, night) }); continue; }
       let k = 0; while (k + 1 < pts.length && pts[k + 1].d <= dz) k++;
       const a = pts[k]; if (!a || !pts[k + 1]) continue;
       const u = dz - a.d, wx = a.wx + a.h * u + a.c * u * u / 2, wy = elevAt(el, camZ + dz), pr = proj(dz, wx, wy);
@@ -363,6 +417,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   const place = (c: ViewCar) => {
     let dz = c.z - camZ; const L = v.len; dz = ((dz % L) + L) % L; if (dz > L / 2) dz -= L;
     if (dz < 0.5 || dz > (DRAW - 2) * SEG_LEN) return null;
+    if (EX) { const e = exactPlace(pts, dz, camXw, elevAt(el, camZ + dz), camY); return e ? { k: e.k / SUB, py: e.py, pxc: e.pxc, pw: e.pw, clip: e.a.clip } : null; }
     let k = 0; while (k + 1 < pts.length && pts[k + 1].d <= dz) k++;
     const a = pts[k]; if (!a || !pts[k + 1]) return null;
     const u = dz - a.d, wx = a.wx + a.h * u + a.c * u * u / 2, wy = elevAt(el, camZ + dz), p = proj(dz, wx, wy);
@@ -371,7 +426,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   // v14：近處的車（含自己）真實深度會投影到畫面外，畫的時候抬到底線 GROUND；橫向位置也要用「那一列」的路寬，
   // 否則車左右移動比路面快 ~1.8 倍（這正是轉向看起來很衝的原因之一），並排的電腦車也會被甩到畫面邊。
   const GROUND = H - 6;
-  const rowAt = (y: number) => { for (let k = 1; k < pts.length; k++) { const a = pts[k - 1], b = pts[k]; if (b.y <= y && a.y >= y && a.y > b.y) { const f = (y - b.y) / (a.y - b.y); return { x: b.x + (a.x - b.x) * f, w: b.w + (a.w - b.w) * f }; } } return null; };
+  const rowAt = (y: number) => rowAtPts(pts, y);
   const gw = rowAt(GROUND)?.w ?? playerPw(); // 底線那一列的半路寬：玩家車寬 PLAYER_W 對應這個路寬
   role('fx');
   for (const pk of v.pickups ?? []) { // 路上氮氣道具：跟車同一套投影
@@ -386,7 +441,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   }
   for (const c of v.cars) {
     const isMe = !!v.me && c.id === v.me.id, p0 = place(c); if (!p0) continue;
-    const row = p0.py > GROUND ? rowAt(GROUND) : null, p = row ? { ...p0, pxc: row.x, lat: row.w } : { ...p0, lat: p0.pw };
+    const row = p0.py > GROUND ? rowAt(GROUND) : null, p = row ? { ...p0, pxc: EX && isMe ? exactMeCenter(pts, row.w, camXw) : row.x, lat: row.w } : { ...p0, lat: p0.pw };
     if (!isMe && p.clip < H && p.py > p.clip + 2) continue; // 被坡頂擋住
     if (!isMe && t.weather === 'fog' && p.k > 13) continue; // 霧裡看不到遠方的車
     const target = PLAYER_W * p.lat / gw; /* v14：車寬跟畫在那一列的路寬成正比 */ if (!isMe && target < 5) continue; const lod = isMe ? -1 : lodFor(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
