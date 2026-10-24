@@ -214,7 +214,7 @@ function boot() {
       drawRace(x, {
         pickups, gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
         tick: sim.tick, countdown: sim.countdown, laps: sim.laps, len: sim.len,
-        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash, now, exact: true, camH, hitbox: showHitbox ? DEMO_HITBOX : undefined,
+        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash, now, exact: true, camH, hitbox: showHitbox ? DEMO_HITBOX : undefined, carW: DEMO_HITBOX.dx,
       });
       return;
     }
@@ -226,7 +226,7 @@ function boot() {
       drawRace(x, {
         gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
         tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len,
-        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash: 'FINISH!',  exact: true, camH,
+        rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash: 'FINISH!',  exact: true, carW: DEMO_HITBOX.dx, camH,
       });
       const meC = sim.cars.find((c) => c.id === ME_ID)!;
       const pos = raceRanking(sim).indexOf(meC) + 1;
@@ -249,7 +249,7 @@ function boot() {
     }));
     drawRace(x, {
       track: t, me, cars: [...ghosts, me], tick: 0, countdown: 60, laps: t.laps,
-      len: 2000, rank: RACE_SLOTS, frame, hud: true, gears: 4, top: stats.topSpeed,
+      len: 2000, rank: RACE_SLOTS, frame, hud: true, carW: DEMO_HITBOX.dx, gears: 4, top: stats.topSpeed,
     });
     panel(x, 0, 0, W, 22);
     text(x, 'SOLO DEMO', 6, 4, 0, 2);

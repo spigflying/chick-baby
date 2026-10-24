@@ -46,7 +46,10 @@ export const COLLIDE_DX = 0.38 / ROAD_WIDEN;
  *  dx：兩車中心橫向距離 < dx 才算碰（=兩個盒子各寬 dx 相疊），取 0.24（比精靈平均 0.257 小約 3px，擦邊不算）。
  *  dz：車長以 2× 車寬 ≈ 1.6 m 估，取 1.5 m；中心縱向距離 < dz 才算碰。dz > dz/2 ＝追撞、≤ dz/2 ＝並排擦撞。 */
 export interface Hitbox { dx: number; dz: number }
-export const DEMO_HITBOX: Hitbox = { dx: 0.24, dz: 1.5 };
+/** race-demo-onecar：試玩頁只有兩款車（玩家原廠車＋單一 AI 款），兩者都畫成「不透明車身寬 = dx 半路寬」；
+ *  dx = 52px / 舊底線半路寬 194.8px ≈ 0.267 → 取 0.267。中心橫距 < dx ⇔ 兩台精靈重疊，每一對車都用同一個盒子。 */
+export const DEMO_CAR_W = 0.267;
+export const DEMO_HITBOX: Hitbox = { dx: DEMO_CAR_W, dz: 1.5 };
 /** v26：差一整圈以上（套圈）的兩台車彼此沒有碰撞，AI 也不跟車／讓車 */
 export const lapped = (a: { z: number }, b: { z: number }, len: number) => Math.abs(a.z - b.z) >= len;
 export const QUALIFY_RANK = 10;
