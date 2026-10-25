@@ -239,7 +239,7 @@ export interface RaceCar {
   /** v15 碰撞事件（給畫面特效）：evT＝最後一次被撞的 tick、evK＝種類 1 撞路邊 2 追撞前車 3 被追撞 4 側擦、evS＝力道（扣裝甲前的傷害）、evSide＝-1 左 / 0 前後 / 1 右 */
   evT?: number; evK?: number; evS?: number; evSide?: number;
   /** v16 翻車剩餘 tick（0＝沒在翻） */
-  flip?: number; /** 路上氮氣道具：最後一次吃到的 tick（給畫面火花）與次數 */ pkT?: number; pkN?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v23：前／側／後 分區損傷 0–100（HUD 用） */ zd?: number[]; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number;
+  flip?: number; /** 路上氮氣道具：最後一次吃到的 tick（給畫面火花）與次數 */ pkT?: number; pkN?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v23：前／側／後 分區損傷 0–100（HUD 用） */ zd?: number[]; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number; /** race-demo-hitfix：最後一次「碰到但沒傷害」的 tick（試玩頁碰撞盒畫黃色） */ touchT?: number;
 }
 /** 完美度（%）＝ 100 − damage */
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
@@ -515,6 +515,7 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
     const a = live[i], b = live[j], dz = b.z - a.z; if (dz > czMax) break;
     if (lapped(a, b, s.len)) continue; const dx = Math.abs(a.x - b.x); if (dx >= cdx) continue;
     if (s.hitbox && dz >= czMax) continue; // 盒子剛好貼齊＝沒碰
+    if (s.hitbox) { demoCollide(s, a, b, dz, dx, cdx, czMax, cside); continue; } // race-demo-hitfix：盒子重疊一定有反應
     if (dz > cside && a.speed > b.speed) { // a 從後面撞上 b
       const rel = (a.speed - b.speed) / (30 * X);
       if (a.speed - b.speed < 1.5 * X) { a.speed = b.speed; continue; } // 輕輕貼上：不算撞
@@ -526,6 +527,29 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
       hurt(a, 1, 'S', s.tick, HIT_SWIPE, a.x < b.x ? 1 : -1); hurt(b, 1, 'S', s.tick, HIT_SWIPE, a.x < b.x ? -1 : 1); // v23：輕擦 ≈ −1% a.hit = b.hit = 8; a.speed *= 0.92; b.speed *= 0.92;
       const push = a.x < b.x ? -0.2 : 0.2; a.x += push; b.x -= push;
     }
+  }
+}
+/** race-demo-hitfix（只有試玩頁 s.hitbox）：盒子重疊＝一定處理，處理完不再重疊。
+ *  舊規則的漏洞：①前後重疊但後車不比前車快（同速、前車較快、或「輕輕貼上」把速度對齊後）→ 什麼都不做，盒子一直疊著；
+ *  ②並排但任一車還在撞擊冷卻（hit>0）→ 什麼都不做；③並排擦撞的冷卻／減速被誤寫進註解，沒生效。 */
+export const DEMO_GENTLE_DV = 1.5;
+function demoCollide(s: RaceState, a: RaceCar, b: RaceCar, dz: number, dx: number, cdx: number, czMax: number, cside: number) {
+  const X = SPEED_X, side = a.x < b.x ? 1 : -1; // a 在 b 的左邊 → side=1
+  if (dz > cside) { // 前後：a 在後
+    const dv = a.speed - b.speed;
+    if (dv >= DEMO_GENTLE_DV * X && a.hit <= 0 && b.hit <= 0) { // 真的追撞
+      const rel = dv / (30 * X);
+      a.speed = b.speed * 0.85; b.speed += 2 * X;
+      hurt(a, 3 * (0.3 + rel), 'F', s.tick, HIT_REAR_END, 0); hurt(b, 2 * (0.3 + rel), 'R', s.tick, HIT_REARED, 0);
+      a.hit = Math.max(a.hit, 8); b.hit = Math.max(b.hit, 6);
+    } else { a.touchT = b.touchT = s.tick; if (dv > 0) { const v = (a.speed + b.speed) / 2; a.speed = v; b.speed = v; } } // 輕碰：沒傷害、速度對齊（黃框）
+    const gap = czMax - dz; a.z -= gap / 2; b.z += gap / 2; // 推開到剛好貼齊
+  } else { // 並排
+    if (a.hit <= 0 && b.hit <= 0) {
+      hurt(a, 1, 'S', s.tick, HIT_SWIPE, side); hurt(b, 1, 'S', s.tick, HIT_SWIPE, -side);
+      a.hit = b.hit = 8; a.speed *= 0.92; b.speed *= 0.92;
+    } else a.touchT = b.touchT = s.tick; // 冷卻中：沒傷害，只推開（黃框）
+    const gap = cdx - dx + 0.02; a.x -= side * gap / 2; b.x += side * gap / 2;
   }
 }
 export function raceRanking(s: RaceState): RaceCar[] {

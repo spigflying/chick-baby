@@ -163,7 +163,7 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
   x.fillStyle = Q[edge]; x.fillRect(px, py, w, h); x.fillStyle = Q[bg]; x.fillRect(px + 1, py + 1, w - 2, h - 2);
 }
 
-export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number; /** 前／側／後 分區損傷 0–100 */ zd?: number[]; /** 最後吃到路上氮氣道具的 tick */ pkT?: number; /** 坐在車上的寵物精靈鍵（伺服器給；電腦車沒有） */ pet?: string | null }
+export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number; /** 前／側／後 分區損傷 0–100 */ zd?: number[]; /** 最後吃到路上氮氣道具的 tick */ pkT?: number; /** 坐在車上的寵物精靈鍵（伺服器給；電腦車沒有） */ pet?: string | null; /** race-demo-hitfix：碰到但沒傷害（碰撞盒畫黃色） */ touch?: boolean }
 export interface View { /** 試玩頁（地圖先）：真實幾何投影（前方每段用自己的轉角，平面轉向、真深度），細分 5m 取樣 */ exact?: boolean; /** exact 模式攝影機高度（m），預設 CAM_H_EXACT */ camH?: number; track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[]; /** race-demo-hitbox：畫每台車的碰撞盒（地面投影，寬 dx 路寬單位、長 dz 公尺，以車中心為準） */ hitbox?: { dx: number; dz: number }; /** race-demo-onecar：所有車畫成同一個寬度（半路寬單位，=碰撞盒 dx），以不透明車身寬為準 */ carW?: number }
 
 /** v13／curve-unify：彎道用引擎 segCurvature（與小地圖／外甩同一套）；攝影機橫向跟車比例。 */
@@ -465,7 +465,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     const ghost = !isMe && !!v.me && isLapped(c, v.me, v.len); // v26：差一圈以上＝沒有碰撞，畫成半透明（棋盤點陣）
     if (v.hitbox) { const hb = v.hitbox, lift = (row ? GROUND : p0.py) - p0.py, kx = row ? row.w / p0.pw : 1, cx0 = p.pxc - p0.pxc; // 與車同一個抬升／縮放
       const edge = (dzm: number) => { const q = place({ ...c, z: c.z + dzm }); return q ? { y: q.py + lift, l: q.pxc + cx0 + (c.x - hb.dx / 2) * q.pw * kx, r: q.pxc + cx0 + (c.x + hb.dx / 2) * q.pw * kx } : null; };
-      const r0 = edge(-hb.dz / 2), f0 = edge(hb.dz / 2), col = c.hit > 0 ? '#ff2020' : '#20ff40';
+      const r0 = edge(-hb.dz / 2), f0 = edge(hb.dz / 2), col = c.hit > 0 ? '#ff2020' : c.touch ? '#ffe020' : '#20ff40'; /* 紅＝撞擊、黃＝碰到沒傷害、綠＝沒碰 */
       if (r0 && f0) sprites.push({ k: p.k - 0.6 + (isMe ? -0.5 : 0), draw: () => { x.save(); x.strokeStyle = col; x.lineWidth = 1; x.beginPath(); x.moveTo(r0.l, r0.y); x.lineTo(r0.r, r0.y); x.lineTo(f0.r, f0.y); x.lineTo(f0.l, f0.y); x.closePath(); x.stroke(); x.restore(); } }); }
     sprites.push({ k: p.k + (isMe ? -0.5 : 0), draw: () => {
       const fp = c.flip ? 1 - c.flip / FLIP_TICKS : 0;

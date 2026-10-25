@@ -180,7 +180,7 @@ function boot() {
         pet: c.ai ? null : 'chicken',
         z, x: xx, speed, damage: c.damage, nitro: c.nitro, nitroT: c.nitroT,
         fin: c.finishedTick, hit: c.hit, evT: c.evT, evK: c.evK, evS: c.evS, evSide: c.evSide,
-        zd: c.zd, pkT: c.pkT ?? 0, flip, brake: c.id === ME_ID ? keys.brake : false,
+        zd: c.zd, pkT: c.pkT ?? 0, flip, touch: c.touchT !== undefined && sim!.tick - c.touchT < 8, brake: c.id === ME_ID ? keys.brake : false,
       } as ViewCar;
     });
   }
