@@ -61,6 +61,7 @@ describe('不轉向時車身穩定', () => {
     const xs: number[] = [], cxs: number[] = [];
     for (let i = 0; i < RACE_TICK_RATE * 3; i++) {
       setRaceInput(s, 'me', { gas: true, brake: false, left: false, right: false, nitro: false }); stepRace(s);
+      if (Math.abs(me.x) > 0.95) break; // race-demo-throw 之後不打方向甩得更快：只看路面上（出界後鏡頭跟隨飽和、速度驟降，不屬於「擺」）
       for (const c of s.cars) if (c !== me) c.z = -5000;
       const camZ = me.z - 2.75, camXw = me.x * RACE_ROAD_W * raceCamFollow(me.x);
       const pts = exact ? exactRoadPts(m.segs, camZ, camXw, () => 0, CAM_H_EXACT) : legacyPts(m.segs, camZ, camXw, RACE_CAM_H);
