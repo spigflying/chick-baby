@@ -29,7 +29,7 @@ const STOCK_COLOR = 0;
 function boot() {
   const root = document.getElementById('app')!;
   document.body.style.background = '#1a1030';
-  root.innerHTML = `<main class="page race-page">
+  root.innerHTML = `<main class="page race-page demo-nosel">
     <div class="race-dev">
       <p class="muted" style="margin:0;padding:4px 8px;background:#2a1848;border:2px solid #000;font-family:var(--ui,#Cubic 11,monospace)">DEMO · 離線試玩 · 不登入 · 不存檔 · 重新整理＝沒了</p>
       <div class="lcd race-lcd"><canvas id="rc" width="${W}" height="${H}"></canvas><p class="msg" id="rmsg">選賽道後按「開始試玩」</p></div>
@@ -147,6 +147,9 @@ function boot() {
     b.addEventListener('pointercancel', set(false));
     b.addEventListener('contextmenu', (e) => e.preventDefault());
   });
+  // 手機連點不要跳出「拷貝／搜尋」：畫面與面板按鈕擋長按選單（不 stopPropagation，idle.ts 要收到 pointerdown）
+  root.querySelector('#rc')!.addEventListener('contextmenu', (e) => e.preventDefault());
+  root.querySelector('.race-panel')!.addEventListener('contextmenu', (e) => { if ((e.target as HTMLElement).closest('button')) e.preventDefault(); });
   const KEYMAP: Record<string, keyof typeof keys> = {
     ArrowLeft: 'left', a: 'left', A: 'left', ArrowRight: 'right', d: 'right', D: 'right',
     ArrowUp: 'gas', z: 'gas', Z: 'gas', w: 'gas', W: 'gas',
