@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { registerMapFirstTracks, trackSegs, createRace, stepRace, setRaceInput, SEG_LEN, RACE_TICK_RATE, MAPFIRST_NOSTEER_MUL, MAPFIRST_COUNTER_MUL, TRACKS, segCurvature } from '../src/index';
+import { registerMapFirstTracks, trackSegs, createRace, stepRace, setRaceInput, SEG_LEN, RACE_TICK_RATE, MAPFIRST_NOSTEER_MUL, MAPFIRST_COUNTER_MUL, MAPFIRST_NOSTEER_PUSH, TRACKS, segCurvature } from '../src/index';
 
 registerMapFirstTracks();
 type Inp = 'against' | 'none' | 'with';
@@ -23,13 +23,17 @@ export function throwRun(id: string, pick: (c: number) => boolean, inp: Inp, spe
 const NINETY = (c: number) => c > 0 && c <= 7, HAIRPIN = (c: number) => c > 7;
 
 describe('race-demo-throw: outward drift against > none > with (map-first only)', () => {
-  it('constants', () => { expect(MAPFIRST_NOSTEER_MUL).toBeGreaterThanOrEqual(1.3); expect(MAPFIRST_NOSTEER_MUL).toBeLessThanOrEqual(1.5); expect(MAPFIRST_COUNTER_MUL).toBeGreaterThan(1); });
+  it('constants', () => { expect(MAPFIRST_NOSTEER_MUL).toBeGreaterThanOrEqual(1.3); expect(MAPFIRST_NOSTEER_MUL).toBeLessThanOrEqual(1.5); expect(MAPFIRST_NOSTEER_PUSH).toBe(2); expect(MAPFIRST_COUNTER_MUL).toBeGreaterThan(MAPFIRST_NOSTEER_PUSH); });
   for (const [name, id, pick] of [['90° (mf2)', 'mf2', NINETY], ['hairpin (mf1)', 'mf1', HAIRPIN]] as const) {
     it(`${name}: ordering at the same speed`, () => {
       const a = throwRun(id, pick, 'against'), n = throwRun(id, pick, 'none'), w = throwRun(id, pick, 'with');
       if (process.env.THROW_DUMP) console.log(name, JSON.stringify({ a, n, w }));
       expect(a.out1s).toBeGreaterThan(n.out1s); expect(n.out1s).toBeGreaterThan(w.out1s); expect(n.out1s).toBeGreaterThan(0);
       expect(a.offTick ?? 1e9).toBeLessThan(n.offTick ?? 1e9);
+      // Benson 目標（20 tick/s）：90° 不打 ≤1.5s、反打 ≤1s；髮夾 不打 ≤0.9s、反打 ≈0.6s
+      const [nMax, aMax] = id === 'mf2' ? [30, 20] : [18, 13];
+      expect(n.offTick ?? 1e9).toBeLessThanOrEqual(nMax); expect(a.offTick ?? 1e9).toBeLessThanOrEqual(aMax);
+      expect(w.offTick).toBeNull();
     });
   }
   it('production tracks unaffected (not map-first)', () => { expect(TRACKS.some((t) => t.mapFirst)).toBe(false); });

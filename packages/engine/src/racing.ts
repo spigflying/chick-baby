@@ -411,11 +411,13 @@ export function mapFirstPullRate(curve: number, pullSp: number, grip: number): n
  * 轉向權限倍率（乘在 STEER_RATE×speedAuth 上；STEER_RATE／CORNER_PULL 仍依 SPEED_X/4，避免飄）。
  * 加油時橫向變鈍、收油時更靈 → 急彎收油較好過。
  */
-/** race-demo-throw（只在 mapFirst 賽道、只對玩家）：彎中不打方向 → 外甩 ×MAPFIRST_NOSTEER_MUL；
- *  反打（往彎外打）→ 外甩 ×NOSTEER_MUL，再加 MAPFIRST_COUNTER_MUL × 轉向權限（舊版只加 1×）。往彎內打不變。
+/** race-demo-throw（只在 mapFirst 賽道、只對玩家）：
+ *  不打方向 → 外甩 ×MAPFIRST_NOSTEER_MUL，再往彎外推 MAPFIRST_NOSTEER_PUSH × 轉向權限（＝2b2983b 的反打總量）；
+ *  反打（往彎外打）→ 外甩 ×NOSTEER_MUL，再加 MAPFIRST_COUNTER_MUL × 轉向權限。往彎內打不變。
  *  外甩速度：反打 > 不打 > 往內打。 */
 export const MAPFIRST_NOSTEER_MUL = 1.4;
-export const MAPFIRST_COUNTER_MUL = 2;
+export const MAPFIRST_NOSTEER_PUSH = 2;
+export const MAPFIRST_COUNTER_MUL = 3;
 export const STEER_AUTH_GAS = 0.75;
 export const STEER_AUTH_NITRO = 0.68; // 氮氣中再鈍一點
 export const STEER_AUTH_COAST = 1.2;
@@ -477,7 +479,7 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
     if (t.mapFirst && !c.ai && pull !== 0 && Math.sign(steer) !== Math.sign(pull)) { // race-demo-throw：不打／反打
       const counter = steer !== 0; // pull>0 往 −x 甩；steer 與 pull 異號＝往彎外打
       c.x -= pull * MAPFIRST_NOSTEER_MUL * dt;
-      if (counter) c.x += steer * auth * MAPFIRST_COUNTER_MUL * dt;
+      c.x += (counter ? steer * MAPFIRST_COUNTER_MUL : -Math.sign(pull) * MAPFIRST_NOSTEER_PUSH) * auth * dt;
     } else {
       c.x += steer * auth * dt;
       c.x -= pull * dt;
