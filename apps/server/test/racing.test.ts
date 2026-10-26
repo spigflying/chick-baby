@@ -6,7 +6,7 @@ import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
 import { fastForwardRace, inRace, raceBusy, raceLabel, startRaceLoop } from '../src/racing';
 import { randomUUID } from 'node:crypto';
-import { partPrice, prizeFor, RACE_SLOTS, seasonOf, setRaceInput, TRACKS } from '@chick/engine';
+import { partPrice, prizeFor, RACE_SLOTS, seasonOf, setRaceInput, TRACKS, TRACK_VERSION } from '@chick/engine';
 import { CLOSING_GUARD_MS, RACE_DROP_MS, capRaceTicks, stepRaces } from '../src/racing';
 import { handleClosed } from '../src/closing';
 
@@ -348,8 +348,11 @@ describe('racing: disconnects, bus outage, closing', () => {
     const season = seasonOf(Date.now());
     await a.call('GET', '/race/profile'); await b.call('GET', '/race/profile'); // 建檔（錦標賽積分榜）
     for (const [u, ms] of [[a.id, 90_000], [b.id, 95_000]] as const) {
-      await sql`INSERT INTO race_results (race_id, season, track, user_id, rank, time_ms, prize, points, condition, humans, private) VALUES (${randomUUID()}, ${season}, 'tw1', ${u}, 1, ${ms}, 0, 0, 100, 1, false)`.execute(db);
+      await sql`INSERT INTO race_results (race_id, season, track, user_id, rank, time_ms, prize, points, condition, humans, private, track_ver) VALUES (${randomUUID()}, ${season}, 'tw1', ${u}, 1, ${ms}, 0, 0, 100, 1, false, ${TRACK_VERSION})`.execute(db);
     }
+    // race-prod-port：舊版賽道（track_ver 預設 1）的更快紀錄還在表裡，但不列入排行榜
+    await sql`INSERT INTO race_results (race_id, season, track, user_id, rank, time_ms, prize, points, condition, humans, private) VALUES (${randomUUID()}, ${season}, 'tw1', ${b.id}, 1, 10000, 0, 0, 100, 1, false)`.execute(db);
+    expect((await sql<any>`SELECT count(*)::int AS n FROM race_results WHERE track_ver = 1 AND user_id = ${b.id}`.execute(db)).rows[0].n).toBe(1);
     const lb = (await a.call('GET', '/race/leaderboard/tw1')).json;
     expect(lb.best.map((r: any) => [r.name, r.time_ms])).toEqual([['咪咪（同名）', 90_000], ['同名', 95_000]]);
     expect(lb.best[0].id).toBeUndefined();

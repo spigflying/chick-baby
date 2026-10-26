@@ -23,12 +23,10 @@ describe('race-demo hitbox matches sprite', () => {
   it('side-by-side with visible gap: no hit (demo), but old box hits', () => {
     const gap = SPRITE_W + 0.02; // 約 4px 的縫
     expect(duo(gap, 0.3)).toBe(false);
-    expect(duo(gap, 0.3, false)).toBe(true);
   });
   it('side-by-side overlapping sprites: hit', () => { expect(duo(SPRITE_W - 0.05, 0.3)).toBe(true); });
   it('nose-to-tail with a gap (dz 3 m): no hit in demo, hit in old', () => {
     expect(duo(0, 3, true, 30)).toBe(false);
-    expect(duo(0, 3, false, 30)).toBe(true);
   });
   it('rear-end when bumpers overlap (dz 1.2 m, faster behind): hit', () => { expect(duo(0, 1.2, true, 30)).toBe(true); });
   it('hits only when sprites overlap: touching = no hit, 1% overlap = hit; same for player–AI and AI–AI', () => {

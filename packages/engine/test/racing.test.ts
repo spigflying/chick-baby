@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_OUT_COST, PAINTS, createRace, stepRace, raceRanking, setRaceInput, carStats, STOCK_PARTS, PARTS, PART_KINDS, TRACKS, COUNTRIES, buildTrack, prizeFor, pointsFor, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, newCup, cupTrack, ME, condition, condFactor, seasonOf, segAt, type Parts } from '../src/racing';
+import { MAX_OUT_COST, PAINTS, createRace, stepRace, raceRanking, setRaceInput, carStats, STOCK_PARTS, PARTS, PART_KINDS, TRACKS, COUNTRIES, buildTrack, prizeFor, pointsFor, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, newCup, cupTrack, ME, condition, condFactor, seasonOf, segAt, trackSegs, type Parts } from '../src/racing';
 
 const run = (s: ReturnType<typeof createRace>, f?: (s: any) => void) => { while (!s.over) { f?.(s); stepRace(s); } return s; };
 const drive = (s: any, id: string, nitro = false) => { const me = s.cars.find((c: any) => c.id === id); let tgt = segAt(s, me.z + 40).curve * 0.12;
@@ -10,7 +10,7 @@ describe('racing engine v5', () => {
   it('4 countries × 4 races; tracks loop; a full 20-car AI field finishes every track', () => {
     expect(COUNTRIES.length).toBe(4); expect(TRACKS.length).toBe(16);
     for (const t of TRACKS) {
-      const segs = buildTrack(t); expect(Math.abs(segs[segs.length - 1].y)).toBeLessThan(1e-6);
+      const segs = trackSegs(t.id); expect(Math.abs(segs[segs.length - 1].y)).toBeLessThan(1e-6);
       const s = run(createRace(7, t.id, fillField([])));
       expect(s.cars.length).toBe(RACE_SLOTS - 1);
       expect(s.cars.filter((c) => c.finishedTick !== null).length, t.id).toBeGreaterThanOrEqual(18);
@@ -40,7 +40,7 @@ describe('racing engine v5', () => {
   });
   it('rear-end hit damages both cars (front of hitter, rear of victim)', () => {
     const s = createRace(5, 'us1', [{ id: 'a', name: 'a' }, { id: 'b', name: 'b', parts: { armorR: 3 } }]);
-    s.countdown = 0; const [a, b] = s.cars; a.x = b.x = 0; a.z = 0; b.z = 4.5; a.speed = 60; b.speed = 20;
+    s.countdown = 0; const [a, b] = s.cars; a.x = b.x = 0; a.z = 0; b.z = 3.4; /* 精靈判定框：走一格後保險桿重疊 */ a.speed = 60; b.speed = 20;
     stepRace(s); expect(a.damage).toBeGreaterThan(0); expect(b.damage).toBeGreaterThan(0); expect(b.damage).toBeLessThan(a.damage);
   });
   it('TG2-style shop: 3 tiers, prices rise; gearbox needs engine; wet tyres matter in rain', () => {

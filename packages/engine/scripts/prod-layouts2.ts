@@ -1,4 +1,4 @@
-// v2 草稿：模板 → fin 補角 → 局部搜尋固定直線長度（閉合／無自交／相隔 >700m 路段距離 ≥300m）→ 指標＋難度分數 → JSON 給繪圖、寫出 racing-prod-layouts2.draft.ts
+// v2 草稿：模板 → fin 補角 → 局部搜尋固定直線長度（閉合／無自交／相隔 >700m 路段距離 ≥300m）→ 指標＋難度分數 → JSON 給繪圖、寫出 racing-prod-layouts.ts
 import { buildMapFirst, type LayoutPiece } from '../src/racing-mapfirst';
 import { SEG_LEN, TRACKS, buildTrack } from '../src/racing';
 import { TEMPLATES, resolve } from '../src/racing-prod-layouts2.templates';
@@ -90,8 +90,8 @@ for (const t of TRACKS) { if (only && t.id !== only) continue;
 if (!only) {
   writeFileSync('/workspace/prod-layouts2.json', JSON.stringify(res));
   const fmt = (p: any) => ('a' in p ? `A(${+p.a.toFixed(2)}, ${p.r}${p.hill ? ', ' + p.hill : ''})` : `S(${p.s === 'auto' ? "'auto'" : p.s}${p.hill ? ', ' + p.hill : ''})`);
-  let src = `/** 草稿 v2（未接到 racing.ts）：由 racing-prod-layouts2.templates.ts 經 scripts/prod-layouts2.ts 補角＋調直線長度後的結果。 */\nimport type { LayoutPiece } from './racing-mapfirst';\nconst S = (s: number | 'auto', hill?: number): LayoutPiece => (hill ? { s, hill } : { s });\nconst A = (a: number, r: number, hill?: number): LayoutPiece => (hill ? { a, r, hill } : { a, r });\nexport const PROD_LAYOUTS2_DRAFT: Record<string, LayoutPiece[]> = {\n`;
+  let src = `/** 草稿 v2（未接到 racing.ts）：由 racing-prod-layouts2.templates.ts 經 scripts/prod-layouts2.ts 補角＋調直線長度後的結果。 */\nimport type { LayoutPiece } from './racing-mapfirst';\nconst S = (s: number | 'auto', hill?: number): LayoutPiece => (hill ? { s, hill } : { s });\nconst A = (a: number, r: number, hill?: number): LayoutPiece => (hill ? { a, r, hill } : { a, r });\nexport const PROD_LAYOUTS: Record<string, LayoutPiece[]> = {\n`;
   for (const r of res) src += `  // ${r.insp}\n  ${r.id}: [${r.pieces.map(fmt).join(', ')}],\n`;
-  writeFileSync('src/racing-prod-layouts2.draft.ts', src + '};\n');
+  writeFileSync('src/racing-prod-layouts.ts', src + '};\n');
 }
 console.log(bad ? `${bad} BAD` : 'ALL OK');

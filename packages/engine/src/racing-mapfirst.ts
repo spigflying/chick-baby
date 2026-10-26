@@ -3,7 +3,7 @@
  * 賽道 = 封閉 2D 佈局（直線＋圓弧，弧有明確轉角與半徑）。路段每段 SEG_LEN 公尺，
  * 每段航向變化（弧度）＝佈局在那 20m 的實際轉角 → segment.curve = 轉角 / SEG_TURN_K。
  * 之後小地圖（trackPathXY）、路面彎曲（segCurvature）、外甩（mapFirstPullRate）全部只讀這個 curve，沒有別的比例。
- * 只有試玩頁會 registerTrack()；正式 /race 不用。
+ * 試玩頁 registerTrack() 三條 mf 賽道；race-prod-port 起正式 16 條賽道也用 buildMapFirst（佈局在 racing-prod-layouts.ts）。
  */
 import { SEG_LEN, SEG_TURN_K, registerTrack, type Segment, type Track, type Scenery, type Weather } from './racing';
 
@@ -68,7 +68,9 @@ export function buildMapFirst(L: MapLayout, idx = 0): MapFirstTrack {
   const dy = segs[segs.length - 1].y; segs.forEach((s, i) => { s.y -= (dy * (i + 1)) / segs.length; });
   const track: Track = {
     id: L.id, name: L.name, country: '試玩', countryId: 'demo', countryIdx: 0, raceIdx: idx,
-    scenery: L.scenery, weather: L.weather, laps: L.laps, ai: 0.8, pieces: [], mapFirst: true,
+    scenery: L.scenery, weather: L.weather, laps: L.laps, ai: 0.8, mapFirst: true,
+    // pieces 只給畫面的視覺坡道（elevTable）用：[段數, 平均彎度, 起伏]
+    pieces: L.pieces.map((p, i) => [pieceSegs[i], turns.slice(pieceStart[i], pieceStart[i] + pieceSegs[i]).reduce((x, y) => x + y, 0) / pieceSegs[i] / SEG_TURN_K, p.hill ?? 0] as [number, number, number]),
   };
   return { track, segs, turns, pieceStart, pieceSegs, closeGapM: Math.hypot(fx, fy), autoLens };
 }

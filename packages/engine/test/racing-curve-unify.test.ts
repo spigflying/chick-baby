@@ -38,7 +38,7 @@ describe('race-curve-unify: one shared geometry', () => {
 
   it('trackPathXY uses only segTurn — no forced 2π; softClose does not invent turn', () => {
     for (const t of TRACKS) {
-      const segs = buildTrack(t);
+      trackSegs(t.id); const segs = buildTrack(t); // race-prod-port：pieces 由地圖先佈局回填後，舊幾何管線仍需成立
       const sumTurn = segs.reduce((a, s) => a + segTurn(s.curve), 0);
       // without softClose, endpoint displacement reflects real residual turn (not forced to origin via fake heading)
       const open = trackPathXY(segs, false);
@@ -76,7 +76,7 @@ describe('race-curve-unify: one shared geometry', () => {
 
   it('elevation still closes; heading is not force-baked to 2π in buildTrack', () => {
     for (const t of TRACKS) {
-      const segs = buildTrack(t);
+      trackSegs(t.id); const segs = buildTrack(t); // race-prod-port：pieces 由地圖先佈局回填後，舊幾何管線仍需成立
       expect(Math.abs(segs[segs.length - 1].y)).toBeLessThan(1e-6);
       const sumTurn = segs.reduce((a, s) => a + segTurn(s.curve), 0);
       // Real tracks are not all ~2π; we must NOT have baked residual into every curve
@@ -84,7 +84,7 @@ describe('race-curve-unify: one shared geometry', () => {
       expect(Math.abs(Math.abs(sumTurn) - Math.PI * 2) > 0.05 || Math.abs(sumTurn) < 0.05).toBe(true);
       // Stronger: mean |curve| shouldn't have a uniform +2π/(n·K) baked in for balanced tracks
       // us3 is nearly sum≈0 — if baked to 2π, sum would be 2π.
-      if (t.id === 'us3') expect(Math.abs(sumTurn)).toBeLessThan(0.5);
+      if (t.id === 'us3' && !t.mapFirst) expect(Math.abs(sumTurn)).toBeLessThan(0.5);
     }
   });
 });

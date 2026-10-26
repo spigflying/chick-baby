@@ -7,6 +7,8 @@
  * 比賽之間只修好撞壞的部分（完美度回到 100%），其他（獎金、零件、進度）都保留。
  */
 import { createRng, nextFloat, type Rng } from './rng';
+import { buildMapFirst } from './racing-mapfirst';
+import { PROD_LAYOUTS } from './racing-prod-layouts';
 
 export const RACE_TICK_RATE = 20;
 /** v20：整體速度倍率（極速、加速、煞車、碰撞門檻都乘這個；操控用「速度／(70×SPEED_X)」正規化） */
@@ -55,8 +57,17 @@ export const lapped = (a: { z: number }, b: { z: number }, len: number) => Math.
 export const QUALIFY_RANK = 10;
 export const RACES_PER_COUNTRY = 4;
 export const RACE_ENGINE_VERSION = 2;
+/** race-prod-port：正式賽道換成 v2「地圖先」佈局 → 賽道版本 2。成績（race_results.track_ver）用它分版本，舊版紀錄保留但不再列入排行榜。 */
+export const TRACK_VERSION = 2;
 /** 每多一個國家電腦車變強多少（原本 0.055） */
 export const AI_COUNTRY = 0.03;
+/** race-prod-port：v2 佈局逐賽道 AI 強度（tune-ai 校準：簡單機器人 top-3 率 台≈.85→.65、日≈.65→.45、美≈.45→.3、德≈.3→.15） */
+export const PROD_AI: Record<string, number> = {
+  tw1: 1.06, tw2: 1.01, tw3: 1.09, tw4: 0.90,
+  jp1: 1.04, jp2: 1.04, jp3: 0.90, jp4: 1.12,
+  us1: 1.01, us2: 1.16, us3: 1.11, us4: 1.27,
+  de1: 0.88, de2: 1.25, de3: 0.80, de4: 1.70,
+};
 
 // ---------------- 改裝店（TG2）：8 類 × 4 項（原廠標準免費＋升級 1／2／3 階） ----------------
 // 價格＝TG2 原價 ÷ PRICE_DIVISOR（v21 起 5，也就是 TG2 原價 ÷5）（保留 TG2 的價格比例），單位＝寵物金幣 ◎（錢從下樓梯來，見 docs/racing.md 經濟）。
@@ -126,9 +137,9 @@ export type Weather = 'clear' | 'rain' | 'night' | 'snow' | 'fog';
 export type Piece = [number, number, number];
 export interface Track { id: string; name: string; country: string; countryId: string; countryIdx: number; raceIdx: number; scenery: Scenery; weather: Weather; laps: number; ai: number; pieces: Piece[]; /** race-demo-mapfirst：路段由 2D 佈局推導（registerTrack 注入），外甩用真實曲率×速度² */ mapFirst?: boolean }
 export interface Country { id: string; name: string; tracks: string[] }
-type TrackDef = [string, string, Scenery, Weather, number, number]; // id 名稱 景色 天氣 圈數 路線種子
+type TrackDef = [string, string, Scenery, Weather, number, number]; // id 名稱 景色 天氣 圈數 路線種子（race-prod-port 起路線改由 PROD_LAYOUTS 決定，種子不再使用）
 const COUNTRY_DEFS: [string, string, TrackDef[]][] = [
-  ['tw', '台灣', [['tw1', '河濱大道', 'city', 'clear', 3, 11], ['tw2', '陽明山霧道', 'forest', 'fog', 3, 12], ['tw3', '港都夜景', 'city', 'night', 3, 13], ['tw4', '東海岸雨線', 'coast', 'rain', 3, 14]]],
+  ['tw', '台灣', [['tw1', '河濱大道', 'city', 'clear', 4, 11], ['tw2', '陽明山霧道', 'forest', 'fog', 3, 12], ['tw3', '港都夜景', 'city', 'night', 4, 13], ['tw4', '東海岸雨線', 'coast', 'rain', 3, 14]]],
   ['jp', '日本', [['jp1', '箱根山道', 'forest', 'clear', 3, 21], ['jp2', '首都高夜行', 'city', 'night', 3, 22], ['jp3', '雨中賽道', 'farm', 'rain', 3, 23], ['jp4', '北國雪原', 'snow', 'snow', 3, 24]]],
   ['us', '美國', [['us1', '沙漠直線', 'desert', 'clear', 3, 31], ['us2', '紅岩峽谷', 'desert', 'clear', 3, 32], ['us3', '霓虹賭城', 'city', 'night', 3, 33], ['us4', '一號公路霧', 'coast', 'fog', 3, 34]]],
   ['de', '德國', [['de1', '黑森林', 'forest', 'rain', 3, 41], ['de2', '北環霧中', 'forest', 'fog', 3, 42], ['de3', '阿爾卑斯雪', 'snow', 'snow', 3, 43], ['de4', '無限速公路', 'farm', 'clear', 3, 44]]],
@@ -149,8 +160,9 @@ function makePieces(seed: number, hard: number): Piece[] {
 }
 export const COUNTRIES: Country[] = COUNTRY_DEFS.map(([id, name, ts]) => ({ id, name, tracks: ts.map((t) => t[0]) }));
 export const TRACKS: Track[] = COUNTRY_DEFS.flatMap(([cid, cname, ts], ci) => ts.map(([id, name, scenery, weather, laps, seed], ri) => ({
-  id, name, country: cname, countryId: cid, countryIdx: ci, raceIdx: ri, scenery, weather, laps, ai: 0.78 + ci * AI_COUNTRY + ri * 0.01, pieces: makePieces(seed, ci),
+  id, name, country: cname, countryId: cid, countryIdx: ci, raceIdx: ri, scenery, weather, laps, ai: PROD_AI[`${cid}${ri + 1}`] ?? 0.78 + ci * AI_COUNTRY + ri * 0.01, pieces: [], mapFirst: true, // race-prod-port：路段由 PROD_LAYOUTS 推導（trackSegs 時才建）
 })));
+void makePieces; // 舊的種子路線產生器（v1 賽道），留著對照用
 /** race-demo-mapfirst：試玩頁額外註冊的賽道（正式 /race 不呼叫 → 不受影響）。 */
 const EXTRA_TRACKS = new Map<string, Track>();
 export const trackById = (id: string) => TRACKS.find((t) => t.id === id) ?? EXTRA_TRACKS.get(id) ?? null;
@@ -307,7 +319,9 @@ export function racePickups(seed: number, trackId: string, laps: number): Pickup
   for (let lap = 0; lap < laps; lap++) for (let h = 0; h < PICKUPS_PER_LAP; h++) {
     const q = nextFloat(r);
     const tries = Array.from({ length: 24 }, () => [a + h * part + nextFloat(r) * part, PICKUP_LANES[Math.floor(nextFloat(r) * 3)]]);
-    const ok = tries.find(([z]) => pickupSpotOk(trackId, z, len)); if (!ok) continue;
+    let ok = tries.find(([z]) => pickupSpotOk(trackId, Math.round(z), len));
+    if (!ok) for (let z = a + h * part; z < a + (h + 1) * part; z += SEG_LEN) if (pickupSpotOk(trackId, Math.round(z), len)) { ok = [Math.round(z), tries[0][1]]; break; } // race-prod-port：彎多的佈局逐段掃一遍直線
+    if (!ok) continue;
     out.push({ id: out.length, lap, z: lap * len + Math.round(ok[0]), x: ok[1], q: +q.toFixed(3), taken: null });
   }
   return out;
@@ -316,7 +330,16 @@ export function racePickups(seed: number, trackId: string, laps: number): Pickup
 export function applyPickup(c: RaceCar) {
   c.nitroT = c.nitroT > 0 ? Math.max(c.nitroT, Math.min(c.nitroT + PICKUP_TICKS, Math.round(c.stats.nitroTicks))) : PICKUP_TICKS;
 }
-export function trackSegs(id: string) { let s = segCache.get(id); if (!s) { s = buildTrack(trackById(id)!); segCache.set(id, s); } return s; }
+export function trackSegs(id: string) {
+  let s = segCache.get(id); if (s) return s;
+  const t = trackById(id); if (!t) throw new Error(`unknown track ${id}`);
+  if (t.mapFirst) { // race-prod-port：正式賽道＝地圖先佈局
+    const L = PROD_LAYOUTS[id]; if (!L) throw new Error(`mapFirst track ${id} has no layout`);
+    const m = buildMapFirst({ id, name: t.name, scenery: t.scenery, weather: t.weather, laps: t.laps, pieces: L }, t.raceIdx);
+    t.pieces = m.track.pieces; s = m.segs;
+  } else s = buildTrack(t);
+  segCache.set(id, s); return s;
+}
 const segCache = new Map<string, Segment[]>();
 export function segAt(state: { track: string }, z: number) { const segs = trackSegs(state.track); const n = segs.length; return segs[((Math.floor(z / SEG_LEN) % n) + n) % n]; }
 
@@ -510,26 +533,15 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
   }
   // 車與車：追撞（前／後裝甲）與並排擦撞（側裝甲）
   const live = s.cars.filter((c) => c.finishedTick === null && !c.flip).sort((a, b) => a.z - b.z);
-  const cdx = s.hitbox?.dx ?? COLLIDE_DX, czMax = s.hitbox?.dz ?? 5, cside = s.hitbox ? s.hitbox.dz / 2 : 1.5;
+  const hb = s.hitbox ?? DEMO_HITBOX, cdx = hb.dx, czMax = hb.dz, cside = hb.dz / 2; // race-prod-port：所有比賽都用車精靈大小的碰撞盒
   for (let i = 0; i < live.length; i++) for (let j = i + 1; j < live.length; j++) {
     const a = live[i], b = live[j], dz = b.z - a.z; if (dz > czMax) break;
     if (lapped(a, b, s.len)) continue; const dx = Math.abs(a.x - b.x); if (dx >= cdx) continue;
-    if (s.hitbox && dz >= czMax) continue; // 盒子剛好貼齊＝沒碰
-    if (s.hitbox) { demoCollide(s, a, b, dz, dx, cdx, czMax, cside); continue; } // race-demo-hitfix：盒子重疊一定有反應
-    if (dz > cside && a.speed > b.speed) { // a 從後面撞上 b
-      const rel = (a.speed - b.speed) / (30 * X);
-      if (a.speed - b.speed < 1.5 * X) { a.speed = b.speed; continue; } // 輕輕貼上：不算撞
-      a.speed = b.speed * 0.85; b.speed += 2 * X;
-      hurt(a, 3 * (0.3 + rel), 'F', s.tick, HIT_REAR_END, 0); hurt(b, 2 * (0.3 + rel), 'R', s.tick, HIT_REARED, 0);
-      a.hit = Math.max(a.hit, 8); b.hit = Math.max(b.hit, 6);
-      const push = a.x < b.x ? -0.12 : 0.12; a.x += push; b.x -= push;
-    } else if (dz <= cside && a.hit <= 0 && b.hit <= 0) { // 並排擦撞
-      hurt(a, 1, 'S', s.tick, HIT_SWIPE, a.x < b.x ? 1 : -1); hurt(b, 1, 'S', s.tick, HIT_SWIPE, a.x < b.x ? -1 : 1); // v23：輕擦 ≈ −1% a.hit = b.hit = 8; a.speed *= 0.92; b.speed *= 0.92;
-      const push = a.x < b.x ? -0.2 : 0.2; a.x += push; b.x -= push;
-    }
+    if (dz >= czMax) continue; // 盒子剛好貼齊＝沒碰
+    demoCollide(s, a, b, dz, dx, cdx, czMax, cside); // race-demo-hitfix：盒子重疊一定有反應
   }
 }
-/** race-demo-hitfix（只有試玩頁 s.hitbox）：盒子重疊＝一定處理，處理完不再重疊。
+/** race-demo-hitfix（race-prod-port 起所有比賽）：盒子重疊＝一定處理，處理完不再重疊。
  *  舊規則的漏洞：①前後重疊但後車不比前車快（同速、前車較快、或「輕輕貼上」把速度對齊後）→ 什麼都不做，盒子一直疊著；
  *  ②並排但任一車還在撞擊冷卻（hit>0）→ 什麼都不做；③並排擦撞的冷卻／減速被誤寫進註解，沒生效。 */
 export const DEMO_GENTLE_DV = 1.5;

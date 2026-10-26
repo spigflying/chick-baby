@@ -8,7 +8,7 @@ import { sql } from 'kysely';
 import {
   CARS, COUNTRIES, MAX_OUT_COST, ME, PAINTS, PAINT_NAMES, PRIZES, PART_KINDS, PARTS, partPrice, RACE_SLOTS, RACE_TICK_RATE, TRACKS, condition, createRace, cupTrack, fillField,
   MAX_LAPS, createInvite, inviteOutcome, replyInvite, type Invite, newCup, normParts, pointsFor, prizeFor, raceRanking, raceTimeMs, seasonOf, setRaceInput, settleCup, stepRace, trackById, type PartKind, type RaceState,
-  snapCar, snapPickups } from '@chick/engine';
+  snapCar, snapPickups, TRACK_VERSION } from '@chick/engine';
 import type { Db } from './db';
 import { audit, changeBalance, lockWallets, type ReqCtx } from './core';
 import { fail } from './errors';
@@ -85,7 +85,7 @@ export async function raceLeaderboard(db: Db, track: string) {
   // 依使用者分組（同名的人不會被併成一筆）；名字跟賽車上一樣用「寵物（玩家）」
   const best = await d.selectFrom('race_results').innerJoin('users', 'users.id', 'race_results.user_id')
     .select(['users.id as id', 'users.display_name as display', (eb: any) => eb.fn.min('race_results.time_ms').as('time_ms')])
-    .where('race_results.track', '=', track).where('race_results.season', '=', season).where('race_results.time_ms', 'is not', null).groupBy(['users.id', 'users.display_name']).orderBy('time_ms').limit(10).execute();
+    .where('race_results.track', '=', track).where('race_results.season', '=', season).where('race_results.track_ver', '=', TRACK_VERSION) /* race-prod-port：舊版賽道的紀錄保留在表裡，但不列入 */.where('race_results.time_ms', 'is not', null).groupBy(['users.id', 'users.display_name']).orderBy('time_ms').limit(10).execute();
   const champ = await d.selectFrom('race_profiles').innerJoin('users', 'users.id', 'race_profiles.user_id')
     .select(['users.id as id', 'users.display_name as display', 'race_profiles.points', 'race_profiles.wins', 'race_profiles.unlocked']).where('race_profiles.season', '=', season).orderBy('race_profiles.points', 'desc').limit(10).execute();
   const ids = [...new Set([...best, ...champ].map((r: any) => r.id))];
@@ -390,7 +390,7 @@ async function finish(r: Room) {
         const cupR = settleCup(p.cup, p.unlocked, r.room && !r.room.fullLaps ? '__custom_laps__' : r.track, ranking);
         if (prize > 0) await changeBalance(t, s.userId, prize, 'race_prize', { type: 'race', id: r.id });
         await t.updateTable('race_profiles').set({ unlocked: cupR.unlocked, cup: JSON.stringify(cupR.cup), points: p.points + pts, races: p.races + 1, wins: p.wins + (pos === 1 ? 1 : 0), updated_at: new Date() }).where('user_id', '=', s.userId).execute();
-        await t.insertInto('race_results').values({ race_id: r.id, season, track: r.track, user_id: s.userId, rank: pos, time_ms: time, prize, points: pts, condition: condition(car), humans, private: !!r.home || !!r.room }).execute();
+        await t.insertInto('race_results').values({ race_id: r.id, season, track: r.track, user_id: s.userId, rank: pos, time_ms: time, prize, points: pts, condition: condition(car), humans, private: !!r.home || !!r.room, track_ver: TRACK_VERSION }).execute();
         // 比賽之間只修好撞壞的部分：完美度不存檔，下一場回到 100%
         results.push({ user_id: s.userId, rank: pos, prize, points: pts, time_ms: time, condition: condition(car), hits: car.hits, qualified: cupR.qualified, cup_counted: cupR.counted, country_done: cupR.countryDone, champion: cupR.champion, unlocked: cupR.unlocked, cup: cupR.cup, standings: cupR.standings.slice(0, 10) });
       });
@@ -461,7 +461,7 @@ export async function createRoom(userId: string, trackIn: unknown, lapsIn: unkno
   const p = await getProfile(deps!.db, userId);
   const t = trackIn ? trackById(String(trackIn)) : cupTrack(p.cup) ?? TRACKS[0]; if (!t) fail('BAD_REQUEST');
   if (t!.countryIdx >= p.unlocked) fail('TRACK_LOCKED');
-  const laps = lapsIn === undefined || lapsIn === null ? 3 : parseLaps(lapsIn); if (!laps) fail('BAD_REQUEST');
+  const laps = lapsIn === undefined || lapsIn === null ? t!.laps : parseLaps(lapsIn); if (!laps) fail('BAD_REQUEST');
   const r = newRoom(randomUUID(), deps!.instance(), { user: userId, name: await roomName(userId) }, t!.id, laps!, now);
   rrooms.set(r.id, r); pushRoom(r); await inviteFriends(r, userId);
   return r.id;

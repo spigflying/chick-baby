@@ -1,8 +1,8 @@
-/** 草稿 v2（未接到 racing.ts）：由 racing-prod-layouts2.templates.ts 經 scripts/prod-layouts2.ts 補角＋調直線長度後的結果。 */
+/** 正式 /race 的 16 條賽道佈局（race-prod-port：v2 版圖接上正式賽道；由 racing-prod-layouts2.templates.ts 經 scripts/prod-layouts2.ts 補角＋調直線長度）。 */
 import type { LayoutPiece } from './racing-mapfirst';
 const S = (s: number | 'auto', hill?: number): LayoutPiece => (hill ? { s, hill } : { s });
 const A = (a: number, r: number, hill?: number): LayoutPiece => (hill ? { a, r, hill } : { a, r });
-export const PROD_LAYOUTS2_DRAFT: Record<string, LayoutPiece[]> = {
+export const PROD_LAYOUTS: Record<string, LayoutPiece[]> = {
   // Fuji Speedway（長直線＋T1 減速彎）
   tw1: [S('auto'), A(120, 250), S(40), A(-30, 450), A(30, 450), S(40), A(60, 450), S(60), A(90, 330), S('auto'), A(-25, 300), A(25, 300), S(100), A(90, 400), S(100)],
   // 陽明山 仰德大道／陽金公路（S 彎接單一髮夾）

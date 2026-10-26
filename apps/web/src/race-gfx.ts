@@ -1,5 +1,5 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
-import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, ROAD_WIDEN, lapped as isLapped, segCurvature, trackPathXY, type Track } from '@chick/engine';
+import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, ROAD_WIDEN, lapped as isLapped, DEMO_CAR_W, segCurvature, trackPathXY, type Track } from '@chick/engine';
 import { carBodyH, carPixels, LODS, PLAYER_W, exhaustsOf, DESIGN_W, EXHAUST_Y, type CarLook } from './race-cars';
 import { pickupDims } from './race-pickup';
 import { frontSprite, ensureComposite, S as PET_S } from './sprites';
@@ -164,7 +164,7 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
 }
 
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number; /** 前／側／後 分區損傷 0–100 */ zd?: number[]; /** 最後吃到路上氮氣道具的 tick */ pkT?: number; /** 坐在車上的寵物精靈鍵（伺服器給；電腦車沒有） */ pet?: string | null; /** race-demo-hitfix：碰到但沒傷害（碰撞盒畫黃色） */ touch?: boolean }
-export interface View { /** 試玩頁（地圖先）：真實幾何投影（前方每段用自己的轉角，平面轉向、真深度），細分 5m 取樣 */ exact?: boolean; /** exact 模式攝影機高度（m），預設 CAM_H_EXACT */ camH?: number; track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[]; /** race-demo-hitbox：畫每台車的碰撞盒（地面投影，寬 dx 路寬單位、長 dz 公尺，以車中心為準） */ hitbox?: { dx: number; dz: number }; /** race-demo-onecar：所有車畫成同一個寬度（半路寬單位，=碰撞盒 dx），以不透明車身寬為準 */ carW?: number }
+export interface View { /** 真實幾何投影（未指定時：地圖先賽道＝開，race-prod-port 起正式賽道都是）（前方每段用自己的轉角，平面轉向、真深度），細分 5m 取樣 */ exact?: boolean; /** exact 模式攝影機高度（m），預設 CAM_H_EXACT */ camH?: number; track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[]; /** race-demo-hitbox：畫每台車的碰撞盒（地面投影，寬 dx 路寬單位、長 dz 公尺，以車中心為準） */ hitbox?: { dx: number; dz: number }; /** race-demo-onecar：所有車畫成同一個寬度（半路寬單位，=碰撞盒 dx），以不透明車身寬為準 */ carW?: number }
 
 /** v13／curve-unify：彎道用引擎 segCurvature（與小地圖／外甩同一套）；攝影機橫向跟車比例。 */
 const CAM_FOLLOW = 0.4;
@@ -340,11 +340,13 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   x.save();
   if (sh) { const amp = (2 + 2 * sh.k) * (1 - sh.a), ph = Math.floor(now / 33); x.translate(Math.round((ph % 2 ? 1 : -1) * amp), Math.round(((ph >> 1) % 2 ? 1 : -1) * amp * 0.6)); }
   const night = t.weather === 'night', P = night ? NIGHT : G;
+  // race-prod-port：地圖先賽道（現在正式 16 條全部都是）預設用真實投影＋10m 攝影機＋統一車寬；舊路段賽道仍走舊渲染
+  const EXV = v.exact ?? !!t.mapFirst, CARW = v.carW ?? (EXV ? DEMO_CAR_W : undefined);
   const camZ = v.camZ ?? (v.me ? v.me.z - PLAYER_DZ : 0);
   // v13：攝影機跟著車橫移一部分（世界單位：半路寬 = ROAD_W），全部用小數，不先取整
   const camXw = v.camX !== undefined ? v.camX * ROAD_W : (v.me ? v.me.x * ROAD_W * camFollow(v.me.x) : 0);
   const base = Math.floor(camZ / SEG_LEN), frac = (camZ % SEG_LEN + SEG_LEN) % SEG_LEN / SEG_LEN;
-  const el = elevTable(t), camY = elevAt(el, camZ + PLAYER_DZ) + (v.exact ? (v.camH ?? CAM_H_EXACT) : CAM_H);
+  const el = elevTable(t), camY = elevAt(el, camZ + PLAYER_DZ) + (EXV ? (v.camH ?? CAM_H_EXACT) : CAM_H);
   // 天空與遠景（隨彎道視差移動）：累積彎度＋本段小數部分，連續不跳格
   const bend = curvePrefix(t)[((base % n) + n) % n] * 0.8 + segs[((base % n) + n) % n].curve * frac * 0.8;
   role('sky'); x.fillStyle = night ? Q[3] : Q[0]; x.fillRect(0, 0, W, H);
@@ -355,7 +357,7 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
   // 每段彎度固定 → 航向 h 線性、橫移 x 二次，且對 camZ 連續（不會隨段落邊界跳格）。
   const pts: RoadPt[] = [];
   let lx = 0, lh = 0, maxy = H;
-  const EX = !!v.exact, SUB = EX ? EXACT_SUB : 1;
+  const EX = EXV, SUB = EX ? EXACT_SUB : 1;
   if (EX) pts.push(...exactRoadPts(segs, camZ, camXw, (d) => elevAt(el, camZ + d), camY));
   const proj = (d: number, wx: number, wy: number) => { const zRel = d + 4, scale = DEPTH * 6 / zRel; return { zRel, scale, py: HORIZON - (wy - camY) * scale * (W / 2) / 6, pxc: W / 2 + (wx - camXw) * scale * (W / 2) }; };
   for (let k = 0; k < (EX ? 0 : DRAW); k++) {
@@ -453,13 +455,13 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     const row = p0.py > GROUND ? rowAt(GROUND) : null, p = row ? { ...p0, pxc: EX && isMe ? exactMeCenter(pts, row.w, camXw) : row.x, lat: row.w } : { ...p0, lat: p0.pw };
     if (!isMe && p.clip < H && p.py > p.clip + 2) continue; // 被坡頂擋住
     if (!isMe && t.weather === 'fog' && p.k > 13) continue; // 霧裡看不到遠方的車
-    const target = v.carW ? v.carW * p.lat : PW * p.lat / gw; /* v14：車寬跟畫在那一列的路寬成正比 */ if (!isMe && target < 5) continue; const lod = isMe && carK === 1 && !v.carW ? -1 : v.carW ? sameWidthDraw((l) => (carCanvas(c.car, c.color, {}, l) as any).opW, target).lod : lodFor(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
+    const target = CARW ? CARW * p.lat : PW * p.lat / gw; /* v14：車寬跟畫在那一列的路寬成正比 */ if (!isMe && target < 5) continue; const lod = isMe && carK === 1 && !CARW ? -1 : CARW ? sameWidthDraw((l) => (carCanvas(c.car, c.color, {}, l) as any).opW, target).lod : lodFor(target); role(isMe ? 'car' : c.ai ? 'ai' : 'car');
     const img = carCanvas(c.car, c.color, { brake: c.brake, nitro: c.nitroT > 0, hit: c.hit > 0 || (isMe && c.damage > 60 && v.frame % 20 < 2), frame: v.frame }, lod);
     const bh = (img as any).bodyH as number;
     const bob = isMe && c.speed > 5 && c.speed < 15 * SPEED_X && Math.floor(now / 160) % 2 ? 1 : 0, /* v24：只在低速輕輕晃（依毫秒），高速不晃 */ shake = c.hit > 0 ? (v.frame % 2 ? 1 : -1) : 0;
     // 畫面寬度超過 24px（比玩家還近）才放大 L 圖，否則原尺寸
     // v14：AI 與玩家同比例 —— 挑「不小於目標寬度」的 LOD 再縮到剛好目標寬（以前挑較小的 LOD 不放大，遠一點就小一截）
-    const scale = lod === -1 ? 1 : v.carW ? target / ((img as any).opW as number) : target / LODS[lod];
+    const scale = lod === -1 ? 1 : CARW ? target / ((img as any).opW as number) : target / LODS[lod];
     const dw = Math.round(img.width * scale), dh = Math.round(img.height * scale);
     const sx = Math.round(p.pxc + c.x * p.lat - dw / 2 + shake), sy = (lod === -1 ? Math.min(H - 6 - bh, Math.round(p.py - bh)) : Math.min(H - 6 - Math.round(bh * scale), Math.round(p.py - bh * scale))) - bob; // v14：和玩家並排的車也貼同一條底線，不會掉出畫面
     const ghost = !isMe && !!v.me && isLapped(c, v.me, v.len); // v26：差一圈以上＝沒有碰撞，畫成半透明（棋盤點陣）

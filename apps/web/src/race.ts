@@ -37,7 +37,7 @@ const ERR: Record<string, string> = { ROOM_FULL: '房間滿了', ROOM_CLOSED: '�
 
 interface Snap { at: number; tick: number; countdown: number; cars: Map<string, any[]>; pk?: number[] }
 export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (s: string) => void): () => void {
-  root.innerHTML = `<main class="page race-page">
+  root.innerHTML = `<main class="page race-page nosel">
     <div class="race-dev"><div class="lcd race-lcd"><canvas id="rc" width="${W}" height="${H}"></canvas><p class="msg" id="rmsg">選一條賽道開始比賽！</p></div>
       <div class="race-pad" id="rpad">
         <button data-k="left" aria-label="左">◀</button><button data-k="right" aria-label="右">▶</button>
@@ -105,7 +105,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
         <p class="muted">想和朋友一起跑？到家裡按「玩 → 一起賽車」，在場的人會收到邀請（跟一起下樓梯一樣）；空位由灰色電腦車補滿 ${RACE_SLOTS} 台。</p>`;
       body.querySelectorAll('li[data-tr]').forEach((li) => (li as HTMLElement).onclick = () => { const id = (li as HTMLElement).dataset.tr!; if (trackById(id)!.countryIdx >= prof.unlocked) return toast(ERR.TRACK_LOCKED); sel = id; followCup = id === cupTrack(prof.cup)?.id; setAttract(); renderPanel(); });
       (body.querySelector('#rgo') as HTMLElement).onclick = () => join();
-      (body.querySelector('#rroom') as HTMLElement).onclick = () => { roomForm = true; roomTrack = sel; roomLaps = 3; renderPanel(); };
+      (body.querySelector('#rroom') as HTMLElement).onclick = () => { roomForm = true; roomTrack = sel; roomLaps = trackById(sel)?.laps ?? 3; renderPanel(); };
     } else if (tab === 'garage') {
       const st = carStats(prof.parts, prof.car);
       body.innerHTML = head + `<h3>改裝店（在左邊畫面裡）</h3><p class="muted">8 類零件＋塗裝，共 9 個畫面，用 ◀類／類▶ 換類別。每類任選一階直接買（不用照順序）；換別的階（包括降級）舊零件丟掉、全額付款、不退錢。全部 3 階共 ${money(MAX_OUT_COST)}（TG2 原價 ÷${PRICE_DIVISOR}）。氮氣升級只加強力道和時間，每場一律 ${NITRO_PER_RACE} 次；雨胎下雨／下雪時自動換上。</p>
@@ -153,7 +153,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     body.innerHTML = `<div class="race-top-row"><button id="rmk" class="big race-top-btn">建立房間</button><button id="rmx" class="big race-top-btn">取消</button></div>` + head +
       `<h3>開房間</h3><label class="room-field">賽道 <select id="rmt">${trackOpts(roomTrack)}</select></label><label class="room-field">圈數 <select id="rml">${lapOpts(roomLaps)}</select></label>
       <p class="muted">建立後，好友（去過彼此家裡、或在邀請名單裡的人）不管在哪個畫面都會收到邀請。最多 ${8} 位玩家，其餘由電腦車補滿。房間比賽獎金：2 位以上真人時前三名 ◎150／100／50、只有自己一人時完賽 ◎50（取代一般獎金）；圈數跟賽道預設不同時不算積分、錦標賽與最快時間。</p>`;
-    (body.querySelector('#rmt') as HTMLSelectElement).onchange = (e) => { roomTrack = (e.target as HTMLSelectElement).value; };
+    (body.querySelector('#rmt') as HTMLSelectElement).onchange = (e) => { roomTrack = (e.target as HTMLSelectElement).value; roomLaps = trackById(roomTrack)?.laps ?? roomLaps; renderPanel(); };
     (body.querySelector('#rml') as HTMLSelectElement).onchange = (e) => { roomLaps = Number((e.target as HTMLSelectElement).value); };
     (body.querySelector('#rmx') as HTMLElement).onclick = () => { roomForm = false; renderPanel(); };
     (body.querySelector('#rmk') as HTMLElement).onclick = () => { if (!live?.send({ type: 'room.create', track: roomTrack, laps: roomLaps })) return toast('連線中，請稍候'); msg.textContent = '開房中…'; };

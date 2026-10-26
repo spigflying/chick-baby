@@ -36,5 +36,5 @@ describe('race-demo-throw: outward drift against > none > with (map-first only)'
       expect(w.offTick).toBeNull();
     });
   }
-  it('production tracks unaffected (not map-first)', () => { expect(TRACKS.some((t) => t.mapFirst)).toBe(false); });
+  it('production tracks are map-first too (throw is global, race-prod-port)', () => { expect(TRACKS.every((t) => t.mapFirst)).toBe(true); });
 });

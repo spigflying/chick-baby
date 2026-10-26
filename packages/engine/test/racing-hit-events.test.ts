@@ -6,7 +6,7 @@ describe('racing v15 hit events in snapshots', () => {
     expect(me.evK).toBe(HIT_WALL); expect(me.evSide).toBe(1); expect(me.evS).toBeGreaterThan(2); const row = snapCar(me); expect(row[9]).toBe(s.tick); expect(row[10]).toBe(HIT_WALL); });
   it('side swipe hits both with opposite sides', () => { const { s, me, a } = setup(); me.x = 0; a.x = 0.2; a.z = me.z + 0.3; stepRace(s);
     expect(me.evK).toBe(HIT_SWIPE); expect(a.evK).toBe(HIT_SWIPE); expect(me.evSide).toBe(-a.evSide!); });
-  it('rear-end: attacker front, victim rear', () => { const { s, me, a } = setup(); me.x = a.x = 0; a.z = me.z + 3; a.speed = 30; stepRace(s);
+  it('rear-end: attacker front, victim rear', () => { const { s, me, a } = setup(); me.x = a.x = 0; a.z = me.z + 2.4; a.speed = 30; /* 精靈判定框：走一格後保險桿重疊 */ stepRace(s);
     expect(me.evK).toBe(HIT_REAR_END); expect(a.evK).toBe(HIT_REARED); });
 });
 import { describe as d23, it as i23, expect as e23 } from 'vitest';

@@ -266,6 +266,8 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .sroom-title{font-size:16px}
 .sroom-rules{margin:0;padding-left:18px}
 
-/* race-demo（只有試玩頁）：連點方向／按鈕不選字、不跳長按選單、不雙擊縮放；ancestor 的 manipulation 與 .race-pad 的 none 取交集，按鈕仍是 none */
-.demo-nosel{touch-action:manipulation}
-.demo-nosel,.demo-nosel *{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+/* 連點方向／按鈕不選字、不跳長按選單、不雙擊縮放；ancestor 的 manipulation 與 .race-pad 的 none 取交集，按鈕仍是 none
+   race-prod-port：試玩頁（.demo-nosel）與正式 /race（.nosel，整頁沒有要複製的字）；下樓梯房只套在按鈕（.nosel-btns button），文字仍可選取複製 */
+.demo-nosel,.nosel{touch-action:manipulation}
+.demo-nosel,.demo-nosel *,.nosel,.nosel *,.nosel-btns button{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+.nosel-btns button{touch-action:manipulation}

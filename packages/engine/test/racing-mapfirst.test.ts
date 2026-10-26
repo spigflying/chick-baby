@@ -23,7 +23,7 @@ function idealXY(id: string): [number, number][] {
 describe('race-demo-mapfirst', () => {
   registerMapFirstTracks();
   it('does not touch production tracks', () => {
-    expect(TRACKS.some((t) => t.mapFirst)).toBe(false);
+    expect(TRACKS.every((t) => t.mapFirst)).toBe(true); // race-prod-port：正式賽道全面地圖先
     expect(trackById('mf1')?.mapFirst).toBe(true);
   });
   for (const m of mapFirstTracks()) describe(m.track.id, () => {

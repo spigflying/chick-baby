@@ -259,6 +259,16 @@ const migrations: Record<string, Migration> = {
         ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus','outfit'));`.execute(db);
     },
   },
+  '0009_race_track_ver': {
+    async up(db: Kysely<unknown>) {
+      // race-prod-port：16 條賽道換新佈局 → 成績依賽道版本分開。只加欄位（既有紀錄＝版本 1，保留不刪）；排行榜只看目前 TRACK_VERSION
+      await sql`ALTER TABLE race_results ADD COLUMN track_ver integer NOT NULL DEFAULT 1;
+        CREATE INDEX race_results_track_ver_time ON race_results (season, track, track_ver, time_ms) WHERE time_ms IS NOT NULL;`.execute(db);
+    },
+    async down(db: Kysely<unknown>) {
+      await sql`DROP INDEX race_results_track_ver_time; ALTER TABLE race_results DROP COLUMN track_ver;`.execute(db);
+    },
+  },
 };
 
 const provider: MigrationProvider = { getMigrations: async () => migrations };

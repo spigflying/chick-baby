@@ -8,7 +8,7 @@ const NOTICE: Record<string, string> = { TOO_TIRED: '寵物太累了，沒辦法
 /** v27 下樓梯房頁（/stairs-room）：跟賽車房大廳一樣是獨立畫面。上方按鈕（離開房間／準備）、成員、規則；
  *  規則同「一起下樓梯」（沒有額外設定）；2～6 隻；全員準備 → 3 秒倒數 → 回到寵物頁開始。 */
 export function stairsRoomPage(root: HTMLElement, live: Live | null, myId: string, goHome: () => void, toast: (s: string) => void): () => void {
-  root.innerHTML = `<main class="page"><div class="panel sroom-page" id="srp"></div></main>`;
+  root.innerHTML = `<main class="page nosel-btns"><div class="panel sroom-page" id="srp"></div></main>`;
   const el = root.querySelector('#srp') as HTMLElement;
   let ask = false, wentHome = false, max = 6, shown = false;
   const left = (r: any) => r.countdown_ms === null ? null : Math.max(0, Math.ceil((r.countdown_ms - (Date.now() - r.at)) / 1000));

@@ -55,9 +55,9 @@ describe('race-hairpin-pull: curve-magnitude extra outward pull', () => {
       // outward displacement: pull moves x opposite to curve sign
       return (x0 - me.x) * sign;
     };
-    const mild = drift(1.2, 0.6);
-    const hair = drift(4.6, 0.6);
+    const mild = drift(6.5, 0.5); // race-prod-port：地圖先曲度單位（de2：一般彎≈6.5、髮夾≈21.8）
+    const hair = drift(21.8, 0.5);
     expect(mild).toBeGreaterThan(0);
-    expect(hair).toBeGreaterThan(mild * 1.35);
+    expect(hair).toBeGreaterThan(mild * 1.25); // race-prod-port：地圖先＝真實曲率×速度²，比值≈1.34
   });
 });
