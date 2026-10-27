@@ -1,4 +1,4 @@
-import { createRoom, initRacing, onRaceBus, onRacePresence, raceBusy, raceEcho, startSolo, toRaceAuthority } from './racing';
+import { createRoom, offerRooms, initRacing, onRaceBus, onRacePresence, raceBusy, raceEcho, startSolo, toRaceAuthority } from './racing';
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import type { Db } from './db';
@@ -63,6 +63,11 @@ function forwardMStairs(m: any) {
   }
 }
 
+/** 這台上有空（沒在房裡、沒在比賽）的這些人 → 再送一次好友還開著的房（每人一次） */
+function offerFree(users: string[]) {
+  const ids = new Set(users), done = new Set<string>();
+  for (const c of conns) if (ids.has(c.user.id) && !done.has(c.user.id) && !c.room && !c.rr) { done.add(c.user.id); void offerRooms(c.user.id).catch((err) => console.error('race room offer failed', err)); }
+}
 /** 賽車：負責的執行個體送出的訊息 → 轉給這個執行個體上的連線（同多人下樓梯）。 */
 function forwardRace(m: any) {
   const { t, home, src: _src, via, cid, ...rest } = m;
@@ -77,7 +82,10 @@ function forwardRace(m: any) {
   }
   // v27 賽車房
   if (t === 'rrace.room') { const ids = new Set(m.users as string[]); for (const c of conns) if (ids.has(c.user.id)) { c.room = { id: m.room.id, inst: m.room.inst }; send(c, { type: 'room.state', room: m.room }); } return; }
-  if (t === 'rrace.roomgone') { const ids = new Set(m.users as string[]); for (const c of conns) if (ids.has(c.user.id) && (!c.room || c.room.id === m.room)) { c.room = null; send(c, { type: 'room.gone', room: m.room, code: m.code }); } return; }
+  if (t === 'rrace.roomgone') { const ids = new Set(m.users as string[]); for (const c of conns) if (ids.has(c.user.id) && (!c.room || c.room.id === m.room)) { c.room = null; send(c, { type: 'room.gone', room: m.room, code: m.code }); }
+    if (m.code !== 'STARTED') offerFree(m.users as string[]); // 離開／房關了 → 再告訴他好友還開著的房
+    return; }
+  if (t === 'rrace.roomlist') { const ids = new Set(m.users as string[]); for (const c of conns) if (ids.has(c.user.id)) send(c, { type: 'room.list', inst: m.inst, rooms: m.rooms }); return; }
   if (t === 'rrace.roominvite') { const ids = new Set(m.to as string[]); for (const c of conns) if (ids.has(c.user.id) && !c.room && !c.rr) send(c, { type: 'room.invite', room: m.room, inst: m.inst, game: m.game ?? 'race', from: m.from, from_name: m.from_name, track: m.track, laps: m.laps }); return; }
   if (t === 'rrace.event') { if (home) for (const c of inHome(home)) send(c, { type: 'race.event', home_id: home, ...rest }); }
   else if (t === 'rrace.notice') { for (const c of home ? inHome(home) : conns) if (c.user.id === m.user) send(c, { type: 'race.notice', home_id: home, code: m.code }); }
@@ -87,7 +95,9 @@ function forwardRace(m: any) {
   } else if (t === 'rrace.snap') {
     for (const c of conns) if (c.rr?.id === m.race_id) send(c, { type: 'race.snap', race_id: m.race_id, tick: m.tick, countdown: m.countdown, cars: m.cars, pk: m.pk ?? [] });
   } else if (t === 'rrace.ended') {
-    for (const c of conns) if (c.rr?.id === m.race_id) { c.rr = null; send(c, { type: 'race.ended', race_id: m.race_id, track: m.track, ranking: m.ranking, aborted: !!m.aborted, me: (m.results ?? []).find((p: any) => p.user_id === c.user.id) ?? null }); }
+    const freed: string[] = [];
+    for (const c of conns) if (c.rr?.id === m.race_id) { c.rr = null; freed.push(c.user.id); send(c, { type: 'race.ended', race_id: m.race_id, track: m.track, ranking: m.ranking, aborted: !!m.aborted, me: (m.results ?? []).find((p: any) => p.user_id === c.user.id) ?? null }); }
+    offerFree(freed);
   }
 }
 export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
@@ -165,6 +175,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
     const c: Conn = { id: ++seq, ws: socket, user: publicUser(u), homeId: null, connectedAt: Date.now(), match: null, ip: req.ip, ua: String(req.headers['user-agent'] ?? ''), mm: null };
     conns.add(c);
     send(c, { type: 'hello', user: c.user, server_time: Date.now(), instance: env.instanceId });
+    void offerRooms(c.user.id).catch(() => {}); // 剛連上：好友有開著的房就邀請
     if (phaseAt(clock(), Date.now()) === 'closing') send(c, { type: 'game.closing', closes_at: clock().status(Date.now()).closes_at });
     socket.on('message', async (raw) => {
       let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
@@ -262,6 +273,9 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             await createRoom(c.user.id, msg.track, msg.laps, Date.now(), msg.game === 'stairs' ? 'stairs' : 'race');
             break;
           }
+          case 'room.list': // 好友的房間（各執行個體各回一份 room.list）
+            await offerRooms(c.user.id, 'list', 'race');
+            break;
           case 'room.join': {
             if ((c.match && !c.match.ended) || c.mm || c.rr) throw new AppError('ALREADY_IN_MATCH');
             if (typeof msg.room !== 'string' || typeof msg.inst !== 'string') throw new AppError('BAD_REQUEST');

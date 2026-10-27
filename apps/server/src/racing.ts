@@ -168,6 +168,7 @@ export function onRaceBus(m: any) {
     if (m.t === 'rrace.in') raceInput(r, m.user, m); else if (m.t === 'rrace.drop') drop(r, m.user); else quit(r, m.user);
     return;
   }
+  if (m.t === 'rrace.rquery') { if (!raceEcho(m)) onRoomQuery(m); return; }
   if (m.t.startsWith('rrace.r') && ROOM_INTENTS.has(m.t)) { if (m.inst === deps.instance()) onRoomIntent(m); return; }
   if (!['rrace.invite', 'rrace.reply', 'rrace.cancel', 'rrace.leave'].includes(m.t) || !m.home || !isAuthority(m.home)) return;
   if (m.t === 'rrace.invite') void invite(m.home, m.user, m.name).catch((err) => console.error('race invite failed', err));
@@ -469,6 +470,33 @@ export async function createRoom(userId: string, trackIn: unknown, lapsIn: unkno
 async function inviteFriends(r: RaceRoom, userId: string) {
   try { const to = await raceFriends(deps!.db, userId); if (to.length) outUsers({ t: 'rrace.roominvite', to, room: r.id, inst: r.inst, game: r.game, from: userId, from_name: r.members[0].name, track: r.track, laps: r.laps }); }
   catch (err) { console.error('race room invite failed', err); }
+}
+/** 還能加入的房：沒關、沒在倒數、沒滿 */
+export function roomOpen(r: RaceRoom): boolean {
+  return !r.closed && r.countdownAt === null && r.members.length < (r.game === 'stairs' ? STAIRS_ROOM_MAX : MAX_HUMANS);
+}
+/** 本機負責的房裡，房主是 friends 之一、我不在裡面、還能加入的 */
+export function friendRooms(user: string, friends: string[], game?: string): RaceRoom[] {
+  const fs = new Set(friends);
+  return [...rrooms.values()].filter((r) => roomOpen(r) && fs.has(r.host) && r.host !== user && !r.members.some((m) => m.user === user) && (!game || r.game === game))
+    .sort((a, b) => b.createdAt - a.createdAt);
+}
+const roomListItem = (r: RaceRoom) => ({ room: r.id, inst: r.inst, game: r.game, host: r.host, host_name: r.members.find((m) => m.user === r.host)?.name ?? '', track: r.track, laps: r.laps, members: r.members.length, max: r.game === 'stairs' ? STAIRS_ROOM_MAX : MAX_HUMANS });
+/** 各執行個體回答自己負責的房（rrace.rquery 走 NOTIFY 廣播） */
+function onRoomQuery(m: any) {
+  const user = String(m.user), friends = Array.isArray(m.friends) ? m.friends.map(String) : [];
+  if (m.mode === 'list') { outUsers({ t: 'rrace.roomlist', users: [user], inst: deps!.instance(), rooms: friendRooms(user, friends, m.game ? String(m.game) : undefined).map(roomListItem) }); return; }
+  const r = friendRooms(user, friends)[0]; // 彈窗一次只放一個：最新開的那間（其餘看選單裡的「好友的房間」）
+  if (r) outUsers({ t: 'rrace.roominvite', to: [user], room: r.id, inst: r.inst, game: r.game, from: r.host, from_name: r.members.find((x) => x.user === r.host)?.name ?? '', track: r.track, laps: r.laps });
+}
+/** 有空了（離開房、房關了、比賽結束、剛連上）→ 再告訴他好友還開著的房；mode=list → 回傳好友的房間清單 */
+export async function offerRooms(user: string, mode: 'invite' | 'list' = 'invite', game?: string): Promise<void> {
+  if (!deps) return;
+  const friends = await raceFriends(deps.db, user);
+  const m = { t: 'rrace.rquery', user, friends, mode, game: game ?? null };
+  onRoomQuery(m);
+  if (!friends.length) return;
+  await deps.bus.publish({ ...m, src: deps.instance() }).catch(() => {});
 }
 function onRoomIntent(m: any) {
   const r = rrooms.get(String(m.room)); const now = Date.now();

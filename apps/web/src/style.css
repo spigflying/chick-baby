@@ -246,6 +246,10 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .room-members{list-style:none;padding:0;margin:0}
 .room-members li{display:flex;justify-content:space-between;align-items:center;padding:8px 6px;border-bottom:1px dotted #bba}
 .room-members li.ok{background:#e4f5c8}
+.room-friends{list-style:none;padding:0;margin:0 0 8px}
+.room-friends li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:8px 6px;border-bottom:1px dotted #bba}
+.room-friends li button{flex:none;min-width:64px;min-height:36px}
+.room-refresh{font-size:.8em;padding:2px 8px;margin-left:6px;vertical-align:middle}
 .room-members li.off{opacity:.5}
 .room-st{font-weight:bold;white-space:nowrap}
 .room-tag{font-size:11px;background:#000;color:#fff;padding:1px 5px;border-radius:3px;vertical-align:middle}

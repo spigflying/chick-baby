@@ -1,5 +1,6 @@
 /** 賽車模式頁面：錦標賽選單、車庫、比賽（WS 即時多人，伺服器權威）、結果。 */
 import { tabNav } from './race-nav';
+import { mergeRoomList, friendRoomsHtml, type FriendRoom, type RoomLists } from './race-rooms-list';
 import { statusHtml, mountStatus } from './race-status';
 import { raceOrder, kmhShown } from './race-gfx';
 import { fitScale } from './race-fit';
@@ -69,6 +70,8 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   /** 單人出發的賽道跟著目前錦標賽站（手動點了別條賽道就不跟） */
   let followCup = true;
   /** v27 賽車房：開房表單、按了準備等確認、表單裡選的賽道／圈數 */
+  const roomLists: RoomLists = new Map(); let friendRooms: FriendRoom[] = [], friendAsked = false;
+  const askRooms = () => { if (!live?.room && live?.send({ type: 'room.list' })) { roomLists.clear(); friendAsked = true; } };
   let roomForm = false, readyAsk = false, roomTrack = '', roomLaps = 3;
   /** 斷線重連中：要接回的比賽（等伺服器回 race.started(resumed)／race.ended／race.gone） */
   let resuming: SavedRace | null = null, resumeT = 0;
@@ -99,12 +102,15 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     if (tab === 'cup') {
       const ct = cupTrack(prof.cup); const st = Object.entries(prof.cup.points ?? {}).sort((a: any, b: any) => b[1] - a[1]) as [string, number][];
       body.innerHTML = `<div class="race-top-row"><button id="rgo" class="big race-top-btn">單人出發：${esc(trackById(sel)!.name)}</button><button id="rroom" class="big race-top-btn">開房間</button></div>` + head +
+        friendRoomsHtml(friendRooms, (id) => { const t = trackById(id); return t ? `${t.country}・${t.name}` : id; }, friendAsked && !friendRooms.length && !roomLists.size) +
         COUNTRIES.map((c, ci) => { const lock = ci >= prof.unlocked; return `<h3>${lock ? '🔒 ' : ''}${esc(c.name)}${ci === prof.cup.country ? ' <span class="muted">← 目前</span>' : ''}</h3><ul class="tracks">${c.tracks.map((id) => { const t = trackById(id)!, cur = ct?.id === id; return `<li class="${t.id === sel ? 'sel' : ''} ${lock ? 'lock' : ''}" data-tr="${t.id}"><span>${t.raceIdx + 1}. <b>${esc(t.name)}</b> <span class="muted">${WEATHER[t.weather]}・${t.laps} 圈</span></span><span>${cur ? '錦標賽站' : ''}</span></li>`; }).join('')}</ul>`; }).join('') +
         `<p class="muted">從最後一名起跑，共 ${RACE_SLOTS} 台。前 ${QUALIFY_RANK} 名晉級下一站；前 6 名有獎金 ${PRIZES.map(money).join('/')} 和積分 ${POINTS.join('/')}。每個國家 ${RACES_PER_COUNTRY} 站，國家積分第一解鎖下一國。</p>
         ${st.length ? `<h3>${esc(COUNTRIES[prof.cup.country]?.name)} 國家積分（第 ${prof.cup.race + 1} 站）</h3>${standingsHtml(st)}` : ''}
         <p class="muted">想和朋友一起跑？到家裡按「玩 → 一起賽車」，在場的人會收到邀請（跟一起下樓梯一樣）；空位由灰色電腦車補滿 ${RACE_SLOTS} 台。</p>`;
       body.querySelectorAll('li[data-tr]').forEach((li) => (li as HTMLElement).onclick = () => { const id = (li as HTMLElement).dataset.tr!; if (trackById(id)!.countryIdx >= prof.unlocked) return toast(ERR.TRACK_LOCKED); sel = id; followCup = id === cupTrack(prof.cup)?.id; setAttract(); renderPanel(); });
       (body.querySelector('#rgo') as HTMLElement).onclick = () => join();
+      (body.querySelector('#rrefresh') as HTMLElement).onclick = () => { askRooms(); renderPanel(); };
+      body.querySelectorAll('[data-rjoin]').forEach((b) => (b as HTMLElement).onclick = () => { const el = b as HTMLElement; if (!live?.send({ type: 'room.join', room: el.dataset.rjoin, inst: el.dataset.rinst })) return toast('連線中，請稍候'); msg.textContent = '加入房間中…'; });
       (body.querySelector('#rroom') as HTMLElement).onclick = () => { roomForm = true; roomTrack = sel; roomLaps = trackById(sel)?.laps ?? 3; renderPanel(); };
     } else if (tab === 'garage') {
       const st = carStats(prof.parts, prof.car);
@@ -182,6 +188,7 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     const ct = body.querySelector('#rct') as HTMLSelectElement | null; if (ct) ct.onchange = () => live?.send({ type: 'room.config', track: ct.value });
     const cl = body.querySelector('#rcl') as HTMLSelectElement | null; if (cl) cl.onchange = () => live?.send({ type: 'room.config', laps: Number(cl.value) });
   }
+  askRooms(); const roomListT = window.setInterval(() => { if (mode === 'menu' && tab === 'cup' && !live?.room && !roomForm && !document.hidden) askRooms(); }, 15_000); // 好友的房間：定期更新
   const roomTick = window.setInterval(() => { const el = body.querySelector('#rcd'); if (el && live?.room) { const l = roomLeft(live.room); if (l !== null) el.textContent = String(l); } }, 200);
   // ---------- 連線 ----------
   function join() {
@@ -214,6 +221,8 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     if (m.type === 'race.ended' && !race && resuming && m.race_id === resuming.id) // 重新整理後才收到結果：沒有畫面資料，只顯示結果
       race = { id: m.race_id, inst: resuming.inst, track: m.track ?? sel, laps: 0, len: 1, cars: [], snaps: [], ended: null, pickups: [] };
     if (m.type === 'room.state') { roomForm = false; if (live?.room?.game === 'race' && trackById(live.room.track) && sel !== live.room.track) { sel = live.room.track; followCup = false; } if (live?.room?.members?.find((x: any) => x.user === me.user.id)?.ready) readyAsk = false; if (mode === 'menu') { msg.textContent = live?.room?.countdown_ms != null ? '全員準備，即將開跑！' : '賽車房：大家按「準備」就開跑'; renderPanel(); } }
+    if (m.type === 'room.list') { friendRooms = mergeRoomList(roomLists, m.inst, m.rooms); if (mode === 'menu' && tab === 'cup' && !live?.room && !roomForm) renderPanel(); }
+    if (m.type === 'hello' || m.type === 'room.gone') askRooms();
     if (m.type === 'room.gone') { readyAsk = false; if (m.code !== 'STARTED' && mode === 'menu') { msg.textContent = ({ EXPIRED: '房間閒置太久，已經關閉', ROOM_CLOSED: '房間已經關了', LEFT: '已離開房間', EMPTY: '房間已關閉' } as any)[m.code] ?? '房間已關閉'; renderPanel(); } }
     if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('room.')) { toast(ERR[m.code] ?? m.code); msg.textContent = ERR[m.code] ?? m.code; }
     if (m.type === 'wallet.updated') { coins = m.balance; if (tab === 'garage' && mode === 'menu') renderPanel(); }
@@ -345,5 +354,5 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   setAttract(); loop(); void load();
   const pend = (window as any).__pendingRace; if (pend) { (window as any).__pendingRace = null; onStarted(pend); } // 在家裡接受邀請後被帶過來
   else { const sv = savedRace(); if (sv) { resuming = sv; mode = 'lobby'; setMatch(true); msg.textContent = '接回剛才的比賽…'; tryResume(); renderPanel(); } } // 比賽中重新整理頁面
-  return () => { clearInterval(roomTick); ro.disconnect(); dead = true; cancelAnimationFrame(raf); clearInterval(sendTimer); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); off?.(); if (mode === 'lobby' || mode === 'race') live?.send(leaveMsg()); stopResume(); saveRace(null); setMatch(false); };
+  return () => { clearInterval(roomTick); clearInterval(roomListT); ro.disconnect(); dead = true; cancelAnimationFrame(raf); clearInterval(sendTimer); window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); off?.(); if (mode === 'lobby' || mode === 'race') live?.send(leaveMsg()); stopResume(); saveRace(null); setMatch(false); };
 }
