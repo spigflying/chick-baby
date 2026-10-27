@@ -251,7 +251,7 @@ export interface RaceCar {
   /** v15 碰撞事件（給畫面特效）：evT＝最後一次被撞的 tick、evK＝種類 1 撞路邊 2 追撞前車 3 被追撞 4 側擦、evS＝力道（扣裝甲前的傷害）、evSide＝-1 左 / 0 前後 / 1 右 */
   evT?: number; evK?: number; evS?: number; evSide?: number;
   /** v16 翻車剩餘 tick（0＝沒在翻） */
-  flip?: number; /** 路上氮氣道具：最後一次吃到的 tick（給畫面火花）與次數 */ pkT?: number; pkN?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v23：前／側／後 分區損傷 0–100（HUD 用） */ zd?: number[]; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number; /** race-demo-hitfix：最後一次「碰到但沒傷害」的 tick（試玩頁碰撞盒畫黃色） */ touchT?: number; /** race-demo-obstacles：最後一次撞到路障的 tick／路障 id（冷卻與同一個不重複算）、次數 */ obT?: number; obId?: number; obN?: number;
+  flip?: number; /** 路上氮氣道具：最後一次吃到的 tick（給畫面火花）與次數 */ pkT?: number; pkN?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v23：前／側／後 分區損傷 0–100（HUD 用） */ zd?: number[]; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number; /** race-demo-hitfix：最後一次「碰到但沒傷害」的 tick（試玩頁碰撞盒畫黃色） */ touchT?: number; /** race-demo-obstacles：最後一次撞到路障的 tick／路障 id（冷卻與同一個不重複算）、次數 */ obT?: number; obId?: number; obN?: number; /** 結果統計：最高速度（m/s，引擎單位） */ vTop?: number;
 }
 /** 完美度（%）＝ 100 − damage */
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
@@ -520,6 +520,7 @@ export function stepRace(s: RaceState) {
   // v20：速度 ×2，每個 tick 拆成 SUBSTEPS 次物理（碰撞不會穿過去）；計時器（nitroT／hit／flip）每 tick 只減一次
   const inputs = new Map<RaceCar, RaceInput>();
   for (let sub = 0; sub < SUBSTEPS; sub++) physics(s, sub, inputs);
+  for (const c of s.cars) if (c.finishedTick === null && c.speed > (c.vTop ?? 0)) c.vTop = c.speed; // 結果統計：最高速度（每 tick 一次，很便宜）
   const humans = s.cars.filter((c) => !c.ai);
   if (s.tick >= s.maxTicks || (humans.length > 0 && humans.every((c) => c.finishedTick !== null)) || s.cars.every((c) => c.finishedTick !== null)) s.over = true;
 }
@@ -636,5 +637,14 @@ export const snapCar = (c: RaceCar) => [c.id, +c.z.toFixed(2), +c.x.toFixed(3), 
 /** 快照：已被吃掉的道具 id */
 export const snapPickups = (s: RaceState) => s.pickups.filter((p) => p.taken !== null).map((p) => p.id);
 export const kmh = (v: number) => Math.round(v * 3.6);
+/** 跟 HUD 速度表同一個單位（真實 km/h ÷ 3） */
+export const hudKmh = (ms: number) => Math.round(ms * 3.6 / 3);
+/** 結果畫面每台車的統計（伺服器算、發給所有人）：撞路障次數、吃到路上氮氣次數、平均／最高時速（HUD 單位）。
+ *  平均＝跑過的距離 ÷ 開跑後的時間（完賽算到過線那一刻）。 */
+export function carRaceStats(s: RaceState, c: RaceCar) {
+  const start = RACE_TICK_RATE * 3 /* 跟 raceTimeMs 一樣從倒數結束算 */, end = c.finishedTick ?? s.tick, sec = Math.max(0, end - start) / RACE_TICK_RATE;
+  const dist = Math.min(Math.max(0, c.z), s.len * s.laps);
+  return { ob: c.obN ?? 0, pk: c.pkN ?? 0, avg: sec > 0 ? hudKmh(dist / sec) : 0, top: hudKmh(c.vTop ?? 0) };
+}
 /** 賽季：一個日曆月（台北時間），例如 '2026-10'。 */
 export function seasonOf(ms: number) { const d = new Date(ms + 8 * 3600_000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; }

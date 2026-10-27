@@ -8,6 +8,7 @@ import { api, errText } from './api';
 import type { Live } from './ws';
 import { pickupShare, raceObstacles, HIT_OBSTACLE, type ObstacleKind } from '@chick/engine';
 import { bumpSound } from './race-obstacles';
+import { resultsListHtml, fitName, statsLine, type ResultRow } from './race-results';
 import { createRace, stepRace, trackSegs, SEG_LEN, raceRanking, trackById, CARS, PARTS, PART_KINDS, TRACKS, COUNTRIES, carStats, fillField, cupTrack, prizeFor, PRIZES, POINTS, ME, PAINT_NAMES, MAX_OUT_COST, PRICE_DIVISOR, QUALIFY_RANK, RACES_PER_COUNTRY, RACE_SLOTS, NITRO_PER_RACE, type RaceState, type PartKind } from '@chick/engine';
 import { drawShop, newShop, shopHit, shopMove, isPaint, SHOP_SCREENS } from './race-shop';
 import { drawRace, carCanvas, text, textW, zh, zhW, panel, drawMinimap, W, H, G, type ViewCar } from './race-gfx';
@@ -168,7 +169,8 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   const roomLeft = (r: any) => r.countdown_ms === null ? null : Math.max(0, Math.ceil((r.countdown_ms - (Date.now() - r.at)) / 1000));
   function renderRoom(head: string) {
     const r = live!.room, my = r.members.find((m: any) => m.user === me.user.id), host = r.host === me.user.id, t = trackById(r.track)!, left = roomLeft(r);
-    const top = `<button id="rrlv" class="big race-top-btn">離開房間</button>${my?.ready ? '<button id="rrun" class="big race-top-btn">取消準備</button>' : '<button id="rrdy" class="big race-top-btn">準備</button>'}`;
+    const top = `<button id="rrlv" class="big race-top-btn">離開房間</button>${my?.away ? '<button id="rrbk" class="big race-top-btn">回到房間</button>' : my?.ready ? '<button id="rrun" class="big race-top-btn">取消準備</button>' : '<button id="rrdy" class="big race-top-btn">準備</button>'}`;
+    const away = r.members.filter((m: any) => m.away).length;
     const ready = r.members.filter((m: any) => m.ready).length;
     body.innerHTML = `<div class="race-top-row">${top}</div>` + head +
       `<h3>${esc(r.members.find((m: any) => m.host)?.name ?? '')} 的賽車房 <span class="muted">${r.members.length}/8 人</span></h3>
@@ -176,13 +178,15 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       <div class="room-cfg">${host ? `<label class="room-field">賽道 <select id="rct">${trackOpts(r.track)}</select></label><label class="room-field">圈數 <select id="rcl">${lapOpts(r.laps)}</select></label>`
         : `<p>賽道：<b>${esc(t.country)}・${esc(t.name)}</b>（${WEATHER[t.weather]}）・<b>${r.laps}</b> 圈 <span class="muted">（房主決定）</span></p>`}
         <p class="muted">房間獎金：2 位以上真人時前三名 ◎150／100／50；只有自己一人時完賽 ◎50${r.laps !== t.laps ? '；圈數跟賽道預設不同，不算積分、錦標賽與最快時間' : ''}</p></div>
+      ${away ? `<p class="muted">${r.racing ? '比賽進行中' : '還有人在看結果'}（${away} 人）：大家都按「回到房間」後才能準備開跑；3 分鐘內沒回來會移出房間。</p>` : ''}
       <h3>成員 <span class="muted">準備 ${ready}/${r.members.length}</span></h3>
-      <ul class="room-members">${r.members.map((m: any) => `<li class="${m.ready ? 'ok' : ''} ${m.online ? '' : 'off'}"><span>${esc(m.name)}${m.host ? ' <span class="room-tag">房主</span>' : ''}${m.user === me.user.id ? ' <span class="muted">（你）</span>' : ''}</span><span class="room-st">${!m.online ? '斷線中…' : m.ready ? '✔ 準備好了' : '等待中'}</span></li>`).join('')}</ul>
+      <ul class="room-members">${r.members.map((m: any) => `<li class="${m.ready ? 'ok' : ''} ${m.online ? '' : 'off'}"><span>${esc(m.name)}${m.host ? ' <span class="room-tag">房主</span>' : ''}${m.user === me.user.id ? ' <span class="muted">（你）</span>' : ''}</span><span class="room-st">${!m.online ? '斷線中…' : m.away ? (r.racing ? '比賽中…' : '看結果中…') : m.ready ? '✔ 準備好了' : '等待中'}</span></li>`).join('')}</ul>
       <p class="muted">房間 ${Math.ceil(r.expires_ms / 60000)} 分鐘內沒有動作會自動關閉。房主離開時交給最早加入的人。</p>`;
     const on = (id: string, f: () => void) => { const el = body.querySelector(id) as HTMLElement | null; if (el) el.onclick = f; };
     on('#rrlv', () => { live?.send({ type: 'room.leave' }); live!.room = null; msg.textContent = '已離開房間'; renderPanel(); });
     on('#rrdy', () => live?.send({ type: 'room.ready', ready: true })); // 按一次就準備好，不再跳確認
     on('#rrun', () => live?.send({ type: 'room.ready', ready: false }));
+    on('#rrbk', () => live?.send({ type: 'room.back' }));
     const ct = body.querySelector('#rct') as HTMLSelectElement | null; if (ct) ct.onchange = () => live?.send({ type: 'room.config', track: ct.value });
     const cl = body.querySelector('#rcl') as HTMLSelectElement | null; if (cl) cl.onchange = () => live?.send({ type: 'room.config', laps: Number(cl.value) });
   }
@@ -249,11 +253,17 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   function showResults(m: any) {
     for (const c of m.ranking ?? []) if (!c.ai) knownNames.set(c.id, c.name);
     const e = m.me;
-    body.innerHTML = `<button id="rback" class="big race-top-btn">回選單</button><h3>${esc(trackById(m.track)!.name)} 結果</h3><ol class="results">${m.ranking.map((c: any) => `<li class="${c.id === me.user.id ? 'me' : ''}"><span>${c.rank}. ${esc(c.name)}${c.ai ? ' <span class="muted">電腦</span>' : ''}</span><span>${fmtMs(c.time_ms)}</span></li>`).join('')}</ol>
+    const inRoom = !!m.room && live?.room?.id === m.room, mine = (m.ranking as ResultRow[]).find((c) => c.id === me.user.id);
+    const top = inRoom ? `<div class="race-top-row"><button id="rroomback" class="big race-top-btn">回到房間</button><button id="rroomleave" class="big race-top-btn">離開房間</button></div>` : `<button id="rback" class="big race-top-btn">回選單</button>`;
+    body.innerHTML = `${top}<h3>${esc(trackById(m.track)!.name)} 結果</h3>${mine && statsLine(mine) ? `<p class="rr-mine">你的比賽：${esc(statsLine(mine))}</p>` : ''}${resultsListHtml(m.ranking, me.user.id)}
       ${e ? `<p>獎金 <b>${money(e.prize)}</b>　積分 +${e.points}　完美度 <b>${e.condition}%</b>（撞傷下一場前自動修好）</p>
       <p>${e.cup_counted ? (e.qualified ? (e.champion ? '🏆 國家冠軍！解鎖下一個國家' : e.country_done ? '本國四站結束，但不是冠軍，重新挑戰這個國家' : '晉級下一站') : '沒進前 10 名：這個國家要從第 1 站重來') : '<span class="muted">這場不是你目前的錦標賽站（不計國家積分）</span>'}</p>
       ${e.cup_counted ? `<h3>國家積分</h3>${standingsHtml(e.standings)}` : ''}` : ''}`;
-    (body.querySelector('#rback') as HTMLElement).onclick = () => { mode = 'menu'; race = null; renderPanel(); };
+    const on = (id: string, f: () => void) => { const el = body.querySelector(id) as HTMLElement | null; if (el) el.onclick = f; };
+    on('#rback', () => { mode = 'menu'; race = null; renderPanel(); });
+    // 賽車房：自己按才回到房間（回去後準備是空的，再按一次準備）
+    on('#rroomback', () => { live?.send({ type: 'room.back' }); mode = 'menu'; race = null; msg.textContent = '回到房間了：按「準備」等下一場'; renderPanel(); });
+    on('#rroomleave', () => { live?.send({ type: 'room.leave' }); if (live) live.room = null; mode = 'menu'; race = null; msg.textContent = '已離開房間'; renderPanel(); });
   }
   // ---------- 操作：觸控按鈕＋鍵盤（不 stopPropagation，閒置偵測要收到 pointerdown） ----------
   const pad = root.querySelector('#rpad') as HTMLElement;
@@ -350,7 +360,8 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     text(x, `P${e.rank}`, 26, 32, 0, 5);
     zh(x, `獎金 ${coinTxt(e.prize)}　+${e.points} 分`, 96, 32, 0); zh(x, `時間 ${fmtMs(e.time_ms)}`, 96, 46, 1);
     zh(x, `完美度 ${e.condition}%　${e.qualified ? '晉級' : '未晉級（前 10 名）'}`, 96, 60, e.qualified ? 0 : 1);
-    (race!.ended.ranking as any[]).slice(0, 6).forEach((c, i) => { const y = 80 + i * 14, mine = c.id === me.user.id; if (mine) { x.fillStyle = G[2]; x.fillRect(24, y - 2, W - 48, 14); } text(x, String(c.rank), 30, y + 2, mine ? 0 : 1); zh(x, c.name, 44, y, mine ? 0 : 1); text(x, c.time_ms === null ? '--' : fmtMs(c.time_ms).replace(/[’'"]/g, (m: string) => m === '"' ? '.' : ':'), W - 30 - textW('0:00.00'), y + 2, mine ? 0 : 1); });
+    const my = (race!.ended.ranking as ResultRow[]).find((c) => c.id === me.user.id); if (my && typeof my.avg === 'number') zh(x, fitName((n) => zhW(x, n), `撞${my.ob} 加速${my.pk} 均${my.avg} 高${my.top}`, W - 52), 26, 73, 1);
+    (race!.ended.ranking as any[]).slice(0, 6).forEach((c, i) => { const y = 88 + i * 14, mine = c.id === me.user.id; if (mine) { x.fillStyle = G[2]; x.fillRect(24, y - 2, W - 48, 14); } text(x, String(c.rank), 30, y + 2, mine ? 0 : 1); const tx = W - 30 - textW('0:00.00'); zh(x, fitName((n) => zhW(x, n), c.name, tx - 44 - 4), 44, y, mine ? 0 : 1); text(x, c.time_ms === null ? '--' : fmtMs(c.time_ms).replace(/[’'"]/g, (m: string) => m === '"' ? '.' : ':'), W - 30 - textW('0:00.00'), y + 2, mine ? 0 : 1); });
     const st = (e.standings ?? []) as [string, number][]; const myPos = st.findIndex((s) => s[0] === ME) + 1;
     zh(x, e.champion ? '國家冠軍！下一個國家解鎖' : e.country_done ? `本國結束：積分第 ${myPos} 名` : `國家積分第 ${myPos || '-'} 名（${st.find((s) => s[0] === ME)?.[1] ?? 0} 分）`, 26, H - 26, 0);
   }

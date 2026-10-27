@@ -62,7 +62,7 @@ describe('friends\u2019 open rooms are offered again', () => {
     expect(_raceRooms.get(cd)!.countdownAt).not.toBeNull();
     const started = await createRoom(h[3], 'tw1', 1); onRaceBus({ t: 'rrace.rready', inst: 'i1', room: started, user: h[3], ready: true });
     stepRaces(Date.now() + ROOM_COUNTDOWN_MS + 10); await wait(200);
-    expect(_raceRooms.has(started)).toBe(false);
+    expect(_raceRooms.get(started)!.raceId).toBeTruthy(); // 房間留著但比賽中，不推薦
     const n = sent.length; await offerRooms(me); await offerRooms(me, 'list', 'race');
     expect(invitesTo(me, n)).toHaveLength(0); expect(listFor(me, n)[0].rooms).toEqual([]);
   });

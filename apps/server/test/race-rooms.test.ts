@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { newRoom, roomJoin, roomLeave, roomConfig, roomReady, roomDrop, roomTick, roomView, ROOM_COUNTDOWN_MS, ROOM_DROP_MS, ROOM_IDLE_MS } from '../src/race-rooms';
+import { newRoom, roomJoin, roomLeave, roomConfig, roomReady, roomDrop, roomTick, roomView, ROOM_COUNTDOWN_MS, ROOM_DROP_MS, ROOM_IDLE_MS, ROOM_AWAY_MS, roomRaceStart, roomRaceEnd, roomBack } from '../src/race-rooms';
 const A = { user: 'a', name: '小雞（阿明）' }, B = { user: 'b', name: '鴨鴨（小華）' }, C = { user: 'c', name: 'c' };
 const mk = () => newRoom('r1', 'i1', A, 'tw1', 3, 0);
 describe('race rooms (state machine)', () => {
@@ -36,6 +36,22 @@ describe('race rooms (state machine)', () => {
     const r = mk(); roomJoin(r, B, 0, 8); roomReady(r, 'a', true, 1); roomJoin(r, C, 2, 8);
     expect(r.members.find((m) => m.user === 'a')!.ready).toBe(true); roomLeave(r, 'c', 3);
     expect(r.members.find((m) => m.user === 'a')!.ready).toBe(true); roomReady(r, 'b', true, 4); expect(r.countdownAt).toBe(4 + ROOM_COUNTDOWN_MS);
+  });
+  it('after-race lifecycle: away until each presses back; ready cleared; no countdown while anyone is away; away dropped after ROOM_AWAY_MS; no idle expiry mid-race', () => {
+    const r = mk(); roomJoin(r, B, 0, 8); roomJoin(r, C, 0, 8); roomReady(r, 'a', true, 1); roomReady(r, 'b', true, 1); roomReady(r, 'c', true, 1);
+    roomRaceStart(r, 'race1', ['a', 'b', 'c'], 10);
+    expect(r.members.every((m) => m.away && !m.ready)).toBe(true); expect(roomBack(r, 'a', 20)).toBe('ALREADY_IN_MATCH');
+    expect(roomTick(r, 10 + ROOM_IDLE_MS + 5)).toBeNull(); expect(r.closed).toBeNull(); // 比賽中不算閒置
+    roomRaceEnd(r, 'other', 100); expect(r.raceId).toBe('race1'); // 不是這場：不理
+    const end = 10 + ROOM_IDLE_MS + 10; roomRaceEnd(r, 'race1', end);
+    expect(roomBack(r, 'a', end + 1)).toBeNull(); roomReady(r, 'a', true, end + 2); expect(r.countdownAt).toBeNull();
+    roomBack(r, 'b', end + 3); roomReady(r, 'b', true, end + 3); expect(r.countdownAt).toBeNull(); // c 還在看結果
+    roomTick(r, end + ROOM_AWAY_MS + 1); expect(r.members.map((m) => m.user)).toEqual(['a', 'b']); expect(r.countdownAt).toBe(end + ROOM_AWAY_MS + 1 + ROOM_COUNTDOWN_MS);
+    expect(roomView(r, end).members[0]).toMatchObject({ away: false });
+  });
+  it('pressing ready on the results screen counts as coming back', () => {
+    const r = mk(); roomRaceStart(r, 'x', ['a'], 0); expect(roomReady(r, 'a', true, 1)).toBe('ALREADY_IN_MATCH');
+    roomRaceEnd(r, 'x', 2); expect(roomReady(r, 'a', true, 3)).toBeNull(); expect(r.countdownAt).toBe(3 + ROOM_COUNTDOWN_MS);
   });
   it('expires after 10 min idle', () => { const r = mk(); expect(roomTick(r, ROOM_IDLE_MS - 1)).toBeNull(); expect(r.closed).toBeNull(); roomTick(r, ROOM_IDLE_MS + 1); expect(r.closed).toBe('EXPIRED'); });
   it('stairs room needs at least 2 ready members', () => {

@@ -55,7 +55,7 @@ function scene(kind: string) {
 async function page() {
   await import('./style.css');
   const { racePage } = await import('./race');
-  const { snapCar, snapPickups, createRace, stepRace, setRaceInput, raceRanking, raceTimeMs, TRACKS, PARTS, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, prizeFor, pointsFor, condition, ME, newCup } = await import('@chick/engine');
+  const { snapCar, snapPickups, createRace, stepRace, setRaceInput, raceRanking, raceTimeMs, TRACKS, PARTS, NITRO_PER_RACE, RACE_SLOTS, fillField, settleCup, prizeFor, pointsFor, condition, ME, newCup, carRaceStats } = await import('@chick/engine');
   let coins = 3400;
   const prof: any = { points: 16, wins: 1, races: 3, season: '2026-10', paint: 0, parts: { engine: 1, gearbox: 2, dry: 3, wet: 1, nitro: 2, armorF: 1, armorS: 0, armorR: 0 }, car: 'falcon', unlocked: 1, cup: { ...newCup(0), race: 2, points: { [ME]: 16, '阿飛': 14, '雷霆': 10, '閃電': 7 } } };
   const realFetch = window.fetch.bind(window);
@@ -72,10 +72,11 @@ async function page() {
   const emit = (m: any) => handlers.forEach((h) => h(m));
   let sim: any = null, timer = 0;
   const live: any = { inMatch: false, inFight: false, inLobby: false, serverNow: () => Date.now(), on: (h: any) => { handlers.add(h); return () => handlers.delete(h); },
-    send: (m: any) => { if (m.type === 'race.input' && sim) setRaceInput(sim, 'me', m);  return true; } };
+    send: (m: any) => { (window as any).__sent.push(m); if (m.type === 'race.input' && sim) setRaceInput(sim, 'me', m);  return true; } };
+  (window as any).__sent = []; (window as any).__emit = emit; (window as any).__live = live;
   const w = window as any;
-  w.__start = (track: string) => {
-    sim = createRace(5, track, fillField([{ id: 'b', name: 'benson', car: 'muscle', color: 1, parts: prof.parts }, { id: 'me', name: 'racer', car: 'falcon', color: 0, parts: prof.parts as any }]));
+  w.__start = (track: string, long?: boolean) => {
+    sim = createRace(5, track, fillField([{ id: 'b', name: long ? '超級無敵長長長長長長長長的鴨鴨名字（benson_the_longest）' : 'benson', car: 'muscle', color: 1, parts: prof.parts }, { id: 'me', name: long ? '我的寵物叫做超級無敵霹靂旋風小雞雞雞' : 'racer', car: 'falcon', color: 0, parts: prof.parts as any }]));
     emit({ type: 'race.started', race_id: 'r1', track, seed: 5, cars: sim.cars.map((c: any) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, pet: c.ai ? null : c.id === 'me' ? 'chicken' : 'duck' })), laps: sim.laps, len: sim.len, tick_rate: 20, pickups: sim.pickups.map((p: any) => [p.id, p.z, p.x]), obstacles: (sim.obstacles ?? []).map((o: any) => [o.id, o.kind, o.z, o.x, o.w, o.dz]) }); // 跟伺服器 startedMsg 同格式
     const snap = () => emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: sim.countdown, cars: sim.cars.map(snapCar), pk: snapPickups(sim) });
     timer = window.setInterval(() => { stepRace(sim); stepRace(sim); snap(); }, 100);
@@ -86,7 +87,7 @@ async function page() {
     clearInterval(timer); while (!sim.over) { const me = sim.cars.find((c: any) => c.id === 'me'); setRaceInput(sim, 'me', { gas: true, left: me.x > 0.2, right: me.x < -0.2 }); stepRace(sim); }
     const rk = raceRanking(sim); const meC = sim.cars.find((c: any) => c.id === 'me'); const pos = rk.indexOf(meC) + 1;
     emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: 0, cars: sim.cars.map(snapCar) });
-    emit({ type: 'race.ended', race_id: 'r1', track: sim.track, ranking: rk.map((c: any, i: number) => ({ id: c.id, name: c.name, ai: c.ai, rank: i + 1, time_ms: raceTimeMs(sim, c), condition: condition(c) })), me: (() => { const r = settleCup(prof.cup, 1, 'tw3', rk.map((c: any, i: number) => ({ key: c.id === 'me' ? ME : c.ai ? c.name : 'user:' + c.id, rank: i + 1 }))); return { user_id: 'me', rank: pos, prize: prizeFor(pos), points: pointsFor(pos), time_ms: raceTimeMs(sim, meC), condition: condition(meC), hits: meC.hits, unlocked: r.unlocked, qualified: r.qualified, cup_counted: r.counted, country_done: r.countryDone, champion: r.champion, cup: r.cup, standings: r.standings.slice(0, 10) }; })() });
+    emit({ type: 'race.ended', race_id: 'r1', track: sim.track, ranking: rk.map((c: any, i: number) => ({ id: c.id, name: c.name, ai: c.ai, rank: i + 1, time_ms: raceTimeMs(sim, c), condition: condition(c), ...carRaceStats(sim, c) })), room: live.room?.id, me: (() => { const r = settleCup(prof.cup, 1, 'tw3', rk.map((c: any, i: number) => ({ key: c.id === 'me' ? ME : c.ai ? c.name : 'user:' + c.id, rank: i + 1 }))); return { user_id: 'me', rank: pos, prize: prizeFor(pos), points: pointsFor(pos), time_ms: raceTimeMs(sim, meC), condition: condition(meC), hits: meC.hits, unlocked: r.unlocked, qualified: r.qualified, cup_counted: r.counted, country_done: r.countryDone, champion: r.champion, cup: r.cup, standings: r.standings.slice(0, 10) }; })() });
   };
   document.body.style.background = '#1a1030';
   racePage(root, live, { user: { id: 'me', display_name: 'racer' } }, (t) => console.log('toast', t));

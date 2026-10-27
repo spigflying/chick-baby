@@ -76,7 +76,7 @@ function forwardRace(m: any) {
     if (via !== env.instanceId) return;
     const c = [...conns].find((x) => x.id === cid && x.user.id === m.user); if (!c) return;
     if (t === 'rrace.resumed') { c.rr = { id: m.race_id, inst: m.inst }; const { user: _u, ...r } = rest; send(c, { type: 'race.started', home_id: home, resumed: true, ...r }); }
-    else if (t === 'rrace.ended') send(c, { type: 'race.ended', race_id: m.race_id, track: m.track, ranking: m.ranking, aborted: !!m.aborted, me: (m.results ?? []).find((p: any) => p.user_id === c.user.id) ?? null });
+    else if (t === 'rrace.ended') send(c, { type: 'race.ended', race_id: m.race_id, track: m.track, ranking: m.ranking, aborted: !!m.aborted, room: m.room ?? null, me: (m.results ?? []).find((p: any) => p.user_id === c.user.id) ?? null });
     else if (t === 'rrace.gone') send(c, { type: 'race.gone', race_id: m.race_id });
     return;
   }
@@ -96,7 +96,7 @@ function forwardRace(m: any) {
     for (const c of conns) if (c.rr?.id === m.race_id) send(c, { type: 'race.snap', race_id: m.race_id, tick: m.tick, countdown: m.countdown, cars: m.cars, pk: m.pk ?? [] });
   } else if (t === 'rrace.ended') {
     const freed: string[] = [];
-    for (const c of conns) if (c.rr?.id === m.race_id) { c.rr = null; freed.push(c.user.id); send(c, { type: 'race.ended', race_id: m.race_id, track: m.track, ranking: m.ranking, aborted: !!m.aborted, me: (m.results ?? []).find((p: any) => p.user_id === c.user.id) ?? null }); }
+    for (const c of conns) if (c.rr?.id === m.race_id) { c.rr = null; freed.push(c.user.id); send(c, { type: 'race.ended', race_id: m.race_id, track: m.track, ranking: m.ranking, aborted: !!m.aborted, room: m.room ?? null, me: (m.results ?? []).find((p: any) => p.user_id === c.user.id) ?? null }); }
     offerFree(freed);
   }
 }
@@ -283,9 +283,9 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
             toRaceAuthority({ t: 'rrace.rjoin', inst: msg.inst.slice(0, 80), room: msg.room.slice(0, 40), user: c.user.id });
             break;
           }
-          case 'room.leave': case 'room.config': case 'room.ready': {
+          case 'room.leave': case 'room.config': case 'room.ready': case 'room.back': {
             if (!c.room) break;
-            const t = msg.type === 'room.leave' ? 'rrace.rleave' : msg.type === 'room.config' ? 'rrace.rconf' : 'rrace.rready';
+            const t = msg.type === 'room.leave' ? 'rrace.rleave' : msg.type === 'room.config' ? 'rrace.rconf' : msg.type === 'room.back' ? 'rrace.rback' : 'rrace.rready';
             toRaceAuthority({ t, inst: c.room.inst, room: c.room.id, user: c.user.id, track: typeof msg.track === 'string' ? msg.track.slice(0, 20) : null, laps: msg.laps ?? null, ready: !!msg.ready });
             if (msg.type === 'room.leave') c.room = null;
             break;
