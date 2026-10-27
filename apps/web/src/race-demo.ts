@@ -6,7 +6,7 @@ import './style.css';
 import {
   createRace, stepRace, DEMO_HITBOX, setRaceInput, fillField, raceRanking, raceTimeMs, condition,
   trackById, TRACKS, STOCK_PARTS, carStats, pickupShare, rankOf,
-  RACE_TICK_RATE, RACE_SLOTS, NITRO_PER_RACE, registerMapFirstTracks, type RaceState,
+  RACE_TICK_RATE, RACE_SLOTS, NITRO_PER_RACE, registerMapFirstTracks, raceObstacles, type RaceState,
 } from '@chick/engine';
 
 // race-demo-mapfirst：試玩頁只用「地圖先」賽道（佈局→路段；小地圖／路面／外甩同一份轉角）。正式 /race 不註冊。
@@ -25,6 +25,18 @@ const ME_ID = 'me';
 const ME_NAME = '試玩';
 const STOCK_CAR = 'falcon';
 const STOCK_COLOR = 0;
+// race-demo-obstacles：撞路障的音效（悶悶的「咚」：低頻方波往下掉＋一點雜音，和撞車聲不同）
+let obAc: AudioContext | null = null;
+function bumpSound() {
+  try {
+    obAc = obAc ?? new AudioContext(); const ac = obAc, t = ac.currentTime;
+    const o = ac.createOscillator(), g = ac.createGain(); o.type = 'square';
+    o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.16);
+    g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.21);
+  } catch { /* 沒有音效裝置就算了 */ }
+}
+let lastObT = -1;
 
 function boot() {
   const root = document.getElementById('app')!;
@@ -107,6 +119,8 @@ function boot() {
       id: ME_ID, name: ME_NAME, car: STOCK_CAR, color: STOCK_COLOR, parts: STOCK_PARTS,
     }]));
     sim.hitbox = DEMO_HITBOX; // 試玩頁專用：照精靈量的碰撞盒
+    sim.obstacles = raceObstacles(seed, sel); // race-demo-obstacles：路障（種子決定位置，只減速）
+    lastObT = -1;
     mode = 'race';
     prevSnap = snapCars(sim);
     acc = 0; lastNow = performance.now();
@@ -208,14 +222,17 @@ function boot() {
       const cars = viewCars(f);
       const meCar = cars.find((c) => c.id === ME_ID) ?? null;
       const ranked = raceOrder(cars);
-      const flash = meCar?.fin != null ? 'FINISH!' : meCar && meCar.hit > 0 ? 'CRASH!' : meCar && Math.abs(meCar.x) > 1 ? 'OFF ROAD' : undefined;
+      const meS = sim.cars.find((c) => c.id === ME_ID)!;
+      if (meS.obT !== undefined && meS.obT !== lastObT) { lastObT = meS.obT; bumpSound(); }
+      const bump = meS.obT !== undefined && sim.tick - meS.obT < RACE_TICK_RATE * 0.6;
+      const flash = meCar?.fin != null ? 'FINISH!' : meCar && meCar.hit > 0 ? 'CRASH!' : bump ? 'BUMP!' : meCar && Math.abs(meCar.x) > 1 ? 'OFF ROAD' : undefined;
       const meReal = sim.cars.find((c) => c.id === ME_ID)!;
       const share = pickupShare(rankOf(sim.cars, meReal), sim.cars.length);
       const pickups = sim.pickups
         .filter((p) => p.taken === null && p.q < share && Math.abs(p.z - (meCar?.z ?? 0)) < sim!.len / 2)
         .map((p) => ({ z: p.z, x: p.x }));
       drawRace(x, {
-        pickups, gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
+        pickups, obstacles: sim.obstacles, gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
         tick: sim.tick, countdown: sim.countdown, laps: sim.laps, len: sim.len,
         rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash, now, exact: true, camH, hitbox: showHitbox ? DEMO_HITBOX : undefined, carW: DEMO_HITBOX.dx,
       });
@@ -227,7 +244,7 @@ function boot() {
       const meCar = cars.find((c) => c.id === ME_ID) ?? null;
       const ranked = raceOrder(cars);
       drawRace(x, {
-        gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
+        obstacles: sim.obstacles, gears: 4, top: stats.topSpeed, track: t, me: meCar, cars,
         tick: sim.tick, countdown: 0, laps: sim.laps, len: sim.len,
         rank: meCar ? ranked.indexOf(meCar) + 1 : 0, frame, hud: true, flash: 'FINISH!',  exact: true, carW: DEMO_HITBOX.dx, camH,
       });

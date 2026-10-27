@@ -251,13 +251,13 @@ export interface RaceCar {
   /** v15 碰撞事件（給畫面特效）：evT＝最後一次被撞的 tick、evK＝種類 1 撞路邊 2 追撞前車 3 被追撞 4 側擦、evS＝力道（扣裝甲前的傷害）、evSide＝-1 左 / 0 前後 / 1 右 */
   evT?: number; evK?: number; evS?: number; evSide?: number;
   /** v16 翻車剩餘 tick（0＝沒在翻） */
-  flip?: number; /** 路上氮氣道具：最後一次吃到的 tick（給畫面火花）與次數 */ pkT?: number; pkN?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v23：前／側／後 分區損傷 0–100（HUD 用） */ zd?: number[]; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number; /** race-demo-hitfix：最後一次「碰到但沒傷害」的 tick（試玩頁碰撞盒畫黃色） */ touchT?: number;
+  flip?: number; /** 路上氮氣道具：最後一次吃到的 tick（給畫面火花）與次數 */ pkT?: number; pkN?: number; aiNitroAt: number[]; aiSkill: number; aiRecover: number; /** v23：前／側／後 分區損傷 0–100（HUD 用） */ zd?: number[]; /** v22：讓車：-1 靠左／1 靠右，剩幾 tick（決定後維持，不來回換） */ aiYield?: number; aiYieldT?: number; hit: number; hits: number; /** race-demo-hitfix：最後一次「碰到但沒傷害」的 tick（試玩頁碰撞盒畫黃色） */ touchT?: number; /** race-demo-obstacles：最後一次撞到路障的 tick／路障 id（冷卻與同一個不重複算）、次數 */ obT?: number; obId?: number; obN?: number;
 }
 /** 完美度（%）＝ 100 − damage */
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
 /** 完美度對極速的影響：每少 1% 就少 0.4% 極速（最低 60%） */
 export const condFactor = (damage: number) => Math.max(0.6, 1 - 0.004 * damage);
-export interface RaceState { seed: number; track: string; tick: number; laps: number; len: number; cars: RaceCar[]; pickups: Pickup[]; rng: Rng; over: boolean; maxTicks: number; countdown: number; difficulty: number; /** race-demo-hitbox：只有試玩頁設 */ hitbox?: Hitbox }
+export interface RaceState { seed: number; track: string; tick: number; laps: number; len: number; cars: RaceCar[]; pickups: Pickup[]; rng: Rng; over: boolean; maxTicks: number; countdown: number; difficulty: number; /** race-demo-hitbox：只有試玩頁設 */ hitbox?: Hitbox; /** race-demo-obstacles：路障（只有試玩頁設；正式比賽沒有） */ obstacles?: Obstacle[] }
 export interface Entrant { id: string; name: string; ai?: boolean; car?: string; parts?: Partial<Parts>; color?: number; skill?: number }
 const NO_INPUT: RaceInput = { gas: false, brake: false, left: false, right: false, nitro: false };
 
@@ -326,6 +326,54 @@ export function racePickups(seed: number, trackId: string, laps: number): Pickup
   }
   return out;
 }
+/** race-demo-obstacles：路上路障（只減速，不扣完美度）。位置由比賽種子決定（每場不同；同一場每圈同位置）。
+ *  只放在直線與出彎（該段與前方 2 段 |curve| < OBST_MAX_CURVE、前 1 段可以是彎＝出彎），離起終點 ≥ OBST_START_GAP，彼此 ≥ OBST_MIN_GAP。
+ *  x、w 單位＝半路寬（路面 −1..1）；dz＝前後長度（m）；slow＝撞到後速度乘數。 */
+export type ObstacleKind = 'boxes' | 'tyres' | 'cones';
+export interface Obstacle { id: number; kind: ObstacleKind; /** 一圈內的位置（m） */ z: number; x: number; w: number; dz: number; slow: number }
+export const OBSTACLE_SPECS: Record<ObstacleKind, { w: number; dz: number; slow: number }> = {
+  boxes: { w: 0.34, dz: 1.2, slow: 0.5 },  // 紙箱堆：最痛
+  tyres: { w: 0.30, dz: 1.2, slow: 0.55 }, // 輪胎堆
+  cones: { w: 0.9, dz: 0.8, slow: 0.75 },   // 一排三角錐：擋半邊路（0.9 半路寬），要換線
+};
+export const OBST_MAX_CURVE = 0.3, OBST_START_GAP = 200, OBST_MIN_GAP = 160, OBST_COOLDOWN = RACE_TICK_RATE / 2;
+/** 賽道難度 0..1：試玩賽道依序（方城 0、海岸 0.5、山路髮夾 1）；正式賽道用電腦車強度 ai（0.80–1.70） */
+export function obstacleLevel(trackId: string) {
+  const t = trackById(trackId); if (!t) return 0;
+  const v = t.countryId === 'demo' ? t.raceIdx / 2 : (t.ai - 0.8) / 0.9;
+  return Math.max(0, Math.min(1, v));
+}
+export const obstaclesPerLap = (trackId: string) => 2 + Math.round(3 * obstacleLevel(trackId));
+export function obstacleSpotOk(trackId: string, zLap: number, len: number) {
+  if (zLap < OBST_START_GAP || zLap > len - OBST_START_GAP) return false;
+  const segs = trackSegs(trackId), n = segs.length, i = Math.floor(zLap / SEG_LEN);
+  for (let k = 0; k <= 2; k++) if (Math.abs(segs[(((i + k) % n) + n) % n].curve) >= OBST_MAX_CURVE) return false; // 這段＋前方 40m 是直的（不在彎中、不在入彎）
+  return true;
+}
+/** 通過空隙：路面 −1..1 扣掉路障後，最大的空檔（半路寬） */
+export const obstacleGap = (o: { x: number; w: number }) => Math.max((o.x - o.w / 2) - -1, 1 - (o.x + o.w / 2));
+export function raceObstacles(seed: number, trackId: string): Obstacle[] {
+  const len = trackLength(trackSegs(trackId)), r = createRng((seed ^ 0x2f6b3c1d) >>> 0), out: Obstacle[] = [];
+  const want = obstaclesPerLap(trackId), kinds: ObstacleKind[] = ['boxes', 'tyres', 'cones'];
+  const spots: number[] = []; for (let z = OBST_START_GAP; z <= len - OBST_START_GAP; z += 5) if (obstacleSpotOk(trackId, z, len)) spots.push(z);
+  for (let tries = 0; out.length < want && tries < 200 && spots.length; tries++) {
+    const z = spots[Math.floor(nextFloat(r) * spots.length)];
+    if (out.some((o) => Math.abs(o.z - z) < OBST_MIN_GAP)) continue;
+    const kind = kinds[Math.floor(nextFloat(r) * 3)], sp = OBSTACLE_SPECS[kind];
+    const x = kind === 'cones' ? (nextFloat(r) < 0.5 ? -1 : 1) * (1 - sp.w / 2) : PICKUP_LANES[Math.floor(nextFloat(r) * 3)];
+    out.push({ id: out.length, kind, z, x, w: sp.w, dz: sp.dz, slow: sp.slow });
+  }
+  return out.sort((a, b) => a.z - b.z).map((o, i) => ({ ...o, id: i }));
+}
+/** 這台車（中心 x、這一步從 z0 到 z1）有沒有壓到路障 o（hitbox 與畫的寬度一致） */
+export function obstacleHit(o: Obstacle, x: number, z0: number, z1: number, len: number, hb: Hitbox = DEMO_HITBOX) {
+  if (Math.abs(x - o.x) >= (hb.dx + o.w) / 2) return false;
+  const half = (hb.dz + o.dz) / 2, lap = Math.floor(z1 / len);
+  for (const L of [lap - 1, lap]) { const oz = L * len + o.z; if (z1 > oz - half && z0 < oz + half) return true; }
+  return false;
+}
+export const HIT_OBSTACLE = 6;
+
 /** 吃到道具：沒在噴＝PICKUP_TICKS；正在噴＝加 PICKUP_TICKS，最多到一次完整氮氣 */
 export function applyPickup(c: RaceCar) {
   c.nitroT = c.nitroT > 0 ? Math.max(c.nitroT, Math.min(c.nitroT + PICKUP_TICKS, Math.round(c.stats.nitroTicks))) : PICKUP_TICKS;
@@ -367,6 +415,16 @@ function aiInput(s: RaceState, c: RaceCar, grip: number): RaceInput {
     if (dz > 0 && dz < 30 * X && o.speed > c.speed + 3 * X && Math.abs(o.x - c.x) < COLLIDE_DX + 0.15 / ROAD_WIDEN) { c.aiYield = o.x > c.x ? -1 : 1; if (Math.abs(c.x + c.aiYield * 0.55) > 0.9) c.aiYield = -c.aiYield; c.aiYieldT = 60; break; } }
   if (c.aiYieldT) { c.aiYieldT--; target = Math.max(-0.85, Math.min(0.85, c.aiLane * 0.8 + (c.aiYield ?? 0) * 0.55)); }
   if (c.aiRecover > 0) { c.aiRecover--; target = c.aiLane * -0.6; }
+  if (s.obstacles) { // race-demo-obstacles：前方路障在目標線上 → 換到最近的空檔（留邊距）
+    const look = 30 + c.speed * 3, L = s.len, zl = ((c.z % L) + L) % L, hw = (DEMO_CAR_W + 0.3) / 2;
+    for (const o of s.obstacles) {
+      const d = ((o.z - zl) % L + L) % L; if (d > look || d < -2) continue;
+      if (Math.abs(target - o.x) >= o.w / 2 + hw) continue;
+      const lo = o.x - o.w / 2 - hw, hi = o.x + o.w / 2 + hw, cands = [lo, hi].filter((v) => Math.abs(v) <= 0.85);
+      if (cands.length) target = cands.reduce((a, b) => (Math.abs(b - c.x) < Math.abs(a - c.x) ? b : a));
+      break;
+    }
+  }
   // v14：目標線平滑（換線、彎道切線慢慢移過去，不會一下左一下右）
   c.aiT = (c.aiT ?? c.x) + (target - (c.aiT ?? c.x)) * 0.08;
   const dx = c.aiT - c.x;
@@ -527,6 +585,11 @@ function physics(s: RaceState, sub: number, inputs: Map<RaceCar, RaceInput>) {
       if ((p.taken !== null && p.taken !== s.tick) || !(p.z > z0 && p.z <= c.z) || Math.abs(c.x - p.x) > PICKUP_DX) continue;
       if (p.q >= pickupShare(rankOf(s.cars, c), s.cars.length)) continue; // v26：名次太前面看不到這個
       p.taken = s.tick; applyPickup(c); c.pkT = s.tick; c.pkN = (c.pkN ?? 0) + 1;
+    }
+    if (s.obstacles && c.finishedTick === null && (c.obT === undefined || s.tick - c.obT >= OBST_COOLDOWN)) for (const o of s.obstacles) { // race-demo-obstacles：只減速
+      if (!obstacleHit(o, c.x, z0, c.z, s.len, s.hitbox)) continue;
+      c.speed *= o.slow; c.obT = s.tick; c.obId = o.id; c.obN = (c.obN ?? 0) + 1;
+      c.evT = s.tick; c.evK = HIT_OBSTACLE; c.evS = 2; c.evSide = o.x > c.x ? 1 : -1; break;
     }
     c.lap = Math.max(0, Math.floor(c.z / s.len));
     if (c.z >= total && c.finishedTick === null) c.finishedTick = s.tick;

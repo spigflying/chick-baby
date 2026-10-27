@@ -1,7 +1,8 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
-import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, ROAD_WIDEN, lapped as isLapped, DEMO_CAR_W, segCurvature, trackPathXY, type Track } from '@chick/engine';
+import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, ROAD_WIDEN, lapped as isLapped, DEMO_CAR_W, segCurvature, trackPathXY, type Track, type ObstacleKind } from '@chick/engine';
 import { carBodyH, carPixels, LODS, PLAYER_W, exhaustsOf, DESIGN_W, EXHAUST_Y, type CarLook } from './race-cars';
 import { pickupDims } from './race-pickup';
+import { OBST_ART, obstacleDims, obstacleSlide } from './race-obstacles';
 import { frontSprite, ensureComposite, S as PET_S } from './sprites';
 
 /** v3：內部解析度加倍（240×200）；HUD 仍以 120×100 座標畫、放大 2 倍（像經典賽車的粗 HUD）。 */
@@ -164,7 +165,7 @@ export function panel(x: CanvasRenderingContext2D, px: number, py: number, w: nu
 }
 
 export interface ViewCar { id: string; z: number; x: number; speed: number; damage: number; nitro: number; nitroT: number; fin: number | null; hit: number; car: string; color: number; name: string; ai: boolean; brake?: boolean; flip?: number; evT?: number; evK?: number; evS?: number; evSide?: number; /** 前／側／後 分區損傷 0–100 */ zd?: number[]; /** 最後吃到路上氮氣道具的 tick */ pkT?: number; /** 坐在車上的寵物精靈鍵（伺服器給；電腦車沒有） */ pet?: string | null; /** race-demo-hitfix：碰到但沒傷害（碰撞盒畫黃色） */ touch?: boolean }
-export interface View { /** 真實幾何投影（未指定時：地圖先賽道＝開，race-prod-port 起正式賽道都是）（前方每段用自己的轉角，平面轉向、真深度），細分 5m 取樣 */ exact?: boolean; /** exact 模式攝影機高度（m），預設 CAM_H_EXACT */ camH?: number; track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[]; /** race-demo-hitbox：畫每台車的碰撞盒（地面投影，寬 dx 路寬單位、長 dz 公尺，以車中心為準） */ hitbox?: { dx: number; dz: number }; /** race-demo-onecar：所有車畫成同一個寬度（半路寬單位，=碰撞盒 dx），以不透明車身寬為準 */ carW?: number }
+export interface View { /** race-demo-obstacles：路障（z＝一圈內位置；只有試玩頁給，小地圖不畫） */ obstacles?: { z: number; x: number; w: number; kind: ObstacleKind }[]; /** 真實幾何投影（未指定時：地圖先賽道＝開，race-prod-port 起正式賽道都是）（前方每段用自己的轉角，平面轉向、真深度），細分 5m 取樣 */ exact?: boolean; /** exact 模式攝影機高度（m），預設 CAM_H_EXACT */ camH?: number; track: Track; me: ViewCar | null; cars: ViewCar[]; tick: number; countdown: number; laps: number; len: number; rank: number; flash?: string; frame: number; hud: boolean; camZ?: number; camX?: number; gears?: number; top?: number; /** 毫秒時鐘（特效用），預設 performance.now() */ now?: number; /** 路上還沒被吃掉的氮氣道具（絕對距離） */ pickups?: { z: number; x: number }[]; /** race-demo-hitbox：畫每台車的碰撞盒（地面投影，寬 dx 路寬單位、長 dz 公尺，以車中心為準） */ hitbox?: { dx: number; dz: number }; /** race-demo-onecar：所有車畫成同一個寬度（半路寬單位，=碰撞盒 dx），以不透明車身寬為準 */ carW?: number }
 
 /** v13／curve-unify：彎道用引擎 segCurvature（與小地圖／外甩同一套）；攝影機橫向跟車比例。 */
 const CAM_FOLLOW = 0.4;
@@ -214,6 +215,14 @@ export function pickupCanvas(P: string[] = Q) {
   const c = cv.getContext('2d')!;
   for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) { const ch = PICKUP_ART[yy][xx]; if (ch === '.') continue; const k = +ch; c.fillStyle = P[k]; c.fillRect(xx + pad, yy + pad, 1, 1); }
   pickupCache.set(key, cv); return cv;
+}
+const obstCache = new Map<string, HTMLCanvasElement>();
+function obstCanvas(kind: ObstacleKind, P: string[]) {
+  const key = kind + P.join(); let cv = obstCache.get(key); if (cv) return cv;
+  const a = OBST_ART[kind]; cv = document.createElement('canvas'); cv.width = a[0].length; cv.height = a.length;
+  const c = cv.getContext('2d')!;
+  for (let yy = 0; yy < a.length; yy++) for (let xx = 0; xx < a[0].length; xx++) { const ch = a[yy][xx]; if (ch === '.') continue; c.fillStyle = P[+ch]; c.fillRect(xx, yy, 1, 1); }
+  obstCache.set(key, cv); return cv;
 }
 const fxPick = new Map<string, { t: number; t0: number }>();
 /** 吃到道具的火花：8 點星形往外擴散（約 0.45 秒），回傳 0..1 進度或 null */
@@ -449,6 +458,24 @@ export function drawRace(x: CanvasRenderingContext2D, v: View) {
     if (dm.h < 2) continue;
     const ww = Math.max(2, Math.round(dm.w)), hh = Math.max(2, Math.round(dm.h));
     sprites.push({ k: p0.k + 0.1, draw: () => x.drawImage(img, Math.round(cxp + pk.x * lat - ww / 2), Math.round(py - hh), ww, hh) });
+  }
+  { // race-demo-obstacles：路障跟車同一套 exact 投影；遠處就畫（最小 2px），隨深度連續變大；寬＝碰撞寬
+    const meP = v.me ? place(v.me) : null, meK = meP ? meP.k - 0.5 : -1e9;
+    for (const o of v.obstacles ?? []) {
+      const L = v.len; let dz = ((o.z - camZ) % L + L) % L; if (dz > L / 2) dz -= L;
+      const p0 = place({ z: camZ + dz } as ViewCar); if (!p0 || (p0.clip < H && p0.py > p0.clip + 2) || (t.weather === 'fog' && p0.k > 13)) continue;
+      const row = p0.py > GROUND ? rowAt(GROUND) : null, lat = row ? row.w : p0.pw, cxp = row ? row.x : p0.pxc;
+      const dm = obstacleDims(o.kind, o.w, lat), ww = Math.max(2, Math.round(dm.w)), hh = Math.max(1, Math.round(dm.h));
+      const py = row ? GROUND + obstacleSlide(dz, PLAYER_DZ) * (H - GROUND + hh) : p0.py;
+      const img = obstCanvas(o.kind, night ? NIGHT.map((c, i) => (i === 0 ? G[0] : c)) : Q), small = ww < img.width * 0.5;
+      const sx = Math.round(cxp + o.x * lat - ww / 2), sy = Math.round(py) - hh;
+      sprites.push({ k: Math.max(p0.k + 0.05, meK + 0.01), draw: () => {
+        if (!small) { x.drawImage(img, sx, sy, ww, hh); return; }
+        // 遠處：細節縮不下去會閃 → 畫成穩定的剪影（暗框＋亮心），大小照樣連續
+        x.fillStyle = Q[3]; if (o.kind === 'cones') { const n = 5, cw = Math.max(1, Math.round(ww * 7 / img.width)); for (let i = 0; i < n; i++) { const cx0 = sx + Math.round((ww - cw) * i / (n - 1)); for (let r = 0; r < hh; r++) { const rw = Math.max(1, Math.round(cw * (r + 1) / hh)); x.fillRect(cx0 + Math.floor((cw - rw) / 2), sy + r, rw, 1); } } return; }
+        x.fillRect(sx, sy, ww, hh); if (ww >= 4 && hh >= 3) { x.fillStyle = Q[o.kind === 'tyres' ? 2 : 1]; x.fillRect(sx + 1, sy + 1, ww - 2, hh - 2); }
+      } });
+    }
   }
   for (const c of v.cars) {
     const isMe = !!v.me && c.id === v.me.id, p0 = place(c); if (!p0) continue;
