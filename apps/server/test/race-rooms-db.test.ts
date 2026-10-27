@@ -49,6 +49,16 @@ describe('race rooms over the race authority (real schema)', () => {
     expect(_raceRooms.has(id)).toBe(false); expect(inRace(a) && inRace(b)).toBe(true);
     expect(pub.some((m) => m.t === 'rrace.started')).toBe(true); // 房間開的比賽一定 NOTIFY（成員可能在別的執行個體）
   });
+  it('ready once: host changing laps keeps everyone ready and the race still starts (no second ready)', async () => {
+    const a = await user('O1', '雞'), b = await user('O2', '鴨');
+    const id = await createRoom(a, 'tw1', 1);
+    onRaceBus({ t: 'rrace.rjoin', inst: 'i1', room: id, user: b }); await new Promise((r) => setTimeout(r, 100));
+    onRaceBus({ t: 'rrace.rready', inst: 'i1', room: id, user: a, ready: true }); onRaceBus({ t: 'rrace.rready', inst: 'i1', room: id, user: b, ready: true });
+    onRaceBus({ t: 'rrace.rconf', inst: 'i1', room: id, user: a, laps: 2 });
+    const v = last('rrace.room').room; expect(v.laps).toBe(2); expect(v.members.every((m: any) => m.ready)).toBe(true); expect(v.countdown_ms).toBeGreaterThan(ROOM_COUNTDOWN_MS - 200);
+    stepRaces(Date.now() + ROOM_COUNTDOWN_MS + 10); await new Promise((r) => setTimeout(r, 300));
+    expect(last('rrace.roomgone')).toMatchObject({ room: id, code: 'STARTED' }); expect(last('rrace.started').laps).toBe(2);
+  });
   it('host leaves → host moves to the remaining member; last leaves → room gone', async () => {
     const a = await user('A'), b = await user('B');
     const id = await createRoom(a, 'tw1', 3);

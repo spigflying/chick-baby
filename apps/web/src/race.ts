@@ -70,10 +70,10 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   let seq = 0, lastSent = '', sendTimer = 0; let lobbyPlayers: string[] = [], lobbyStarts = 0;
   /** 單人出發的賽道跟著目前錦標賽站（手動點了別條賽道就不跟） */
   let followCup = true;
-  /** v27 賽車房：開房表單、按了準備等確認、表單裡選的賽道／圈數 */
+  /** v27 賽車房：開房表單、表單裡選的賽道／圈數 */
   const roomLists: RoomLists = new Map(); let friendRooms: FriendRoom[] = [], friendAsked = false;
   const askRooms = () => { if (!live?.room && live?.send({ type: 'room.list' })) { roomLists.clear(); friendAsked = true; } };
-  let roomForm = false, readyAsk = false, roomTrack = '', roomLaps = 3;
+  let roomForm = false, roomTrack = '', roomLaps = 3;
   /** 斷線重連中：要接回的比賽（等伺服器回 race.started(resumed)／race.ended／race.gone） */
   let resuming: SavedRace | null = null, resumeT = 0;
 
@@ -168,10 +168,9 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
   const roomLeft = (r: any) => r.countdown_ms === null ? null : Math.max(0, Math.ceil((r.countdown_ms - (Date.now() - r.at)) / 1000));
   function renderRoom(head: string) {
     const r = live!.room, my = r.members.find((m: any) => m.user === me.user.id), host = r.host === me.user.id, t = trackById(r.track)!, left = roomLeft(r);
-    const top = readyAsk ? `<button id="rrok" class="big race-top-btn">確定準備</button><button id="rrno" class="big race-top-btn">先不要</button>`
-      : `<button id="rrlv" class="big race-top-btn">離開房間</button>${my?.ready ? '<button id="rrun" class="big race-top-btn">取消準備</button>' : '<button id="rrdy" class="big race-top-btn">準備</button>'}`;
+    const top = `<button id="rrlv" class="big race-top-btn">離開房間</button>${my?.ready ? '<button id="rrun" class="big race-top-btn">取消準備</button>' : '<button id="rrdy" class="big race-top-btn">準備</button>'}`;
     const ready = r.members.filter((m: any) => m.ready).length;
-    body.innerHTML = `<div class="race-top-row">${top}</div>${readyAsk ? '<p class="room-ask">確定準備好了嗎？全員準備後 3 秒開跑。</p>' : ''}` + head +
+    body.innerHTML = `<div class="race-top-row">${top}</div>` + head +
       `<h3>${esc(r.members.find((m: any) => m.host)?.name ?? '')} 的賽車房 <span class="muted">${r.members.length}/8 人</span></h3>
       ${left !== null ? `<div class="room-cd"><span>全員準備！</span><b id="rcd">${left}</b><span>秒後開跑</span></div>` : ''}
       <div class="room-cfg">${host ? `<label class="room-field">賽道 <select id="rct">${trackOpts(r.track)}</select></label><label class="room-field">圈數 <select id="rcl">${lapOpts(r.laps)}</select></label>`
@@ -181,10 +180,8 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
       <ul class="room-members">${r.members.map((m: any) => `<li class="${m.ready ? 'ok' : ''} ${m.online ? '' : 'off'}"><span>${esc(m.name)}${m.host ? ' <span class="room-tag">房主</span>' : ''}${m.user === me.user.id ? ' <span class="muted">（你）</span>' : ''}</span><span class="room-st">${!m.online ? '斷線中…' : m.ready ? '✔ 準備好了' : '等待中'}</span></li>`).join('')}</ul>
       <p class="muted">房間 ${Math.ceil(r.expires_ms / 60000)} 分鐘內沒有動作會自動關閉。房主離開時交給最早加入的人。</p>`;
     const on = (id: string, f: () => void) => { const el = body.querySelector(id) as HTMLElement | null; if (el) el.onclick = f; };
-    on('#rrlv', () => { live?.send({ type: 'room.leave' }); live!.room = null; readyAsk = false; msg.textContent = '已離開房間'; renderPanel(); });
-    on('#rrdy', () => { readyAsk = true; renderPanel(); });
-    on('#rrno', () => { readyAsk = false; renderPanel(); });
-    on('#rrok', () => { readyAsk = false; live?.send({ type: 'room.ready', ready: true }); });
+    on('#rrlv', () => { live?.send({ type: 'room.leave' }); live!.room = null; msg.textContent = '已離開房間'; renderPanel(); });
+    on('#rrdy', () => live?.send({ type: 'room.ready', ready: true })); // 按一次就準備好，不再跳確認
     on('#rrun', () => live?.send({ type: 'room.ready', ready: false }));
     const ct = body.querySelector('#rct') as HTMLSelectElement | null; if (ct) ct.onchange = () => live?.send({ type: 'room.config', track: ct.value });
     const cl = body.querySelector('#rcl') as HTMLSelectElement | null; if (cl) cl.onchange = () => live?.send({ type: 'room.config', laps: Number(cl.value) });
@@ -226,10 +223,10 @@ export function racePage(root: HTMLElement, live: Live | null, me: any, toast: (
     if (m.type === 'race.gone' && resuming && m.race_id === resuming.id) return gone('斷線太久，這場比賽算棄賽了');
     if (m.type === 'race.ended' && !race && resuming && m.race_id === resuming.id) // 重新整理後才收到結果：沒有畫面資料，只顯示結果
       race = { id: m.race_id, inst: resuming.inst, track: m.track ?? sel, laps: 0, len: 1, cars: [], snaps: [], ended: null, pickups: [], obstacles: [] };
-    if (m.type === 'room.state') { roomForm = false; if (live?.room?.game === 'race' && trackById(live.room.track) && sel !== live.room.track) { sel = live.room.track; followCup = false; } if (live?.room?.members?.find((x: any) => x.user === me.user.id)?.ready) readyAsk = false; if (mode === 'menu') { msg.textContent = live?.room?.countdown_ms != null ? '全員準備，即將開跑！' : '賽車房：大家按「準備」就開跑'; renderPanel(); } }
+    if (m.type === 'room.state') { roomForm = false; if (live?.room?.game === 'race' && trackById(live.room.track) && sel !== live.room.track) { sel = live.room.track; followCup = false; } if (mode === 'menu') { msg.textContent = live?.room?.countdown_ms != null ? '全員準備，即將開跑！' : '賽車房：大家按「準備」就開跑'; renderPanel(); } }
     if (m.type === 'room.list') { friendRooms = mergeRoomList(roomLists, m.inst, m.rooms); if (mode === 'menu' && tab === 'cup' && !live?.room && !roomForm) renderPanel(); }
     if (m.type === 'hello' || m.type === 'room.gone') askRooms();
-    if (m.type === 'room.gone') { readyAsk = false; if (m.code !== 'STARTED' && mode === 'menu') { msg.textContent = ({ EXPIRED: '房間閒置太久，已經關閉', ROOM_CLOSED: '房間已經關了', LEFT: '已離開房間', EMPTY: '房間已關閉' } as any)[m.code] ?? '房間已關閉'; renderPanel(); } }
+    if (m.type === 'room.gone') { if (m.code !== 'STARTED' && mode === 'menu') { msg.textContent = ({ EXPIRED: '房間閒置太久，已經關閉', ROOM_CLOSED: '房間已經關了', LEFT: '已離開房間', EMPTY: '房間已關閉' } as any)[m.code] ?? '房間已關閉'; renderPanel(); } }
     if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('room.')) { toast(ERR[m.code] ?? m.code); msg.textContent = ERR[m.code] ?? m.code; }
     if (m.type === 'wallet.updated') { coins = m.balance; if (tab === 'garage' && mode === 'menu') renderPanel(); }
     if (m.type === 'error' && typeof m.for === 'string' && m.for.startsWith('race.')) { mode = 'menu'; setMatch(false); msg.textContent = ERR[m.code] ?? m.code; toast(ERR[m.code] ?? m.code); renderPanel(); }

@@ -1,7 +1,7 @@
 /**
  * v27 賽車房（純狀態機，不碰網路／資料庫；racing.ts 負責傳送與開賽）。
  * 房主開房、選賽道與圈數；好友收到邀請後加入；每個人按「準備」；全員準備（且都在線）→ 3 秒倒數 → 開賽。
- * 任何變動（有人進出、改賽道／圈數、取消準備、斷線）都會取消倒數。
+ * 任何變動（有人進出、改賽道／圈數、取消準備、斷線）都會取消倒數；但「準備」只要按一次，除非自己取消，不會被重置。
  */
 export const ROOM_IDLE_MS = 10 * 60_000, ROOM_DROP_MS = 30_000, ROOM_COUNTDOWN_MS = 3000;
 export interface RoomMember { user: string; name: string; ready: boolean; online: boolean; joinedAt: number; offAt: number | null }
@@ -39,17 +39,17 @@ export function roomConfig(r: RaceRoom, user: string, track: string | null, laps
   let changed = false;
   if (track && track !== r.track) { r.track = track; changed = true; }
   if (laps && laps !== r.laps) { r.laps = laps; changed = true; }
-  if (changed) for (const m of r.members) m.ready = false; // 條件變了：大家重新確認
+  if (changed) r.countdownAt = null; // 條件變了：保留大家的準備，但倒數重新從 3 秒算，讓大家看得到新條件
   touch(r, now); recount(r, now); return null;
 }
 export function roomReady(r: RaceRoom, user: string, ready: boolean, now: number): string | null {
   const m = r.members.find((x) => x.user === user); if (!m) return 'NOT_IN_ROOM'; if (r.closed) return 'ROOM_CLOSED';
   m.ready = ready; touch(r, now); recount(r, now); return null;
 }
-/** 斷線：標成離線、取消準備；ROOM_DROP_MS 內回來（roomJoin）可以接回 */
+/** 斷線：標成離線（保留準備）；ROOM_DROP_MS 內回來（roomJoin）可以接回 */
 export function roomDrop(r: RaceRoom, user: string, now: number) {
   const m = r.members.find((x) => x.user === user); if (!m || !m.online) return;
-  m.online = false; m.offAt = now; m.ready = false; recount(r, now);
+  m.online = false; m.offAt = now; recount(r, now); // 準備保留：短暫斷線回來不用再按一次（離線時不會開跑）
 }
 /** 每次迴圈：清掉斷線太久的人、閒置太久關房、倒數到了回傳 'start' */
 export function roomTick(r: RaceRoom, now: number): 'start' | null {

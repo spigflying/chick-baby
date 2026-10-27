@@ -10,12 +10,12 @@ const NOTICE: Record<string, string> = { TOO_TIRED: '寵物太累了，沒辦法
 export function stairsRoomPage(root: HTMLElement, live: Live | null, myId: string, goHome: () => void, toast: (s: string) => void): () => void {
   root.innerHTML = `<main class="page nosel-btns"><div class="panel sroom-page" id="srp"></div></main>`;
   const el = root.querySelector('#srp') as HTMLElement;
-  let ask = false, wentHome = false, max = 6, shown = false;
+  let wentHome = false, max = 6, shown = false;
   const left = (r: any) => r.countdown_ms === null ? null : Math.max(0, Math.ceil((r.countdown_ms - (Date.now() - r.at)) / 1000));
   function render() {
     const r = live?.room;
     if (!r || r.game !== 'stairs') {
-      shown = false; ask = false;
+      shown = false;
       el.innerHTML = `<div class="race-top-row"><button data-a="home" class="big race-top-btn">回我的家</button></div><h3>下樓梯房</h3><p class="muted">你現在不在任何下樓梯房。到寵物頁的「樓梯」→「開房間（邀朋友）」開一間，或等朋友邀請。</p>`;
       return;
     }
@@ -23,9 +23,8 @@ export function stairsRoomPage(root: HTMLElement, live: Live | null, myId: strin
     const my = r.members.find((m: any) => m.user === myId), l = left(r), ready = r.members.filter((m: any) => m.ready).length;
     if (l !== null && !wentHome) { wentHome = true; window.setTimeout(() => { if (location.pathname === '/stairs-room') goHome(); }, Math.max(0, (l - 1) * 1000)); }
     if (l === null) wentHome = false;
-    const top = ask ? `<button data-a="ok" class="big race-top-btn">確定準備</button><button data-a="no" class="big race-top-btn">先不要</button>`
-      : `<button data-a="leave" class="big race-top-btn">離開房間</button>${my?.ready ? '<button data-a="unready" class="big race-top-btn">取消準備</button>' : '<button data-a="ready" class="big race-top-btn">準備</button>'}`;
-    el.innerHTML = `<div class="race-top-row">${top}</div>${ask ? '<p class="room-ask">確定準備好了嗎？全員準備後 3 秒開始。</p>' : ''}
+    const top = `<button data-a="leave" class="big race-top-btn">離開房間</button>${my?.ready ? '<button data-a="unready" class="big race-top-btn">取消準備</button>' : '<button data-a="ready" class="big race-top-btn">準備</button>'}`;
+    el.innerHTML = `<div class="race-top-row">${top}</div>
       <h3 class="sroom-title">「${esc(r.members.find((m: any) => m.host)?.name ?? '')}」的下樓梯房 <span class="muted">${r.members.length}/${max} 隻</span></h3>
       ${l !== null ? `<div class="room-cd"><span>全員準備！</span><b data-cd>${l}</b><span>秒後開始</span></div>` : ''}
       <h3>成員 <span class="muted">準備 ${ready}/${r.members.length}</span></h3>
@@ -38,9 +37,7 @@ export function stairsRoomPage(root: HTMLElement, live: Live | null, myId: strin
     const a = (e.target as HTMLElement).closest('[data-a]')?.getAttribute('data-a'); if (!a) return;
     if (a === 'home') { goHome(); return; }
     if (a === 'leave') { live?.send({ type: 'room.leave' }); if (live) live.room = null; goHome(); return; }
-    if (a === 'ready') ask = true;
-    else if (a === 'no') ask = false;
-    else if (a === 'ok') { ask = false; live?.send({ type: 'room.ready', ready: true }); }
+    if (a === 'ready') live?.send({ type: 'room.ready', ready: true }); // 按一次就準備好
     else if (a === 'unready') live?.send({ type: 'room.ready', ready: false });
     render();
   });
