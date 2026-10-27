@@ -76,7 +76,7 @@ async function page() {
   const w = window as any;
   w.__start = (track: string) => {
     sim = createRace(5, track, fillField([{ id: 'b', name: 'benson', car: 'muscle', color: 1, parts: prof.parts }, { id: 'me', name: 'racer', car: 'falcon', color: 0, parts: prof.parts as any }]));
-    emit({ type: 'race.started', race_id: 'r1', track, seed: 5, cars: sim.cars.map((c: any) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, pet: c.ai ? null : c.id === 'me' ? 'chicken' : 'duck' })), laps: sim.laps, len: sim.len, tick_rate: 20, pickups: sim.pickups.map((p: any) => [p.id, p.z, p.x]) });
+    emit({ type: 'race.started', race_id: 'r1', track, seed: 5, cars: sim.cars.map((c: any) => ({ id: c.id, name: c.name, ai: c.ai, car: c.car, color: c.color, pet: c.ai ? null : c.id === 'me' ? 'chicken' : 'duck' })), laps: sim.laps, len: sim.len, tick_rate: 20, pickups: sim.pickups.map((p: any) => [p.id, p.z, p.x]), obstacles: (sim.obstacles ?? []).map((o: any) => [o.id, o.kind, o.z, o.x, o.w, o.dz]) }); // 跟伺服器 startedMsg 同格式
     const snap = () => emit({ type: 'race.snap', race_id: 'r1', tick: sim.tick, countdown: sim.countdown, cars: sim.cars.map(snapCar), pk: snapPickups(sim) });
     timer = window.setInterval(() => { stepRace(sim); stepRace(sim); snap(); }, 100);
   };

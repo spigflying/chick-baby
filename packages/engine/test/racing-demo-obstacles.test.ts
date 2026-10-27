@@ -1,9 +1,9 @@
-// race-demo-obstacles：路障（只在試玩頁）：種子決定、留通道、不放彎中、難度越高越多、撞到只減速、AI 會閃
+// 路障（race-demo-obstacles → 正式版）：種子決定、留通道、不放彎中、難度越高越多、撞到只減速、AI 會閃
 import { describe, it, expect } from 'vitest';
 import {
   registerMapFirstTracks, raceObstacles, obstacleSpotOk, obstacleGap, obstaclesPerLap, obstacleHit, obstacleLevel,
   createRace, stepRace, fillField, trackSegs, trackLength, SEG_LEN, DEMO_HITBOX, DEMO_CAR_W, OBST_MAX_CURVE, OBST_MIN_GAP,
-  OBSTACLE_SPECS, condition, TRACKS, type RaceState,
+  OBSTACLE_SPECS, HIT_OBSTACLE, condition, TRACKS, type RaceState,
 } from '../src';
 
 const MF = registerMapFirstTracks();
@@ -39,9 +39,23 @@ describe('obstacle placement', () => {
     expect(cnt[0]).toBeLessThan(cnt[1]); expect(cnt[1]).toBeLessThan(cnt[2]);
     for (const t of MF) for (const s of SEEDS.slice(0, 10)) expect(raceObstacles(s, t.id).length).toBe(obstaclesPerLap(t.id));
   });
-  it('production races have no obstacles', () => {
-    const s = createRace(1, MF[0].id, fillField([{ id: 'me', name: 'me' }]));
-    expect(s.obstacles).toBeUndefined();
+  it('production races: every track gets seeded obstacles, identical for any entrant list (server, clients, resume)', () => {
+    for (const t of TRACKS) {
+      const a = createRace(4242, t.id, fillField([{ id: 'me', name: 'me' }]));
+      const b = createRace(4242, t.id, fillField([{ id: 'x', name: 'x' }, { id: 'y', name: 'y' }, { id: 'z', name: 'z' }]), 1, 2);
+      expect(a.obstacles!.length).toBeGreaterThanOrEqual(2); expect(a.obstacles!.length).toBeLessThanOrEqual(obstaclesPerLap(t.id));
+      expect(b.obstacles).toEqual(a.obstacles); expect(raceObstacles(4242, t.id)).toEqual(a.obstacles);
+      expect(JSON.parse(JSON.stringify(a.obstacles))).toEqual(a.obstacles); // 走 JSON（跨實例 relay）不變
+      for (const o of a.obstacles!) { expect(obstacleSpotOk(t.id, o.z, a.len)).toBe(true); expect(obstacleGap(o)).toBeGreaterThan(0.5); }
+    }
+  });
+  it('production (no hitbox): every human gets the server-side slowdown, no damage', () => {
+    const s = createRace(9, TRACKS[0].id, fillField([{ id: 'p1', name: 'p1' }, { id: 'p2', name: 'p2' }]));
+    s.countdown = 0; s.pickups = []; const o = { id: 0, kind: 'tyres' as const, z: 400, ...OBSTACLE_SPECS.tyres, x: 0 }; s.obstacles = [o];
+    const hs = s.cars.filter((c) => !c.ai); for (const c of s.cars) if (c.ai) { c.z = -900; c.finishedTick = 0; }
+    hs.forEach((c, i) => { c.z = 390 - i * 40; c.x = 0; c.speed = 100; });
+    const v0: number[] = []; for (let i = 0; i < 200 && hs.some((c) => !c.obN); i++) { hs.forEach((c, j) => { if (!c.obN) { v0[j] = c.speed; c.x = 0; } }); stepRace(s); }
+    for (const c of hs) { expect(c.obN).toBe(1); expect(c.damage).toBe(0); expect(c.hit).toBe(0); expect(c.speed).toBeLessThan(v0[hs.indexOf(c)] * 0.6); expect(c.evK).toBe(HIT_OBSTACLE); }
   });
 });
 

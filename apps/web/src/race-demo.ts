@@ -1,3 +1,4 @@
+import { bumpSound } from './race-obstacles';
 /**
  * 離線單人賽車試玩：純瀏覽器引擎＋本地 AI，不打 API、不寫庫、不存檔。
  * 入口：/race-demo.html（獨立於 main.ts，關門時段也可開）。
@@ -25,17 +26,6 @@ const ME_ID = 'me';
 const ME_NAME = '試玩';
 const STOCK_CAR = 'falcon';
 const STOCK_COLOR = 0;
-// race-demo-obstacles：撞路障的音效（悶悶的「咚」：低頻方波往下掉＋一點雜音，和撞車聲不同）
-let obAc: AudioContext | null = null;
-function bumpSound() {
-  try {
-    obAc = obAc ?? new AudioContext(); const ac = obAc, t = ac.currentTime;
-    const o = ac.createOscillator(), g = ac.createGain(); o.type = 'square';
-    o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.16);
-    g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
-    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.21);
-  } catch { /* 沒有音效裝置就算了 */ }
-}
 let lastObT = -1;
 
 function boot() {

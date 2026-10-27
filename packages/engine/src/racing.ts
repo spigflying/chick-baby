@@ -257,7 +257,7 @@ export interface RaceCar {
 export const condition = (c: { damage: number }) => Math.max(0, Math.round(100 - c.damage));
 /** 完美度對極速的影響：每少 1% 就少 0.4% 極速（最低 60%） */
 export const condFactor = (damage: number) => Math.max(0.6, 1 - 0.004 * damage);
-export interface RaceState { seed: number; track: string; tick: number; laps: number; len: number; cars: RaceCar[]; pickups: Pickup[]; rng: Rng; over: boolean; maxTicks: number; countdown: number; difficulty: number; /** race-demo-hitbox：只有試玩頁設 */ hitbox?: Hitbox; /** race-demo-obstacles：路障（只有試玩頁設；正式比賽沒有） */ obstacles?: Obstacle[] }
+export interface RaceState { seed: number; track: string; tick: number; laps: number; len: number; cars: RaceCar[]; pickups: Pickup[]; rng: Rng; over: boolean; maxTicks: number; countdown: number; difficulty: number; /** race-demo-hitbox：只有試玩頁設 */ hitbox?: Hitbox; /** 路障（createRace 依種子產生；伺服器與所有客戶端同一份） */ obstacles?: Obstacle[] }
 export interface Entrant { id: string; name: string; ai?: boolean; car?: string; parts?: Partial<Parts>; color?: number; skill?: number }
 const NO_INPUT: RaceInput = { gas: false, brake: false, left: false, right: false, nitro: false };
 
@@ -290,7 +290,7 @@ export function createRace(seed: number, trackId: string, entrants: Entrant[], d
       aiLane: -0.55 + nextFloat(rng) * 1.1, aiSkill: form, aiRecover: 0,
       aiNitroAt: [0.08 + nextFloat(rng) * 0.2, 0.45 + nextFloat(rng) * 0.2, 0.8 + nextFloat(rng) * 0.12].map((f) => f * len * t.laps), hit: 0, hits: 0 };
   });
-  return { seed, track: trackId, tick: 0, laps: t.laps, len, cars, pickups: racePickups(seed, trackId, t.laps), rng, over: false, maxTicks: RACE_TICK_RATE * 60 * 9, countdown: RACE_TICK_RATE * 3, difficulty };
+  return { seed, track: trackId, tick: 0, laps: t.laps, len, cars, pickups: racePickups(seed, trackId, t.laps), obstacles: raceObstacles(seed, trackId), rng, over: false, maxTicks: RACE_TICK_RATE * 60 * 9, countdown: RACE_TICK_RATE * 3, difficulty };
 }
 // ---------------- 路上氮氣道具（nitro pickup） ----------------
 /** 每圈 1–2 個（前半圈必有、後半圈 50%）；隨機車道；不放在彎道（前後 4 段內彎度 ≥ PICKUP_MAX_CURVE）與起終點前後 PICKUP_START_GAP 公尺。

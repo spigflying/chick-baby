@@ -6,7 +6,7 @@ import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
 import { fastForwardRace, inRace, raceBusy, raceLabel, startRaceLoop } from '../src/racing';
 import { randomUUID } from 'node:crypto';
-import { partPrice, prizeFor, RACE_SLOTS, seasonOf, setRaceInput, TRACKS, TRACK_VERSION } from '@chick/engine';
+import { partPrice, prizeFor, raceObstacles, RACE_SLOTS, seasonOf, setRaceInput, TRACKS, TRACK_VERSION } from '@chick/engine';
 import { CLOSING_GUARD_MS, RACE_DROP_MS, capRaceTicks, stepRaces } from '../src/racing';
 import { handleClosed } from '../src/closing';
 
@@ -125,7 +125,10 @@ describe('racing (server) v5', () => {
     const an = await wc.wait((m) => m.type === 'arena.notice'); expect(an.code).toBe('RACE_BUSY');
     wb.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: true }));
     wc.ws.send(JSON.stringify({ type: 'race.reply', invite: inv.invite, accept: false }));
-    const st = await wa.wait((m) => m.type === 'race.started'); await wb.wait((m) => m.type === 'race.started');
+    const st = await wa.wait((m) => m.type === 'race.started'); const stb = await wb.wait((m) => m.type === 'race.started');
+    // 路障：兩位玩家拿到同一份，而且等於用種子算出來的（伺服器權威、客戶端一致）
+    const obs = raceObstacles(st.seed, st.track).map((o) => [o.id, o.kind, o.z, o.x, o.w, o.dz]);
+    expect(obs.length).toBeGreaterThanOrEqual(2); expect(st.obstacles).toEqual(obs); expect(stb.obstacles).toEqual(obs);
     const humans = st.cars.filter((x: any) => !x.ai).map((x: any) => x.id).sort();
     expect(humans).toEqual([a.id, b.id].sort()); expect(st.cars.length).toBe(20);
     const ev = await wc.wait((m) => m.type === 'race.event' && m.kind === 'start'); expect(ev.users.sort()).toEqual(humans);
@@ -232,7 +235,7 @@ describe('racing: disconnects, bus outage, closing', () => {
     const w2 = await openWs(a.cookie);
     w2.ws.send(JSON.stringify({ type: 'race.resume', race_id: st.race_id, inst: st.inst }));
     const rs = await w2.wait((m) => m.type === 'race.started');
-    expect(rs.resumed).toBe(true); expect(rs.race_id).toBe(st.race_id); expect(rs.cars.length).toBe(RACE_SLOTS);
+    expect(rs.resumed).toBe(true); expect(rs.race_id).toBe(st.race_id); expect(rs.cars.length).toBe(RACE_SLOTS); expect(rs.obstacles).toEqual(st.obstacles); expect(rs.obstacles.length).toBeGreaterThan(0); // 重連後路障一樣
     await w2.wait((m) => m.type === 'race.snap' && m.race_id === st.race_id);
     await fastForwardRace(st.race_id, drive(a.id));
     const end = await w2.wait((m) => m.type === 'race.ended');

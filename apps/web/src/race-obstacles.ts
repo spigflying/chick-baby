@@ -44,3 +44,16 @@ export function obstacleDims(kind: ObstacleKind, wUnits: number, lat: number) {
 }
 /** 已經過了車頭：從底線往下滑出畫面（0＝貼底線，1＝完全出去），連續不跳 */
 export function obstacleSlide(dz: number, playerDz: number) { const a = playerDz + 0.75, b = 0.5; return Math.max(0, Math.min(1, (a - dz) / (a - b))); }
+
+// race-demo-obstacles：撞路障的音效（悶悶的「咚」：低頻方波往下掉＋一點雜音，和撞車聲不同）
+let obAc: AudioContext | null = null;
+export function bumpSound() {
+  try {
+    if (localStorage.getItem('chick.mute') === '1') return;
+    obAc = obAc ?? new AudioContext(); const ac = obAc, t = ac.currentTime;
+    const o = ac.createOscillator(), g = ac.createGain(); o.type = 'square';
+    o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(55, t + 0.16);
+    g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    o.connect(g).connect(ac.destination); o.start(t); o.stop(t + 0.21);
+  } catch { /* 沒有音效裝置就算了 */ }
+}

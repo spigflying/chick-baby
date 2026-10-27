@@ -33,22 +33,27 @@ function botInput(s: any, me: any) {
   return { gas: me.speed < safe, brake: me.speed > safe + 6 * X, left, right, nitro: straight && me.nitroT === 0 && me.speed > 30 * X && s.tick % 40 === 0 };
 }
 
-const tracks = [...registerMapFirstTracks(), ...[TRACKS[0], TRACKS[7], TRACKS[15]]];
+const PROD = process.env.PROD === '1'; // 正式版：16 條正式賽道、沒有試玩碰撞盒、路障由 createRace 依種子產生
+const tracks = PROD ? [...TRACKS] : [...registerMapFirstTracks(), ...[TRACKS[0], TRACKS[7], TRACKS[15]]];
+const setup = (s: any, t: any) => { if (PROD) { if (!OBST) s.obstacles = []; } else { s.hitbox = DEMO_HITBOX; s.obstacles = OBST ? raceObstacles(s.seed, t.id) : undefined; } };
+let stuck = 0, dnf = 0;
 const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
 for (const t of tracks) {
   const ranks: number[] = [], times: number[] = [], aiT: number[] = []; let meHits = 0, aiHits = 0, nOb = 0;
   for (let k = 0; k < N; k++) {
     const s = createRace(100 + k, t.id, fillField([{ id: 'me', name: 'me', parts: STOCK_PARTS, car: 'falcon' }]));
-    s.hitbox = DEMO_HITBOX; if (OBST) s.obstacles = raceObstacles(s.seed, t.id); nOb += s.obstacles?.length ?? 0;
+    setup(s, t); nOb += s.obstacles?.length ?? 0;
     const me = s.cars.find((c: any) => c.id === 'me');
     while (!s.over) { setRaceInput(s, 'me', botInput(s, me)); stepRace(s); }
     ranks.push(raceRanking(s).indexOf(me) + 1); times.push(me.finishedTick === null ? NaN : (me.finishedTick - 60) / RACE_TICK_RATE);
     meHits += me.obN ?? 0;
   }
   for (let k = 0; k < 3; k++) {
-    const s = createRace(500 + k, t.id, fillField([])); s.hitbox = DEMO_HITBOX; if (OBST) s.obstacles = raceObstacles(s.seed, t.id);
-    while (!s.over) stepRace(s);
+    const s = createRace(500 + k, t.id, fillField([])); setup(s, t); const slow = new Map<string, number>();
+    while (!s.over) { stepRace(s); if (s.countdown === 0) for (const c of s.cars) if (c.finishedTick === null) { const n = c.speed < 5 * X ? (slow.get(c.id) ?? 0) + 1 : 0; slow.set(c.id, n); if (n === RACE_TICK_RATE * 3) stuck++; } }
+    dnf += s.cars.filter((c: any) => c.finishedTick === null).length;
     for (const c of s.cars) { aiHits += c.obN ?? 0; if (c.finishedTick !== null) aiT.push((c.finishedTick - 60) / RACE_TICK_RATE); }
   }
   console.log(JSON.stringify({ id: t.id, obsPerRace: nOb / N, meRace: +avg(times).toFixed(1), top3: ranks.filter((r) => r <= 3).length / N, ranks: ranks.join(','), meHitsPerRace: +(meHits / N).toFixed(2), aiWinner: +Math.min(...aiT).toFixed(1), aiMedian: +aiT.sort((a, b) => a - b)[aiT.length >> 1].toFixed(1), aiLast: +Math.max(...aiT).toFixed(1), aiFin: aiT.length + '/' + 3 * 19, aiHitsPerCarRace: +(aiHits / 57).toFixed(2) }));
 }
+console.log(JSON.stringify({ aiStuck3s: stuck, aiDnf: dnf }));

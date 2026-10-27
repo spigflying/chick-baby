@@ -6,7 +6,7 @@ const W = DEMO_HITBOX.dx, D = DEMO_HITBOX.dz, X = SPEED_X;
 export function pair(o: { dx: number; dz: number; va: number; vb: number; aMe?: boolean; hitA?: number; hitB?: number; n?: number; demo?: boolean }) {
   const s: RaceState = createRace(1, TRACKS[0].id, fillField([{ id: 'me', name: 'me' }]));
   if (o.demo !== false) s.hitbox = DEMO_HITBOX;
-  s.countdown = 0; s.pickups = [];
+  s.countdown = 0; s.pickups = []; s.obstacles = []; // 只測車車碰撞
   const me = s.cars.find((c) => c.id === 'me')!, ai = s.cars.find((c) => c.ai)!;
   for (const c of s.cars) if (c !== me && c !== ai) { c.z = -500; c.finishedTick = 0; }
   const [a, b] = o.aMe === false ? [ai, me] : [me, ai];

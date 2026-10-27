@@ -1,5 +1,5 @@
 /** 賽車模式繪圖：120×100 偽 3D 道路（Game Boy 四階綠），原創像素跑車（從車尾看）。 */
-import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, ROAD_WIDEN, lapped as isLapped, DEMO_CAR_W, segCurvature, trackPathXY, type Track, type ObstacleKind } from '@chick/engine';
+import { SEG_LEN, roadside, FLIP_TICKS, HIT_OBJECT, HIT_OBSTACLE, trackSegs, trackById, NITRO_PER_RACE, SPEED_X, ROAD_WIDEN, lapped as isLapped, DEMO_CAR_W, segCurvature, trackPathXY, type Track, type ObstacleKind } from '@chick/engine';
 import { carBodyH, carPixels, LODS, PLAYER_W, exhaustsOf, DESIGN_W, EXHAUST_Y, type CarLook } from './race-cars';
 import { pickupDims } from './race-pickup';
 import { OBST_ART, obstacleDims, obstacleSlide } from './race-obstacles';
@@ -251,7 +251,7 @@ function flashOf(img: HTMLCanvasElement) { let f = flashCache.get(img); if (f) r
 /** HUD 損傷圖：哪一區在閃（F 前、R 後、S 側），沒有回傳 null */
 function hudZone(me: ViewCar, now: number): { zone: 'f' | 'r' | 's'; on: boolean } | null {
   const h = hitAge(me.id, now, 700); if (!h) return null; const k = fxHit.get(me.id)!; void k;
-  const ev = me.evK ?? 0; return { zone: ev === HIT_FRONT ? 'f' : ev === HIT_BACK ? 'r' : 's', on: Math.floor(h.a * 10) % 2 === 0 };
+  const ev = me.evK ?? 0; if (ev === HIT_OBSTACLE) return null; /* 路障不扣血：損傷圖不閃 */ return { zone: ev === HIT_FRONT ? 'f' : ev === HIT_BACK ? 'r' : 's', on: Math.floor(h.a * 10) % 2 === 0 };
 }
 /** 畫一個畫面。 */
 // ---------------- 寵物上車：每位玩家自己的寵物坐在座艙（電腦車沒有） ----------------
