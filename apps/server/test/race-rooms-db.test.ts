@@ -63,7 +63,7 @@ describe('race rooms over the race authority (real schema)', () => {
     const a = await user('C');
     await expect(createRoom(a, 'tw1', 9)).rejects.toThrow('BAD_REQUEST');
     await expect(createRoom(a, 'jp4', 3)).rejects.toThrow();
-    const id = await createRoom(a, 'tw1', undefined); expect(_raceRooms.get(id)!.laps).toBe(3);
+    const id = await createRoom(a, 'tw1', undefined); expect(_raceRooms.get(id)!.laps).toBe(4); // default = track laps (tw1 = 4)
     const n = sent.length; onRaceBus({ t: 'rrace.rleave', inst: 'other', room: id, user: a }); expect(sent.length).toBe(n);
   });
   it('room race pays humans 150/100 (top 3 among humans), custom laps: no points / best time', async () => {
