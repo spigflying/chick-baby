@@ -45,15 +45,25 @@ export const rankText = (r: number) => `第 ${r} 名`;
 /** 名字是「寵物名（暱稱）」，結算畫面很窄，只留寵物名。 */
 const petOnly = (n: string) => n.split('（')[0];
 const causeText = (p: MultiResultRow) => p.cause === 'left' ? '離開' : p.cause === 'hp' ? '沒血了' : p.cause === 'fell' ? '掉下去' : '';
-export interface MultiResultRow { user_id: string; name: string; num: number; rank: number; floor: number; coins: number; cause: string | null }
+export interface MultiResultRow { user_id: string; name: string; num: number; rank: number; floor: number; coins: number; cause: string | null; survived_ms?: number; hp?: number; max_hp?: number }
+/** 每隻的這局資訊（伺服器算的；舊伺服器沒送就只顯示出局原因） */
+export function multiStatsLine(p: MultiResultRow): string {
+  const a: string[] = [];
+  if (typeof p.survived_ms === 'number') a.push(`撐了 ${(p.survived_ms / 1000).toFixed(1)} 秒`);
+  if (typeof p.hp === 'number' && p.max_hp) a.push(`剩血 ${p.hp}/${p.max_hp}`);
+  const why = causeText(p); if (why) a.push(why);
+  return a.join('・');
+}
 /** 多人局結算畫面：所有人的名次、樓層、怎麼出局，加上自己拿到的金幣（餘額由上方列的 wallet.updated 更新，這裡不顯示，避免先顯示舊值）。 */
-export function multiResultHtml(r: { aborted?: boolean; error?: string; time_up?: boolean; closing?: boolean; players: MultiResultRow[]; me: MultiResultRow | null }): string {
-  if (r.aborted || r.error) return `<div class="mt">— 遊戲中止 —</div><p>${r.error ? '結算失敗，這場不計分。' : '伺服器維護中，這場不計分。'}</p><div class="mi back on">✕ 離開</div>`;
+export function multiResultHtml(r: { aborted?: boolean; error?: string; time_up?: boolean; closing?: boolean; players: MultiResultRow[]; me: MultiResultRow | null }, room = false): string {
+  // 下樓梯房：房間留著，自己按「回到房間」（或離開房間）
+  const foot = room ? '<div class="bfoot rfoot"><div class="mi on" data-rback="1">▶ 回到房間</div><div class="mi" data-rleave="1">✕ 離開房間</div></div>' : '<div class="mi back on">✕ 離開</div>';
+  if (r.aborted || r.error) return `<div class="mt">— 遊戲中止 —</div><p>${r.error ? '結算失敗，這場不計分。' : '伺服器維護中，這場不計分。'}</p>${foot}`;
   const head = r.time_up ? (r.closing ? '— 快關門了，時間到！ —' : '— 時間到！ —') : '— 一起下樓梯 —';
-  // 出局原因另起一行（名字長時不會被截掉）
-  const rows = r.players.map((p) => `<div class="wide brow${p.user_id === r.me?.user_id ? ' mine' : ''}"><span>${p.rank}. ${esc(p.name)}</span><em>${p.floor} 樓 +${p.coins}</em></div>${causeText(p) ? `<div class="bwhy">${esc(causeText(p))}</div>` : ''}`).join('');
+  // 名字自己一行、可以換行（長名字不會蓋到樓層／金幣），下一行是樓層＋金幣＋這局資訊
+  const rows = r.players.map((p) => { const st = multiStatsLine(p); return `<div class="brow2${p.user_id === r.me?.user_id ? ' mine' : ''}"><div class="bn">${p.rank}. ${esc(p.name)}</div><div class="bl"><em>${p.floor} 樓 +${p.coins}</em>${st ? `<small>${esc(st)}</small>` : ''}</div></div>`; }).join('');
   const mine = r.me ? `<div class="wide"><b>${rankText(r.me.rank)}</b><span>${coinHtml(r.me.coins)}</span></div>` : '';
-  return `<div class="board"><div class="mt">${head}</div><div class="blist">${rows}</div>${mine}<div class="mi back on">✕ 離開</div></div>`;
+  return `<div class="board"><div class="mt">${head}</div><div class="blist">${rows}</div>${mine}${foot}</div>`;
 }
 
 /** 其他寵物：在兩個快照之間插值（t = 0 → 上一個、1 → 最新）。新出現的直接用最新位置。 */

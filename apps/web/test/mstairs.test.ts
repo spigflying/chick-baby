@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { inviteHtml, inviterHtml, lerpPos, multiResultHtml, multiStatus, rankText, stairsNotice } from '../src/mstairs';
 import { boardHtml } from '../src/board';
@@ -19,9 +20,19 @@ describe('M2 一起下樓梯 (web helpers)', () => {
       { user_id: 'c', name: 'C寶', num: 3, rank: 3, floor: 3, coins: 5, cause: 'left' },
     ];
     const h = multiResultHtml({ players, me: players[1] });
-    expect(h).toContain('1. A寶（阿）'); expect(h).toContain('<div class="bwhy">掉下去</div>'); expect(h).not.toContain('推'); expect(h).not.toContain('<small'); expect(h).not.toContain('目前'); expect(h).toContain('離開'); expect(h).toContain('12 樓 +8');
-    expect(h).toContain('brow mine'); expect(h).toContain(rankText(2));
+    expect(h).toContain('1. A寶（阿）'); expect(h).toContain('<small>掉下去</small>'); expect(h).not.toContain('推'); expect(h).not.toContain('目前'); expect(h).toContain('離開'); expect(h).toContain('12 樓 +8');
+    expect(h).toContain('brow2 mine'); expect(h).not.toContain('data-rback'); expect(h).toContain(rankText(2));
     expect(multiResultHtml({ aborted: true, players: [], me: null })).toContain('遊戲中止');
+  });
+  it('room result: full long names on their own line, stats line, back-to-room buttons', () => {
+    const L = '超級無敵長長長長長長長長長的寵物名字（超級無敵長的玩家暱稱abcdefghijk）';
+    const players = [{ user_id: 'a', name: L, num: 1, rank: 1, floor: 41, coins: 150, cause: null, survived_ms: 60000, hp: 3, max_hp: 5 },
+      { user_id: 'b', name: 'B', num: 2, rank: 2, floor: 9, coins: 100, cause: 'hp', survived_ms: 23500, hp: 0, max_hp: 4 }];
+    const h = multiResultHtml({ players, me: players[0] }, true);
+    expect(h).toContain(`<div class="bn">1. ${L.replace(/</g, '&#60;')}</div><div class="bl"><em>41 樓 +150</em><small>撐了 60.0 秒・剩血 3/5</small>`);
+    expect(h).toContain('撐了 23.5 秒・剩血 0/4・沒血了'); expect(h).toContain('data-rback'); expect(h).toContain('離開房間');
+    expect(multiResultHtml({ aborted: true, players: [], me: null }, true)).toContain('回到房間');
+    const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8'); expect(css).toMatch(/brow2 \.bn\{overflow-wrap:anywhere/);
   });
   it('other pets are interpolated between snapshots, but not across a teleport', () => {
     expect(lerpPos({ x: 0, y: 10 }, { x: 10, y: 20 }, 0.5)).toEqual({ x: 5, y: 15 });

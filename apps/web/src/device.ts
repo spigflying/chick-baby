@@ -25,6 +25,8 @@ export interface Ctx {
   wallet: () => number; setWallet: (n: number) => void;
   toast: (t: string) => void;
   goHome: () => void;
+  /** 下樓梯房：回到房間頁 */
+  goStairsRoom?: () => void;
 }
 /** 便便位置：從右往左排在地上，一排 16 個，超過就往上疊（玫瑰茶最多 23 個）。 */
 export function poopXY(i: number) { const row = Math.floor(i / 16), col = i % 16; return { x: W - 9 - col * 7, y: GROUND - 5 - (col % 2) * 3 - row * 7 }; }
@@ -580,7 +582,13 @@ export class Device {
         if (t.closest('.back')) this.closeMenu();
         return;
       }
-      if (this.menu === 'result') { this.endStairsView(); return; }
+      if (this.menu === 'result') {
+        const lv = this.ctx.live;
+        if (t.closest('[data-rback]')) { lv.send({ type: 'room.back' }); this.endStairsView(); this.ctx.goStairsRoom?.(); return; }
+        if (t.closest('[data-rleave]')) { lv.send({ type: 'room.leave' }); lv.room = null; this.endStairsView(); return; }
+        if (lv.room?.game === 'stairs' && this.$('.menu [data-rback]')) return; // 房間局：要按「回到房間」或「離開房間」
+        this.endStairsView(); return;
+      }
       if (this.menu === 'board') { if (t.closest('[data-go]')) { this.closeMenu(); this.startStairs(); } else if (t.closest('[data-multi]')) { this.closeMenu(); this.startMulti(); } else if (t.closest('[data-race]')) { this.closeMenu(); this.startRace(); } else if (t.closest('[data-room]')) { this.closeMenu(); this.startRoom(); } else if (t.closest('.back')) this.closeMenu(); return; }
       if (this.menu === 'shop') { const it = t.closest('.mi') as HTMLElement | null; if (!it) return; const i = +it.dataset.i!; if (i < 0) return this.closeMenu(); this.menuSel = i; return void this.shopPick(i); }
       this.closeMenu();
@@ -910,7 +918,7 @@ export class Device {
         this.menu = 'result';
         const el = this.$('.menu'); el.hidden = false;
         if (multi) {
-          el.innerHTML = multiResultHtml(r);
+          el.innerHTML = multiResultHtml(r, !!m.room && this.ctx.live.room?.game === 'stairs');
           this.say(r.aborted || r.error || !r.me ? '遊戲中止' : `${r.time_up ? '時間到！' : ''}${rankText(r.me.rank)}！下了 ${r.me.floor} 樓，賺到 ◎${r.me.coins}！`);
           return;
         }

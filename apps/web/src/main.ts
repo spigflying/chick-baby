@@ -78,7 +78,7 @@ async function loginPage() {
 async function homePage(homeId: string) {
   device?.destroy();
   app.innerHTML = `<main class="page"><div class="presrow" id="presRow"></div><div id="devSlot"></div><div class="panel" id="side"></div></main>`;
-  device = new Device({ me: me.user, cfg, live: live!, wallet: () => wallet, setWallet, toast, goHome: () => nav('/') });
+  device = new Device({ me: me.user, cfg, live: live!, wallet: () => wallet, setWallet, toast, goHome: () => nav('/'), goStairsRoom: () => nav('/stairs-room') });
   $('#devSlot').replaceWith(device.el);
   try {
     const view = await api('GET', `/homes/${homeId}`);

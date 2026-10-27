@@ -282,3 +282,13 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .race-panel ol.results2 .rr-time{font-weight:bold;color:#000;white-space:nowrap}
 .race-panel ol.results2 li.me{background:#ffe08a}
 .race-panel .rr-mine{font-size:13px}
+
+/* 多人下樓梯結算：名字一行（可換行），樓層／金幣／這局資訊下一行 */
+.menu .brow2{font-size:.9em;padding:1px 0;border-bottom:1px dotted var(--g1)}
+.menu .brow2.mine{background:var(--g1);color:var(--g3)}
+.menu .brow2 .bn{overflow-wrap:anywhere;word-break:break-word;line-height:1.2}
+.menu .brow2 .bl{display:flex;flex-wrap:wrap;gap:0 6px;align-items:baseline;padding-left:1.2em}
+.menu .brow2 .bl em{white-space:nowrap;font-style:normal;font-weight:bold}
+.menu .brow2 .bl small{font-size:.8em;opacity:.8;overflow-wrap:anywhere;min-width:0}
+.menu .rfoot{display:flex;gap:4px}.menu .rfoot .mi{flex:1;justify-content:center}
+.room-note{background:#fff3c4;border:2px solid #c99a2e;border-radius:6px;padding:6px 8px;margin:6px 0}

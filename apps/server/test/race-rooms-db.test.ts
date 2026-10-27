@@ -127,6 +127,17 @@ describe('race rooms over the race authority (real schema)', () => {
     await fastForwardRace(raceId, (s) => { for (const c of s.cars) if (!c.ai) { c.speed = 400; } });
     const res = last('rrace.ended').results; expect(res.find((x: any) => x.user_id === a).prize).toBe(50);
   });
+  it('stairs room: start failure (not enough eligible pets) keeps the room with everyone back in the lobby', async () => {
+    const a = await user('F1', '雞'), b = await user('F2', '鴨');
+    const id = await createRoom(a, null, null, Date.now(), 'stairs');
+    onRaceBus({ t: 'rrace.rjoin', inst: 'i1', room: id, user: b }); await new Promise((r) => setTimeout(r, 100));
+    await db.updateTable('pets').set({ status: 'dead' } as any).where('owner_id', '=', b).execute();
+    onRaceBus({ t: 'rrace.rready', inst: 'i1', room: id, user: a, ready: true }); onRaceBus({ t: 'rrace.rready', inst: 'i1', room: id, user: b, ready: true });
+    stepRaces(Date.now() + ROOM_COUNTDOWN_MS + 10);
+    for (let i = 0; i < 40 && _raceRooms.get(id)?.raceId; i++) await new Promise((r) => setTimeout(r, 100));
+    const v = last('rrace.room').room; expect(v.racing).toBe(false); expect(v.members.every((x: any) => !x.away && !x.ready)).toBe(true);
+    expect(sent.some((x) => x.t === 'rrace.notice' && x.code === 'NOT_ENOUGH_PLAYERS')).toBe(true);
+  });
   it('stairs room: 2 ready → multiplayer stairs starts (room match, NOTIFY to members) and pays 150/100', async () => {
     const a = await user('S1', '雞'), b = await user('S2', '鴨');
     const id = await createRoom(a, null, null, Date.now(), 'stairs');
@@ -135,12 +146,26 @@ describe('race rooms over the race authority (real schema)', () => {
     onRaceBus({ t: 'rrace.rjoin', inst: 'i1', room: id, user: b }); await new Promise((r) => setTimeout(r, 100));
     onRaceBus({ t: 'rrace.rready', inst: 'i1', room: id, user: b, ready: true });
     onRaceBus({ t: 'rrace.rconf', inst: 'i1', room: id, user: a, track: 'tw2' }); expect(last('rrace.notice')).toMatchObject({ code: 'BAD_REQUEST' });
-    stepRaces(Date.now() + ROOM_COUNTDOWN_MS + 10); await new Promise((r) => setTimeout(r, 500));
-    const st = [...pub].reverse().find((m) => m.t === 'mstairs.started'); if (!st) console.log(sent.slice(-5)); expect(st).toBeTruthy(); expect(st.home).toBe(`room:${id}`); expect(st.users.sort()).toEqual([a, b].sort()); expect(st.inst).toBe('i1');
-    expect(last('rrace.roomgone')).toMatchObject({ code: 'STARTED' });
+    stepRaces(Date.now() + ROOM_COUNTDOWN_MS + 10);
+    for (let i = 0; i < 40 && !pub.some((m) => m.t === 'mstairs.started'); i++) await new Promise((r) => setTimeout(r, 100));
+    const st = [...pub].reverse().find((m) => m.t === 'mstairs.started');  expect(st).toBeTruthy(); expect(st.home).toBe(`room:${id}`); expect(st.users.sort()).toEqual([a, b].sort()); expect(st.inst).toBe('i1');
     const m = mmatches.get(`room:${id}`)!; expect(m.room).toEqual({ inst: 'i1' });
+    // 房間留著：成員都在、標成 away、比賽中
+    expect(_raceRooms.has(id)).toBe(true); expect(_raceRooms.get(id)!.raceId).toBe(m.id);
+    expect(last('rrace.room').room).toMatchObject({ racing: true, host: a }); expect(last('rrace.room').room.members.every((x: any) => x.away && !x.ready)).toBe(true);
+    onRaceBus({ t: 'rrace.rback', inst: 'i1', room: id, user: a }); expect(last('rrace.notice')).toMatchObject({ user: a, code: 'ALREADY_IN_MATCH' });
     const loser = m.seats.find((x) => x.userId === b)!; leaveStairs(m.state, loser.petId);
     const out = (await finishStairs(m, 'quit'))!; const coins = Object.fromEntries(out.map((o) => [o.user_id, o.coins]));
     expect(coins[a]).toBe(150); expect(coins[b]).toBe(100);
+    for (const o of out) { expect(typeof o.survived_ms).toBe('number'); expect(o.max_hp).toBeGreaterThan(0); expect(o.hp).toBeGreaterThanOrEqual(0); }
+    const ended = [...pub].reverse().find((x) => x.t === 'mstairs.ended'); expect(ended.players[0].survived_ms).toBeTypeOf('number');
+    const v = last('rrace.room').room; expect(v.racing).toBe(false); expect(v.members.every((x: any) => x.away)).toBe(true);
+    onRaceBus({ t: 'rrace.rback', inst: 'i1', room: id, user: a }); onRaceBus({ t: 'rrace.rready', inst: 'i1', room: id, user: a, ready: true });
+    expect(last('rrace.room').room.countdown_ms).toBeNull(); // b 還在看結果
+    onRaceBus({ t: 'rrace.rback', inst: 'i1', room: id, user: b }); expect(last('rrace.room').room.members.find((x: any) => x.user === b)).toMatchObject({ away: false, ready: false });
+    onRaceBus({ t: 'rrace.rready', inst: 'i1', room: id, user: b, ready: true }); expect(last('rrace.room').room.countdown_ms).toBeGreaterThan(0);
+    onRaceBus({ t: 'rrace.rready', inst: 'i1', room: id, user: b, ready: false }); // 這次不開，測 3 分鐘移出
+    const r = _raceRooms.get(id)!; r.members.find((x) => x.user === b)!.away = true; r.members.find((x) => x.user === b)!.awayAt = Date.now();
+    stepRaces(Date.now() + ROOM_AWAY_MS + 1000); expect(_raceRooms.get(id)!.members.map((x) => x.user)).toEqual([a]);
   });
 });

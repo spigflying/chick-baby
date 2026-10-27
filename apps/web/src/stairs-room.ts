@@ -23,21 +23,24 @@ export function stairsRoomPage(root: HTMLElement, live: Live | null, myId: strin
     const my = r.members.find((m: any) => m.user === myId), l = left(r), ready = r.members.filter((m: any) => m.ready).length;
     if (l !== null && !wentHome) { wentHome = true; window.setTimeout(() => { if (location.pathname === '/stairs-room') goHome(); }, Math.max(0, (l - 1) * 1000)); }
     if (l === null) wentHome = false;
-    const top = `<button data-a="leave" class="big race-top-btn">離開房間</button>${my?.ready ? '<button data-a="unready" class="big race-top-btn">取消準備</button>' : '<button data-a="ready" class="big race-top-btn">準備</button>'}`;
+    const away = r.members.filter((m: any) => m.away).length;
+    const top = `<button data-a="leave" class="big race-top-btn">離開房間</button>${my?.away ? `<button data-a="back" class="big race-top-btn"${r.racing ? ' disabled' : ''}>回到房間</button>` : my?.ready ? '<button data-a="unready" class="big race-top-btn">取消準備</button>' : '<button data-a="ready" class="big race-top-btn">準備</button>'}`;
     el.innerHTML = `<div class="race-top-row">${top}</div>
       <h3 class="sroom-title">「${esc(r.members.find((m: any) => m.host)?.name ?? '')}」的下樓梯房 <span class="muted">${r.members.length}/${max} 隻</span></h3>
       ${l !== null ? `<div class="room-cd"><span>全員準備！</span><b data-cd>${l}</b><span>秒後開始</span></div>` : ''}
+      ${my?.away ? `<p class="room-note">${r.racing ? '這局還在進行中，結束後按「回到房間」。' : '這局結束了！按「回到房間」回來準備下一局。'}</p>` : away ? `<p class="muted">${r.racing ? '房裡有人正在下樓梯' : `還有人在看結果（${away} 隻）`}：大家按「回到房間」後才能準備開始；3 分鐘內沒回來會移出房間。</p>` : ''}
       <h3>成員 <span class="muted">準備 ${ready}/${r.members.length}</span></h3>
-      <ul class="room-members">${r.members.map((m: any) => `<li class="${m.ready ? 'ok' : ''} ${m.online ? '' : 'off'}"><span>${esc(m.name)}${m.host ? ' <span class="room-tag">房主</span>' : ''}${m.user === myId ? ' <span class="muted">（你）</span>' : ''}</span><span class="room-st">${!m.online ? '斷線中…' : m.ready ? '✔ 準備好了' : '等待中'}</span></li>`).join('')}</ul>
+      <ul class="room-members">${r.members.map((m: any) => `<li class="${m.ready ? 'ok' : ''} ${m.online ? '' : 'off'}"><span>${esc(m.name)}${m.host ? ' <span class="room-tag">房主</span>' : ''}${m.user === myId ? ' <span class="muted">（你）</span>' : ''}</span><span class="room-st">${!m.online ? '斷線中…' : m.away ? (r.racing ? '遊戲中…' : '看結果中…') : m.ready ? '✔ 準備好了' : '等待中'}</span></li>`).join('')}</ul>
       <h3>規則</h3>
-      <ul class="sroom-rules"><li>玩法同「一起下樓梯」：←→ 移動，撐到最後的贏。</li><li>至少 ${r.min || 2} 隻、最多 ${max} 隻；寵物要醒著、有體力。</li><li>房間獎金：前三名 ◎150／100／50。</li><li>全員準備後倒數 3 秒，會自動回到寵物頁開始。</li></ul>
+      <ul class="sroom-rules"><li>玩法同「一起下樓梯」：←→ 移動，撐到最後的贏。</li><li>至少 ${r.min || 2} 隻、最多 ${max} 隻；寵物要醒著、有體力。</li><li>房間獎金：前三名 ◎150／100／50。</li><li>全員準備後倒數 3 秒，會自動回到寵物頁開始。</li><li>玩完房間還在：在結果畫面按「回到房間」再準備下一局；3 分鐘沒回來會移出房間。</li></ul>
       <p class="muted">房間 ${Math.ceil(r.expires_ms / 60000)} 分鐘內沒有動作會自動關閉。房主離開時交給最早加入的人。</p>`;
   }
   el.addEventListener('click', (e) => {
     const a = (e.target as HTMLElement).closest('[data-a]')?.getAttribute('data-a'); if (!a) return;
     if (a === 'home') { goHome(); return; }
     if (a === 'leave') { live?.send({ type: 'room.leave' }); if (live) live.room = null; goHome(); return; }
-    if (a === 'ready') live?.send({ type: 'room.ready', ready: true }); // 按一次就準備好
+    if (a === 'back') live?.send({ type: 'room.back' });
+    else if (a === 'ready') live?.send({ type: 'room.ready', ready: true }); // 按一次就準備好
     else if (a === 'unready') live?.send({ type: 'room.ready', ready: false });
     render();
   });
