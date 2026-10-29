@@ -215,6 +215,27 @@ describe('racing (server) v5', () => {
     wa.ws.close(); wb.ws.close();
   });
   it('closing guard constant is 8 minutes', () => { expect(CLOSING_GUARD_MS).toBe(480000); });
+  it('regression: still in a stairs room (finished, never pressed 離開房間) → opening or joining a race room just switches rooms', async () => {
+    const a = await login('roomHopA'), b = await login('roomHopB');
+    const wa = await openWs(a.cookie), wb = await openWs(b.cookie);
+    wa.ws.send(JSON.stringify({ type: 'room.create', game: 'stairs' }));
+    const sr = (await wa.wait((m) => m.type === 'room.state' && m.room.game === 'stairs')).room;
+    wa.msgs.length = 0;
+    wa.ws.send(JSON.stringify({ type: 'room.create', track: 'tw1' })); // 以前：ALREADY_IN_ROOM「你已經在別的房間了」
+    const rr = (await wa.wait((m) => m.type === 'room.state' || m.type === 'error')).room;
+    expect(wa.msgs.some((m) => m.type === 'error')).toBe(false);
+    expect(rr.game).toBe('race'); expect(rr.members.map((m: any) => m.user)).toEqual([a.id]);
+    expect((await wa.wait((m) => m.type === 'room.gone' && m.room === sr.id)).room).toBe(sr.id); // 原本的下樓梯房（只有自己）關了
+    // 加入別人的房也一樣：b 在自己的下樓梯房裡，直接加入 a 的賽車房
+    wb.ws.send(JSON.stringify({ type: 'room.create', game: 'stairs' }));
+    const sb = (await wb.wait((m) => m.type === 'room.state' && m.room.game === 'stairs')).room;
+    wb.msgs.length = 0;
+    wb.ws.send(JSON.stringify({ type: 'room.join', room: rr.id, inst: rr.inst }));
+    const joined = (await wb.wait((m) => (m.type === 'room.state' && m.room.id === rr.id) || m.type === 'error' || m.type === 'race.notice'));
+    expect(joined.type).toBe('room.state'); expect(joined.room.members.map((m: any) => m.user).sort()).toEqual([a.id, b.id].sort());
+    expect(wb.msgs.some((m) => m.type === 'room.gone' && m.room === sb.id) || !!(await wb.wait((m) => m.type === 'room.gone' && m.room === sb.id))).toBe(true);
+    wa.ws.close(); wb.ws.close();
+  });
 });
 
 describe('racing: disconnects, bus outage, closing', () => {

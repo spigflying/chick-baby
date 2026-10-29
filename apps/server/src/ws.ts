@@ -144,6 +144,12 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
     } catch (e) { app.log.error(e); }
   });
 
+  /** 離開目前的房間（例如下樓梯房玩完沒按「離開房間」就跑去開賽車房：不擋，直接換房）。比賽中的人在呼叫前就被 ALREADY_IN_MATCH 擋下。 */
+  function leaveRoom(c: Conn) {
+    if (!c.room) return;
+    toRaceAuthority({ t: 'rrace.rleave', inst: c.room.inst, room: c.room.id, user: c.user.id });
+    c.room = null;
+  }
   function leaveHome(c: Conn) {
     if (!c.homeId) return;
     const home = c.homeId; c.homeId = null; c.presenceUser = undefined;
@@ -269,7 +275,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
           // ---- v27 賽車房 ----
           case 'room.create': {
             if ((c.match && !c.match.ended) || c.mm || c.rr) throw new AppError('ALREADY_IN_MATCH');
-            if (c.room) throw new AppError('ALREADY_IN_ROOM');
+            leaveRoom(c); // 一個人同時只在一個房間：開新房＝離開原本的
             await createRoom(c.user.id, msg.track, msg.laps, Date.now(), msg.game === 'stairs' ? 'stairs' : 'race');
             break;
           }
@@ -279,7 +285,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
           case 'room.join': {
             if ((c.match && !c.match.ended) || c.mm || c.rr) throw new AppError('ALREADY_IN_MATCH');
             if (typeof msg.room !== 'string' || typeof msg.inst !== 'string') throw new AppError('BAD_REQUEST');
-            if (c.room && c.room.id !== msg.room) throw new AppError('ALREADY_IN_ROOM');
+            if (c.room && c.room.id !== msg.room) leaveRoom(c); // 進別的房＝離開原本的
             toRaceAuthority({ t: 'rrace.rjoin', inst: msg.inst.slice(0, 80), room: msg.room.slice(0, 40), user: c.user.id });
             break;
           }

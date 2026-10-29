@@ -829,7 +829,7 @@ export class Device {
   stairsOut() { const st = this.stairs; return !!st && st.multi && !st.ended && !st.state.players[st.me]?.alive; }
   /** v27 下樓梯房：開一間房間邀朋友（不限同一個家），全員準備好倒數 3 秒後用一起下樓梯開始。 */
   startRoom() {
-    if (this.ctx.live.room) return this.say('你已經在一個房間裡了');
+    if (this.ctx.live.room?.game === 'stairs') { this.say('你已經在下樓梯房裡了'); this.ctx.goStairsRoom?.(); return; } // 在賽車房：開下樓梯房時伺服器會先讓你離開賽車房
     const p = this.myPresence?.pet;
     if (!p) return this.say('沒有寵物不能下樓梯');
     if (p.status !== 'alive') return this.say(stairsNotice(p.status === 'egg' ? 'PET_EGG' : 'PET_DEAD'));
