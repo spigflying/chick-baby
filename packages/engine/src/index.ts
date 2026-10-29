@@ -9,3 +9,5 @@ export * from './arena';
 export * from './bao';
 export * from './racing';
 export * from './racing-mapfirst';
+export * from './sfv';
+export * from './sfv-room';

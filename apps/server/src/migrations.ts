@@ -269,6 +269,34 @@ const migrations: Record<string, Migration> = {
       await sql`DROP INDEX race_results_track_ver_time; ALTER TABLE race_results DROP COLUMN track_ver;`.execute(db);
     },
   },
+  '0010_home_fight_1v1_refund': {
+    async up(db: Kysely<unknown>) {
+      // 一次性商務退款：migration 成功後不以 down 倒扣，避免使用者已花掉退款時產生負餘額。
+      await sql`
+        ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+        ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus','outfit','race_part','race_prize','item_refund'));
+        WITH refunds AS (
+          SELECT user_id,
+            SUM(CASE item_id WHEN 'sword' THEN fights_left * 15 WHEN 'kame' THEN fights_left * 60 WHEN 'poop' THEN fights_left * 5 ELSE 0 END)::int AS amount,
+            jsonb_object_agg(item_id, fights_left ORDER BY item_id) AS items
+          FROM user_items WHERE fights_left > 0 GROUP BY user_id
+        ), wallet_updates AS (
+          UPDATE wallets w SET balance = w.balance + r.amount, updated_at = now()
+          FROM refunds r WHERE w.user_id = r.user_id
+          RETURNING w.user_id, w.balance, r.amount
+        ), ledger_rows AS (
+          INSERT INTO coin_ledger (user_id, delta, balance_after, reason, ref_type, ref_id)
+          SELECT user_id, amount, balance, 'item_refund', 'item_refund', 'home-fight-1v1' FROM wallet_updates
+          RETURNING user_id
+        ), audit_rows AS (
+          INSERT INTO audit_log (user_id, action, target_type, target_id, result, detail)
+          SELECT r.user_id, 'item.refund', 'user', r.user_id::text, 'ok', jsonb_build_object('amount', r.amount, 'items', r.items)
+          FROM refunds r JOIN ledger_rows l ON l.user_id = r.user_id
+        )
+        UPDATE user_items SET fights_left = 0, updated_at = now() WHERE fights_left > 0;
+      `.execute(db);
+    },
+  },
 };
 
 const provider: MigrationProvider = { getMigrations: async () => migrations };

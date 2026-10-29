@@ -9,7 +9,6 @@ import { changeBalance, lockWallets, notify } from './core';
 import { clock } from './hours';
 import { env } from './env';
 import type { PresenceStore } from './presence';
-import { listItems } from './items';
 import { inStairs, stairsInviting } from './mstairs';
 import { raceBusy } from './racing';
 
@@ -22,12 +21,12 @@ interface Arena { home: string; state: ArenaState; startAt: number; invite?: Inv
 const arenas = new Map<string, Arena>();
 const homeCooldown = new Map<string, number>();
 const inserts = new Map<string, Promise<unknown>>();
-let deps: { db: Db; bus: Bus; presence: PresenceStore; instance: () => string } | null = null;
+let deps: { db: Db; bus: Bus; presence: PresenceStore; instance: () => string; busyUser?: (home: string, user: string) => boolean } | null = null;
 
 export function isAuthority(home: string) { return !!deps && deps.presence.instances(home)[0] === deps.instance(); }
 const pub = (m: Record<string, unknown>) => void deps!.bus.publish(m).catch(() => {});
 
-export function initArena(d: { db: Db; bus: Bus; presence: PresenceStore; instance?: () => string }) {
+export function initArena(d: { db: Db; bus: Bus; presence: PresenceStore; instance?: () => string; busyUser?: (home: string, user: string) => boolean }) {
   deps = { ...d, instance: d.instance ?? (() => env.instanceId) };
 }
 function petOf(home: string, user: string) { return deps!.presence.users(home).find((u) => u.id === user)?.pet ?? null; }
@@ -67,7 +66,6 @@ export function ownerBlock(home: string): string | null {
 /** 每個執行個體都會收到同一則 NOTIFY；只有負責的執行個體處理輸入。 */
 export function onArenaBus(m: any) {
   if (!deps) return;
-  if (m?.t === 'arena.items') { for (const a of arenas.values()) if (isAuthority(a.home) && a.state.fighters.some((f) => f.userId === m.user)) void listItems(deps.db, m.user).then((it) => { setFighterItems(a.state, m.user, it); snapshot(a); }).catch(() => {}); return; }
   if (!m?.home || !isAuthority(m.home)) return;
   if (m.t === 'arena.join') void join(m.home, m.user);
   else if (m.t === 'arena.invite') invite(m.home, m.user);
@@ -76,10 +74,11 @@ export function onArenaBus(m: any) {
   else if (m.t === 'arena.leave') { const a = arenas.get(m.home); if (a) { const e = removeFighter(a.state, m.user); if (e) onEnd(a, e); snapshot(a); } }
 }
 async function join(home: string, user: string) {
+  if (deps!.busyUser?.(home, user)) return;
   const pet = petOf(home, user);
   if (!canFightPet(pet)) return pub({ t: 'arena.notice', home, user, code: 'NOT_ELIGIBLE' });
   if (inStairs(home, user)) return; // 下樓梯中：比完再回來
-  const items = await listItems(deps!.db, user).catch(() => ({}));
+  const items = {};
   let a = arenas.get(home);
   if (!a) { arenas.set(home, (a = { home, state: createArena(), startAt: Date.now() })); }
   // 顯示用：寵物名（主人暱稱）；暱稱是使用者自訂的 display_name

@@ -4,6 +4,7 @@ import { abortAll } from './stairs';
 import { abortArenas } from './arena';
 import { abortMStairs } from './mstairs';
 import { abortRaces } from './racing';
+import { abortFights } from './fight1v1';
 import type { Db } from './db';
 
 export interface ClosingHandlers {
@@ -35,6 +36,7 @@ export async function handleClosed(deps: { db: Db; hub: { closeAll(msg: unknown,
   await abortAll(deps.db);
   await abortMStairs(); // M2 多人局：aborted，不發獎勵、不扣精力
   await abortArenas(); // v1.4：對戰取消，不轉帳
+  await abortFights('GAME_CLOSED');
   abortRaces(); // 賽車：中止、不結算（不能等斷線變成「沒跑完」→ 錦標賽重來）
   deps.hub.closeAll({ type: 'game.closed', opens_at: opensAt }, 4423);
   await deps.gate.release();

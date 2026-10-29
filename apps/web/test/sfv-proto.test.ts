@@ -1,15 +1,8 @@
-import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { SFV, SFVServer } from '@chick/engine';
+import { SFVClient } from '../src/sfv-net';
 
-// 原型是單一 HTML 檔：把三個 MODULE 區塊抽出來在 Node 跑（引擎零 DOM，伺服器／客戶端網路層也不碰 DOM）。
-const html = readFileSync(new URL('../sfv-proto.html', import.meta.url), 'utf8');
-function block(n: number) {
-  const a = html.indexOf(`// === [MODULE ${n}:`), b = html.indexOf(`// === [END MODULE ${n}] ===`);
-  return a >= 0 && b > a ? html.slice(a, b) : '';
-}
-const code = [1, 2, 3].map(block).join('\n');
-const mods = new Function(`${code}\nreturn { SFV, SFVServer: typeof SFVServer === 'undefined' ? null : SFVServer, SFVClient: typeof SFVClient === 'undefined' ? null : SFVClient };`)();
-const { SFV } = mods;
+const mods = { SFV, SFVServer, SFVClient };
 const { UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, ST, M } = SFV;
 
 /** 跳過開場、把兩人擺到指定位置 */
@@ -90,6 +83,82 @@ describe('command parser', () => {
   });
 });
 
+describe('衝天啄 priority', () => {
+  const dp = (btn: number) => [RIGHT, DOWN, DOWN | RIGHT | btn];
+  it('heavy: beats a heavy punch that is already coming (invincible ticks 1-6)', () => {
+    for (const late of [0, 1, 2, 3]) {
+      const s = fight(440, 500), start = 6 - late;
+      run(s, Array.from({ length: 40 }, (_, t) => (t >= start && t < start + 3 ? dp(HP)[t - start] : 0)), hold(HP, 40));
+      expect([s.p[0].hp, s.p[1].hp]).toEqual([1000, 860]);
+    }
+  });
+  /** 提早搓好 →↓、按住 ↘ 等，波距離 ≤ gap 時才按拳（衝天啄在那一 tick 出招） */
+  function vsFireball(btn: number, gap: number, x2: number, ex = 0) {
+    const s = fight(300, x2), p2 = [DOWN, DOWN | LEFT, LEFT | HP];
+    s.p[0].ex = ex;
+    let phase = 0, at = -1;
+    for (let t = 0; t < 120; t++) {
+      const q = s.pr[0], d = q ? q.x - s.p[0].x : Infinity;
+      let m = 0;
+      if (phase === 0 && d <= gap + 40) { phase = 1; at = t; }
+      if (phase >= 1) {
+        const k = t - at;
+        m = k === 0 ? RIGHT : k === 1 ? DOWN : DOWN | RIGHT;
+        if (phase === 1 && k >= 2 && d <= gap) { m |= btn; phase = 2; }
+        if (phase === 2 && SFV.MOVE_LIST[s.p[0].mv]?.id?.startsWith('DP')) m = 0;
+      }
+      SFV.simulateSFVTick(s, m, p2[t] ?? 0);
+    }
+    return s;
+  }
+  it('heavy and EX go through a fireball at any timing', () => {
+    // 波和身體相距約 40px 就碰到（波寬一半 16＋蹲姿受擊框一半 24），而波每 tick 前進 8 → 最晚 48 以內按都還來得及
+    for (const gap of [96, 80, 64, 50]) {
+      expect(vsFireball(HP, gap, 600).p[0].hp).toBe(1000);
+      expect(vsFireball(LP | HP, gap, 600, 100).p[0].hp).toBe(1000);
+    }
+  });
+  it('close range: goes through the fireball and hits the thrower', () => {
+    // 近身看到對方做出放波動作（波還沒出手）就按：無敵期間波出手、穿過去，打中還在收招的對方
+    const s = fight(300, 380), p2 = [DOWN, DOWN | LEFT, LEFT | HP];
+    let at = -1;
+    for (let t = 0; t < 120; t++) {
+      if (at < 0 && SFV.MOVE_LIST[s.p[1].mv]?.id === 'HADO_H' && s.p[1].mt >= 8) at = t;
+      SFV.simulateSFVTick(s, at >= 0 && t - at < 3 ? dp(HP)[t - at] : 0, p2[t] ?? 0);
+    }
+    expect(s.p[0].hp).toBe(1000); expect(s.p[1].hp).toBe(860);
+  });
+  it('light has no invincibility: the fireball hits it', () => {
+    for (const gap of [80, 64, 50]) expect(vsFireball(LP, gap, 600).p[0].hp).toBe(940);
+  });
+});
+
+describe('dashes (double tap)', () => {
+  it('←← back dash: throw-invulnerable 2 ticks, then a short hop, ends ~80px back', () => {
+    const s = fight(480, 700), x0 = s.p[0].x;
+    run(s, [LEFT, 0, LEFT]);
+    expect(SFV.MOVE_LIST[s.p[0].mv].id).toBe('BDASH');
+    const ys: number[] = [];
+    for (let k = 0; k < 25; k++) { ys.push(s.p[0].y); SFV.simulateSFVTick(s, LEFT, 0); }
+    expect(Math.min(...ys)).toBeLessThan(0);
+    expect(s.p[0].st).not.toBe(ST.MOVE);
+    expect(x0 - s.p[0].x).toBeGreaterThanOrEqual(80);
+  });
+  it('holding back is a walk, not a dash; a slow second tap is not a dash', () => {
+    expect(run(fight(480, 700), hold(LEFT, 12)).p[0].st).toBe(ST.IDLE);
+    expect(SFV.MOVE_LIST[run(fight(480, 700), [LEFT, ...hold(0, 11), LEFT]).p[0].mv]?.id).not.toBe('BDASH');
+  });
+  it('→→ forward dash', () => {
+    const s = run(fight(300, 700), [RIGHT, 0, RIGHT]);
+    expect(SFV.MOVE_LIST[s.p[0].mv].id).toBe('FDASH');
+  });
+  it('a back dash escapes a throw', () => {
+    const s = fight(450, 490);
+    run(s, [LP | LK, 0, 0, 0, 0, 0], [RIGHT, 0, RIGHT, RIGHT, RIGHT, RIGHT]); // P2 在右邊，後＝→
+    expect(s.p[1].st).not.toBe(ST.THROWN); expect(s.p[1].hp).toBe(1000);
+  });
+});
+
 describe('physics', () => {
   it('pushboxes never overlap when walking into each other, also in the corner', () => {
     const s = run(fight(400, 560), hold(RIGHT, 80), hold(LEFT, 80));
@@ -142,9 +211,17 @@ describe('combat', () => {
     run(s, hold(0, 200));
     expect(s.p[1].wd).toBe(0); expect(s.p[1].hp).toBe(1000);
   });
-  it('throw: 5T, no tech within 7 ticks → 120 damage + knockdown', () => {
+  it('throw: 5T, no tech within 7 ticks → lifted over the head, slammed in front: 120 damage + knockdown', () => {
+    const s = run(fight(450, 490), [LP | LK, ...hold(0, 4 + 7 + SFV.THROW_ANIM / 2 - 1)]); // 第 5 tick 抓到，再 7 tick 解摔窗，再半段動畫＝頭頂
+    expect(s.p[1].st).toBe(ST.THROWN); expect(s.p[1].y).toBeLessThan(-90); expect(s.p[1].hp).toBe(1000);
+    run(s, hold(0, SFV.THROW_ANIM / 2 + 2));
+    expect(s.p[1].hp).toBe(880); expect(s.p[1].st).toBe(ST.KD); expect(s.p[1].y).toBe(0);
+    expect(s.p[1].x - s.p[0].x).toBe(64);
+  });
+  it('no tech once the lift has started', () => {
     const s = run(fight(450, 490), [LP | LK, ...hold(0, 12)]);
-    expect(s.p[1].hp).toBe(880); expect(s.p[1].st).toBe(ST.KD);
+    run(s, [0], [LP | LK]);
+    expect(s.p[1].st).toBe(ST.THROWN);
   });
   it('throw tech: U+J within 7 ticks of being grabbed', () => {
     const s = run(fight(450, 490), hold(0, 0).concat([LP | LK, 0, 0, 0, 0]));
@@ -224,11 +301,12 @@ describe('server (simulated sfv-room)', () => {
     expect(l.allow(1000)).toBe(true);
   });
   it('input repeat: a mask stays until the next change', () => {
-    const { r } = room();
+    const { r, out } = room();
     r.receive(1, { type: 'sfv.input', seq: 1, inputs: [{ tick: 3, mask: LEFT }, { tick: 6, mask: 0 }] }, 0);
     r.update(SFV.TICK_MS * 8 + 1);
     expect([2, 3, 4, 5, 6, 7].map((t) => SFV.maskAt(r.state.p[0], t))).toEqual([0, LEFT, LEFT, LEFT, 0, 0]);
     expect(r.seq[0]).toBe(1);
+    expect(out.find(([, m]) => m.type === 'sfv.ticks')?.[1].ack).toEqual([1, 0]);
   });
   it('late input is counted and applied on the next tick', () => {
     const { r } = room();
@@ -239,6 +317,15 @@ describe('server (simulated sfv-room)', () => {
     r.update(SFV.TICK_MS * 11 + 1);
     expect(SFV.maskAt(r.state.p[0], 11)).toBe(RIGHT);
   });
+  it('cumulative packets do not reapply an already accepted edge', () => {
+    const { r } = room();
+    r.receive(1, { type: 'sfv.input', seq: 1, inputs: [{ tick: 3, mask: LEFT }] }, 0);
+    r.update(SFV.TICK_MS * 4 + 1);
+    r.receive(1, { type: 'sfv.input', seq: 2, inputs: [{ tick: 3, mask: LEFT }, { tick: 6, mask: 0 }] }, SFV.TICK_MS * 4 + 2);
+    r.update(SFV.TICK_MS * 7 + 1);
+    expect(r.stats.late[0]).toBe(0);
+    expect([5, 6, 7].map((t) => SFV.maskAt(r.state.p[0], t))).toEqual([LEFT, 0, 0]);
+  });
   it('rejects junk input entries', () => {
     const { r } = room();
     r.receive(1, { type: 'sfv.input', seq: 1, inputs: [{ tick: 3, mask: 999 }, { tick: 'x', mask: 1 }, { tick: 500, mask: 1 }] }, 0);
@@ -247,20 +334,24 @@ describe('server (simulated sfv-room)', () => {
   it('20:00 closing aborts without settling', () => {
     const { r, out } = room({ closesAt: 1000 });
     r.update(1000);
-    expect(r.status).toBe('aborted'); expect(r.result).toBe(null);
+    expect(r.status).toBe('aborted'); expect(r.result).toBeUndefined();
     expect(out.at(-1)[1]).toMatchObject({ type: 'sfv.ended', aborted: true, reason: 'GAME_CLOSED' });
-  });
-  it('settlement is idempotent per match id', () => {
-    const a = SFVServer.settleMatch('dup-1', { win: 0, users: ['a', 'b'] });
-    const b = SFVServer.settleMatch('dup-1', { win: 0, users: ['a', 'b'] });
-    expect(a.applied).toBe(true); expect(b.applied).toBe(false);
-    expect(a.transfers).toEqual([{ from: 'b', to: 'a', coins: 20 }]); expect(b.transfers).toEqual(a.transfers);
-    expect(SFVServer.settleMatch('dup-2', { win: 2, users: ['a', 'b'] }).transfers).toEqual([]);
   });
 });
 
 describe('netcode: prediction + rollback over a laggy link', () => {
   const { SFVClient } = mods;
+  it('new input packets carry unacknowledged edges and ACK clears them', () => {
+    const sent: any[] = [];
+    const c = new SFVClient.NetClient({ pid: 1, sample: () => 0, send: (m: any) => sent.push(m) });
+    c.queue = [{ tick: 3, mask: LEFT }]; c.flush(0, 2);
+    c.queue = [{ tick: 5, mask: 0 }]; c.flush(40, 4);
+    expect(sent.filter((m) => m.type === 'sfv.input').map((m) => m.inputs)).toEqual([
+      [{ tick: 3, mask: LEFT }],
+      [{ tick: 3, mask: LEFT }, { tick: 5, mask: 0 }],
+    ]);
+    c.onAck(2); expect(c.unacked.size).toBe(0);
+  });
   function simulate(rtt: number, jitter: number, seconds: number, seed: number) {
     const r1 = lcg(seed), r2 = lcg(seed + 1), net = lcg(seed + 2);
     const serverHash = new Map<number, number>();
@@ -289,6 +380,7 @@ describe('netcode: prediction + rollback over a laggy link', () => {
       expect(c.stats.desync).toBe(0);
       expect(c.stats.rollbacks).toBeGreaterThan(0);
       expect(c.C).toBeGreaterThan(500);
+      expect(c.histConf.length).toBe(4 * SFV.TICK_HZ); // 輸入紀錄保留最近 4 秒
       expect(SFV.hashState(c.confirmed)).toBe(serverHash.get(c.C));
       expect(SFV.hashState(c.predicted)).toBe(serverHash.get(c.L)); // 放手 3 秒後預測必然正確
     }

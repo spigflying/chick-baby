@@ -449,7 +449,7 @@ describe('home presence carries pets (v1.3)', () => {
   });
 });
 
-describe('fight mode v2 (v1.5)', () => {
+describe.skip('legacy arena melee mode (removed by home 1v1)', () => {
   let arenaLoop: NodeJS.Timeout;
   beforeAll(async () => { const m = await import('../src/arena'); arenaLoop = m.startArenaLoop(); });
   afterAll(() => clearInterval(arenaLoop));
@@ -668,6 +668,92 @@ describe('fight mode v2 (v1.5)', () => {
     await wc.wait((m) => m.type === 'arena.result', 'result'); await new Promise((r) => setTimeout(r, 200));
     expect((await db.selectFrom('user_items').select('fights_left').where('user_id', '=', a.id).where('item_id', '=', 'poop').executeTakeFirstOrThrow()).fights_left).toBe(9);
     void b; await close();
+  });
+});
+
+describe('home fight 1v1', () => {
+  async function openWs(c: Client) {
+    const msgs: any[] = [];
+    const ws = await app.injectWS('/ws', { headers: { cookie: c.cookie }, socket: { remoteAddress: '127.0.0.1' } } as any,
+      { onInit: (s) => s.on('message', (d) => msgs.push(JSON.parse(String(d)))) });
+    const wait = async (pred: (m: any) => boolean, what = '') => {
+      for (let i = 0; i < 250; i++) { const m = [...msgs].reverse().find(pred); if (m) return m; await new Promise((r) => setTimeout(r, 20)); }
+      throw new Error(`timeout ${what}: ${JSON.stringify(msgs.slice(-8))}`);
+    };
+    await wait((m) => m.type === 'hello', 'hello');
+    return { ws, msgs, wait, send: (m: any) => ws.send(JSON.stringify(m)) };
+  }
+
+  afterEach(async () => {
+    const m = await import('../src/fight1v1');
+    m._fightInvites.clear(); m._fights.clear(); m._fightCooldowns.clear(); setClock(ALWAYS_OPEN);
+  });
+
+  it('uses targeted desktop consent, pins two players, and a disconnect forfeits with idempotent DB settlement', async () => {
+    const a = await login('Benson'), b = await login('仲軍'), spectator = await login('Spectator');
+    await hatchAlive(a, 'chicken'); await hatchAlive(b, 'duck');
+    await db.updateTable('wallets').set({ balance: 7 }).where('user_id', '=', b.id).execute();
+    const home = (await a.call('GET', '/api/me')).json.home.id;
+    const wa = await openWs(a), wb = await openWs(b), wc = await openWs(spectator);
+    for (const w of [wa, wb]) w.send({ type: 'home.join', home_id: home, touch: false });
+    wc.send({ type: 'home.join', home_id: home, touch: true });
+    await wa.wait((m) => m.type === 'home.presence' && m.users.length === 3, 'presence');
+
+    wa.send({ type: 'fight.invite', to: b.id });
+    const inv = await wb.wait((m) => m.type === 'fight.event' && m.kind === 'invite' && m.to === b.id, 'invite');
+    wc.send({ type: 'fight.reply', invite: inv.invite, accept: true });
+    await wc.wait((m) => m.type === 'fight.notice' && m.code === 'TOUCH_DEVICE', 'touch refused');
+    wb.send({ type: 'fight.reply', invite: inv.invite, accept: true });
+    const start = await wa.wait((m) => m.type === 'fight.event' && m.kind === 'start', 'start');
+    expect(start.players.map((p: any) => p.user_id)).toEqual([a.id, b.id]);
+    expect(start.you_pid).toBe(1);
+    expect((await wb.wait((m) => m.type === 'fight.event' && m.kind === 'start', 'opponent start')).you_pid).toBe(2);
+    expect((await wc.wait((m) => m.type === 'fight.event' && m.kind === 'start', 'spectator start')).you_pid).toBeNull();
+    expect(await db.selectFrom('fights').select(['id', 'status']).where('id', '=', start.fight_id).executeTakeFirstOrThrow()).toEqual({ id: start.fight_id, status: 'playing' });
+
+    wb.ws.terminate();
+    const result = await wa.wait((m) => m.type === 'fight.result' && m.fight_id === start.fight_id, 'forfeit result');
+    expect(result).toMatchObject({ winner: a.id, draw: false, reason: 'forfeit' });
+    expect(result.parts.find((p: any) => p.user_id === a.id)).toMatchObject({ transfer: 7, pool: 25, delta: 32 });
+    expect(result.parts.find((p: any) => p.user_id === b.id)).toMatchObject({ transfer: -7, pool: 25, delta: 18, forfeit: true });
+    expect((await a.call('GET', '/api/me')).json.wallet.balance).toBe(52);
+    expect((await b.call('GET', '/api/me')).json.wallet.balance).toBe(25);
+    expect(await db.selectFrom('fights').select(['status', 'winner_user_id']).where('id', '=', start.fight_id).executeTakeFirstOrThrow())
+      .toEqual({ status: 'done', winner_user_id: a.id });
+    expect(await db.selectFrom('audit_log').select('id').where('action', '=', 'fight.settle').where('target_id', '=', start.fight_id).execute()).toHaveLength(1);
+    wa.ws.terminate(); wc.ws.terminate(); await new Promise((r) => setTimeout(r, 300));
+  });
+
+  it('removes consumable item HTTP surfaces and /me inventory', async () => {
+    const a = await login('Benson');
+    expect((await a.call('GET', '/api/items')).status).toBe(404);
+    expect((await a.call('POST', '/api/items/buy', { item_id: 'sword', request_id: rid() })).status).toBe(404);
+    expect((await a.call('GET', '/api/me')).json).not.toHaveProperty('items');
+  });
+
+  it('refund migration pays remaining uses once, clears inventory, and records ledger + audit', async () => {
+    const a = await login('Benson');
+    await db.insertInto('user_items').values([
+      { user_id: a.id, item_id: 'sword', fights_left: 7 },
+      { user_id: a.id, item_id: 'kame', fights_left: 2 },
+      { user_id: a.id, item_id: 'poop', fights_left: 3 },
+    ]).execute();
+    const rerun = async () => {
+      await sql`DELETE FROM kysely_migration WHERE name = '0010_home_fight_1v1_refund'`.execute(db);
+      await migrateToLatest(db as any);
+    };
+    try {
+      await rerun();
+      expect((await db.selectFrom('wallets').select('balance').where('user_id', '=', a.id).executeTakeFirstOrThrow()).balance).toBe(260); // 20 + 7×15 + 2×60 + 3×5
+      expect((await db.selectFrom('user_items').select('fights_left').where('user_id', '=', a.id).execute()).map((x) => x.fights_left)).toEqual([0, 0, 0]);
+      expect(await db.selectFrom('coin_ledger').select(['delta', 'reason']).where('user_id', '=', a.id).where('reason', '=', 'item_refund').execute()).toEqual([{ delta: 240, reason: 'item_refund' }]);
+      expect(await db.selectFrom('audit_log').select('detail').where('user_id', '=', a.id).where('action', '=', 'item.refund').execute()).toHaveLength(1);
+      await rerun();
+      expect((await db.selectFrom('wallets').select('balance').where('user_id', '=', a.id).executeTakeFirstOrThrow()).balance).toBe(260);
+      expect(await db.selectFrom('coin_ledger').select('id').where('user_id', '=', a.id).where('reason', '=', 'item_refund').execute()).toHaveLength(1);
+    } finally {
+      await migrateToLatest(db as any);
+    }
   });
 });
 

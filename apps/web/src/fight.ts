@@ -15,39 +15,17 @@ export function controlMode(o: { isOwner: boolean; submenuOpen: boolean; navOpen
 }
 /** 控制面板顯示條件：寵物控制或動作列模式（主人在有訪客時也會看到）。 */
 export const showFightbar = (m: string) => m === 'pet' || m === 'nav';
-export type Pad = { left: boolean; right: boolean; jump: boolean; attack: boolean; upAtk: boolean; item: boolean };
-const EMPTY: Pad = { left: false, right: false, jump: false, attack: false, upAtk: false, item: false };
-// ↑ 按住再按空白 = 上啄（伺服器判斷）；Z = 用道具（龜派氣功要按住 1 秒）；X = 換道具
-const KEYMAP: Record<string, keyof Pad> = { ArrowLeft: 'left', a: 'left', ArrowRight: 'right', d: 'right', ArrowUp: 'jump', w: 'jump', ' ': 'attack', Spacebar: 'attack', z: 'item', Z: 'item' };
-/** 'pet' 模式的按鍵：回傳要改的按鈕；Enter = 開啟動作列；X = 換裝備的道具。 */
-export function petKey(key: string): keyof Pad | 'nav' | 'cycle' | null { if (key === 'Enter') return 'nav'; if (key === 'x' || key === 'X') return 'cycle'; return KEYMAP[key] ?? null; }
+export type Pad = { left: boolean; right: boolean; jump: boolean };
+const EMPTY: Pad = { left: false, right: false, jump: false };
+const KEYMAP: Record<string, keyof Pad> = { ArrowLeft: 'left', a: 'left', ArrowRight: 'right', d: 'right', ArrowUp: 'jump', w: 'jump' };
+/** 家中漫遊只保留移動、跳躍；Enter 開啟動作列。 */
+export function petKey(key: string): keyof Pad | 'nav' | null { if (key === 'Enter') return 'nav'; return KEYMAP[key] ?? null; }
 export class PadState {
   pad: Pad = { ...EMPTY };
   /** 回傳 true = 有變化（要送給伺服器） */
   set(b: keyof Pad, v: boolean) { if (this.pad[b] === v) return false; this.pad[b] = v; return true; }
   clear() { const ch = Object.values(this.pad).some(Boolean); this.pad = { ...EMPTY }; return ch; }
 }
-// ---------- v1.5 道具 ----------
-export const ITEM_INFO: Record<string, { name: string; price: number; fights: number; desc: string }> = {
-  sword: { name: '長劍', price: 150, fights: 10, desc: '揮砍 42px・12 傷害' },
-  kame: { name: '龜派氣功', price: 300, fights: 5, desc: '按住 1 秒・光束 30 傷害・每場 1 次' },
-  poop: { name: '丟大便', price: 50, fights: 10, desc: '拋物線・8 傷害＋滑倒・對戰中無限丟（0.5 秒冷卻）' },
-};
-export const ITEM_ORDER = ['sword', 'kame', 'poop'];
-/** X：在擁有（剩餘場數 > 0）的道具間循環。 */
-export function nextEquip(items: Record<string, number> | undefined, cur: string | null): string | null {
-  const owned = ITEM_ORDER.filter((i) => (items?.[i] ?? 0) > 0);
-  if (!owned.length) return null;
-  const k = cur ? owned.indexOf(cur) : -1;
-  return owned[(k + 1) % owned.length];
-}
-/** HUD：裝備中的道具與剩餘場數（丟大便另外顯示彈藥）。 */
-export function itemHud(eq: string | null, items: Record<string, number> | undefined): string {
-  if (!eq || !(items?.[eq]! > 0)) return '';
-  const n = Object.keys(items ?? {}).filter((k) => items![k] > 0).length;
-  return `${ITEM_INFO[eq].name} 剩${items![eq]}場${n > 1 ? '・X換' : ''}`;
-}
-
 export interface FSnap { u: string; pet: string; sp: string; name: string; x: number; y: number; dir: 1 | -1; atk: number; inv: number; hp: number; fight: string | null;
   out?: boolean; sw?: string | null; sn?: number; hn?: number; hd?: number; chg?: number; eq?: string | null; items?: Record<string, number>; slip?: boolean }
 export interface ArenaMsg { tick: number; server_time: number; fighters: FSnap[]; fights: { id: string; parts: string[]; left_ms: number }[]; hp_max: number; frozen?: boolean; cooldown_ms?: number; invite?: { id: string; from: string; to: string[]; left_ms: number } | null; proj?: { x: number; y: number }[] }
@@ -107,7 +85,7 @@ export function resultText(r: { winner: string | null; amount: number; reason: s
   return `${name(r.winner)} 贏了！拿走 ◎${r.amount}${r.reason === 'forfeit' ? '（對手離開）' : ''}`;
 }
 /** 手機（觸控）的提示：沒有鍵盤，用螢幕按鈕。 */
-export const TOUCH_HINT = '按住 ◀ ▶ 移動・▲ 跳・啄／上啄／道具（龜派氣功按住 1 秒）・發起戰鬥・選單 開動作列';
+export const TOUCH_HINT = '按住 ◀ ▶ 移動・▲ 跳・發起戰鬥・選單 開動作列';
 export const hintFor = (m: ControlMode, touch: boolean) => (m === 'pet' && touch ? TOUCH_HINT : m === 'nav' && touch ? '點下方圖示選動作・再按「選單」或任一控制鈕返回' : HINT[m]);
 /** 控制鈕按下：動作列（nav）開著時直接回到寵物控制，不要吞掉這一下（手機沒有 Esc）。 */
 export function padPress(mode: string, down: boolean): { exitNav: boolean; apply: boolean } {
@@ -116,7 +94,7 @@ export function padPress(mode: string, down: boolean): { exitNav: boolean; apply
   return { exitNav: false, apply: mode === 'pet' };
 }
 export const HINT: Record<ControlMode, string> = {
-  pet: '←→ 移動　↑ 跳　空白 啄　↑+空白 上啄　Z 道具　X 換　F 發起戰鬥　Enter 選單',
+  pet: '←→ 移動　↑ 跳　F 發起戰鬥　Enter 選單',
   nav: '←→ 選擇　Enter 確定　Esc 返回',
   menu: '',
 };

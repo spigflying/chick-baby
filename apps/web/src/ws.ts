@@ -16,6 +16,7 @@ export class Live {
   roomMatch: { m: any; at: number } | null = null;
   get busy() { return this.inMatch || this.inFight || this.inLobby || !!this.room; }
   homeId: string | null = null;
+  readonly touch = globalThis.matchMedia?.('(pointer:coarse)').matches ?? false;
   offset = 0; // 伺服器時間 − 本地時間
   rtt = 0;
   private samples: { rtt: number; off: number }[] = [];
@@ -48,7 +49,7 @@ export class Live {
 
   joinHome(id: string | null) {
     this.homeId = id;
-    if (id) this.send({ type: 'home.join', home_id: id }); else this.send({ type: 'home.leave' });
+    if (id) this.send({ type: 'home.join', home_id: id, touch: this.touch }); else this.send({ type: 'home.leave' });
   }
   reconnect(_why: string) { const w = this.ws; this.ws = null; w?.close(1000, 'reconnect'); this.open(); }
 
@@ -62,7 +63,7 @@ export class Live {
       if (m.type === 'hello') {
         this.onStatus('online');
         for (let i = 0; i < 5; i++) setTimeout(() => this.ping(), i * 120);
-        if (this.homeId) this.send({ type: 'home.join', home_id: this.homeId }); // 重新同步
+        if (this.homeId) this.send({ type: 'home.join', home_id: this.homeId, touch: this.touch }); // 重新同步
         if (this.room) this.send({ type: 'room.join', room: this.room.id, inst: this.room.inst }); // v27：斷線 30 秒內回到房間
       } else if (m.type === 'time.pong') this.pong(m);
       else if (m.type === 'room.state') this.room = { ...m.room, at: Date.now() };

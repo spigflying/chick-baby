@@ -2,7 +2,7 @@
 import type { PublicPet } from './pets';
 
 export type PetSummary = { id: string; name: string; species: string; status: 'egg' | 'alive' | 'dead'; sleeping: boolean; sick: boolean; mood: 'happy' | 'ok' | 'sad'; look?: string };
-export type PresenceUser = { id: string; display_name: string; avatar_url: string | null; pet: PetSummary | null };
+export type PresenceUser = { id: string; display_name: string; avatar_url: string | null; pet: PetSummary | null; touch?: boolean };
 
 export function petSummary(p: PublicPet | null | undefined): PetSummary | null {
   if (!p) return null;
@@ -47,9 +47,23 @@ export class PresenceStore {
   }
   users(home: string): PresenceUser[] {
     const out = new Map<string, PresenceUser>();
-    for (const { user: u } of this.homes.get(home)?.values() ?? []) { out.delete(u.id); out.set(u.id, u); }
+    for (const { user: u } of this.homes.get(home)?.values() ?? []) {
+      const old = out.get(u.id);
+      out.delete(u.id);
+      // 同一人同時開手機與電腦時，只要還有一條電腦連線就能被挑戰。
+      out.set(u.id, old ? { ...u, touch: !!old.touch && !!u.touch } : u);
+    }
     return [...out.values()];
   }
+  /** 產品上的「可操作格鬥」資格以連線為準，不能被同一人的手機分頁覆蓋。 */
+  hasDesktop(home: string, userId: string): boolean {
+    for (const e of this.homes.get(home)?.values() ?? []) if (e.user.id === userId && !e.user.touch) return true;
+    return false;
+  }
+  desktopKey(home: string, userId: string): string | null {
+    return [...(this.homes.get(home)?.entries() ?? [])].filter(([, e]) => e.user.id === userId && !e.user.touch).map(([k]) => k).sort()[0] ?? null;
+  }
+  hasKey(home: string, key: string): boolean { return this.homes.get(home)?.has(key) ?? false; }
   /** 使用者目前在哪些家（多個分頁可能在不同家）。 */
   whereIs(userId: string): string[] {
     const out: string[] = [];

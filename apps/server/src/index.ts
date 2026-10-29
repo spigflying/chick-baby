@@ -8,6 +8,7 @@ import { handleClosed, startClosingLoop } from './closing';
 import { abortAll, startStairsLoop } from './stairs';
 import { abortArenas, startArenaLoop } from './arena';
 import { abortMStairs, startMStairsLoop } from './mstairs';
+import { abortFights, startFightLoop } from './fight1v1';
 
 const { db } = createDb();
 const bus = new Bus();
@@ -15,6 +16,7 @@ const bus = new Bus();
 const { app, hub, gate } = await buildApp(db, bus);
 const loop = startStairsLoop(db);
 const arenaLoop = startArenaLoop();
+const fightLoop = startFightLoop();
 const mstairsLoop = startMStairsLoop();
 const raceLoop = startRaceLoop();
 const closing = startClosingLoop({
@@ -30,10 +32,11 @@ let shuttingDown = false;
 async function shutdown(sig: string) {
   if (shuttingDown) return; shuttingDown = true;
   app.log.info(`${sig}: draining`);
-  clearInterval(loop); clearInterval(arenaLoop); clearInterval(mstairsLoop); clearInterval(raceLoop); abortRaces(); clearInterval(closing.timer);
+  clearInterval(loop); clearInterval(arenaLoop); clearInterval(fightLoop); clearInterval(mstairsLoop); clearInterval(raceLoop); abortRaces(); clearInterval(closing.timer);
   await abortAll(db);
   await abortMStairs();
   await abortArenas();
+  await abortFights('SIGTERM');
   hub.drain();
   await app.close().catch(() => {});
   await bus.stop(); await db.destroy();

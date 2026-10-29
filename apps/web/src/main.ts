@@ -5,6 +5,7 @@ import './style.css';
 import { api, act, errText, ApiError } from './api';
 import { Live } from './ws';
 import { racePage } from './race';
+import { FightView } from './fight-view';
 let pageOff: (() => void) | null = null;
 import { Device } from './device';
 import { drawShell } from './shell';
@@ -18,7 +19,7 @@ const $ = (s: string) => document.querySelector(s) as HTMLElement;
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const app = $('#app');
 
-let cfg: any; let me: any = null; let live: Live | null = null; let device: Device | null = null; let presence: any[] = []; let presenceSeen = false;
+let cfg: any; let me: any = null; let live: Live | null = null; let device: Device | null = null; let fightView: FightView | null = null; let presence: any[] = []; let presenceSeen = false;
 let wallet = 0;
 let idleOff: (() => void) | null = null;
 let sleepTimer = 0; let sleepAnim = 0;
@@ -46,6 +47,7 @@ function setWallet(n: number) { wallet = n; const c = document.getElementById('b
 
 // ---------- 登入 ----------
 async function loginPage() {
+  fightView?.destroy(); fightView = null; device?.destroy(); device = null;
   $('#bar').hidden = true;
   app.innerHTML = `<main class="page"><div class="device" id="lobbyDev"><canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div>
     <div class="lcd"><div class="lcd-top"><span>多人版</span><span>M1</span></div><div class="scr" style="display:flex;justify-content:center;gap:8%;padding:12% 0;background:var(--g3)" id="lobbyPets"></div><p class="msg">登入後就能孵蛋、拜訪朋友的家！</p></div></div></div>
@@ -78,11 +80,11 @@ async function loginPage() {
 async function homePage(homeId: string) {
   device?.destroy();
   app.innerHTML = `<main class="page"><div class="presrow" id="presRow"></div><div id="devSlot"></div><div class="panel" id="side"></div></main>`;
-  device = new Device({ me: me.user, cfg, live: live!, wallet: () => wallet, setWallet, toast, goHome: () => nav('/'), goStairsRoom: () => nav('/stairs-room') });
+  device = new Device({ me: me.user, cfg, live: live!, wallet: () => wallet, setWallet, toast, goHome: () => nav('/'), goStairsRoom: () => nav('/stairs-room'), startFight: () => fightView?.chooseOpponent() });
   $('#devSlot').replaceWith(device.el);
   try {
     const view = await api('GET', `/homes/${homeId}`);
-    device.setHome(view);
+    device.setHome(view); fightView?.setHome(view.home.id);
     presence = []; presenceSeen = false;
     live!.joinHome(view.home.id);
     renderSide(view);
@@ -203,7 +205,7 @@ async function adminPage() {
 
 // ---------- 休息時段（requirements §4.7）----------
 function sleepPage(st: { opens_at: number | null; server_time?: number }) {
-  live?.stop(); live = null; idleOff?.(); idleOff = null; device?.destroy(); device = null;
+  live?.stop(); live = null; idleOff?.(); idleOff = null; device?.destroy(); device = null; fightView?.destroy(); fightView = null;
   $('#bar').hidden = true;
   const skew = st.server_time ? st.server_time - Date.now() : 0; // 伺服器時間 − 本地時間
   // v1.5：蛋殼畫面＋自己的寵物在睡覺（從 localStorage 快取畫；不打 API、不開 WebSocket）
@@ -244,6 +246,7 @@ async function route() {
   if (!me) return loginPage();
   renderBar();
   const p = location.pathname;
+  if (!p.startsWith('/home/') && p !== '/') fightView?.setHome(null);
   if (!p.startsWith('/home/') && p !== '/') { device?.destroy(); device = null; }
   pageOff?.(); pageOff = null;
   let m: RegExpMatchArray | null;
@@ -285,7 +288,9 @@ const escHtml = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&'
 let lastStairsRoom: string | null = null;
 function startLive() {
   live?.stop();
+  fightView?.destroy(); fightView = null;
   live = new Live();
+  fightView = new FightView(live, me.user, toast);
   live.onStatus = (s) => {
     if (s === 'unauthorized') { me = null; void route(); }
     else if (s === 'closed') void goSleep();
@@ -295,7 +300,7 @@ function startLive() {
   live.on((m) => {
     if (m.type === 'home.presence' && device?.home && m.home_id === device.home.id) {
       const d = presenceDiff(presenceSeen ? presence : null, m.users, me.user.id);
-      presence = m.users; presenceSeen = true; renderPresence(); device.setPresence(m.users, !!m.owner_away);
+      presence = m.users; presenceSeen = true; renderPresence(); device.setPresence(m.users, !!m.owner_away); fightView?.setPresence(m.users);
       const msg = [...d.joined.map((n) => `${n} 來了`), ...d.left.map((n) => `${n} 離開了`)].join('、');
       if (msg) toast(msg);
       if (d.joined.length || d.left.length) blip(d.joined.length > 0);

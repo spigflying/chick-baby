@@ -7,7 +7,8 @@ import { env } from './env';
 import { AppError } from './errors';
 import { canEnter, currentPet, feed, getHome, ownerAction, viewHome } from './game';
 import { PresenceStore, petSummary, PRESENCE_REFRESH_MS, type PresenceUser } from './presence';
-import { benchFighters, fightBusy, inFightAt, initArena, onArenaBus, onPresenceChange } from './arena';
+import { benchFighters, initArena, onArenaBus, onPresenceChange } from './arena';
+import { currentFightTick, fightBusy as fight1v1Busy, inFightAt as inFight1v1At, initFight1v1, isFightAuthority, onFightBus, onFightPresence, routeFightIntent } from './fight1v1';
 import { initMStairs, inStairs, mmatches, onMStairsBus, onMStairsPresence, stairsInviting, toAuthority } from './mstairs';
 import { rateLimit } from './core';
 import { createSolo, currentTick, finish, handleInput, matches, type Match } from './stairs';
@@ -19,6 +20,8 @@ import { clock } from './hours';
 import type { DbGate } from './gate';
 
 interface Conn { presenceUser?: PresenceUser; id: number; ws: WebSocket; user: { id: string; display_name: string; avatar_url: string | null }; homeId: string | null; connectedAt: number; match: Match | null; ip: string; ua: string;
+  /** 只用來限制操作介面，不是安全邊界。 */
+  touch: boolean;
   /** M2：這條連線正在玩的多人局（在哪個家、哪一局） */
   mm: { home: string; id: string; inst?: string } | null;
   /** 賽車：這條連線正在跑的比賽（哪一場、哪個執行個體在模擬） */
@@ -44,7 +47,7 @@ function broadcastPresence(homeId: string) {
 function presenceChanged(homes: string[], userIds: string[]) {
   const all = new Set(homes);
   for (const u of userIds) { const h = presence.homeOf(u); if (h) all.add(h); }
-  for (const h of all) { broadcastPresence(h); onPresenceChange(h); onMStairsPresence(h); onRacePresence(h); }
+  for (const h of all) { broadcastPresence(h); onPresenceChange(h); onFightPresence(h); onMStairsPresence(h); onRacePresence(h); }
 }
 /** WS 連線的期限（Cloud Run 60 分鐘）：比賽要在那之前時間到。 */
 const connDeadline = (c: Conn) => c.connectedAt + 58 * 60_000;
@@ -100,16 +103,39 @@ function forwardRace(m: any) {
     offerFree(freed);
   }
 }
+/** 1v1 格鬥：authority 的輸出轉給本執行個體上同一個家的連線。 */
+function forwardFight(m: any) {
+  const { t, home, src: _src, ...rest } = m;
+  if (t === 'fight.notice') { for (const c of inHome(home)) if (c.user.id === m.user) send(c, { type: t, home_id: home, code: m.code }); return; }
+  if (t === 'fight.event' && (m.kind === 'start' || m.kind === 'sync')) {
+    const { controllers, ...safe } = rest;
+    for (const c of inHome(home)) { const key = `${env.instanceId}:${c.id}`, i = (controllers as string[]).indexOf(key); send(c, { type: t, home_id: home, ...safe, you_pid: i >= 0 ? i + 1 : null }); }
+    return;
+  }
+  if (t === 'fight.event' && m.kind === 'control') {
+    const { controller, ...safe } = rest;
+    for (const c of inHome(home)) send(c, { type: t, home_id: home, ...safe, you_pid: `${env.instanceId}:${c.id}` === controller ? m.pid : null });
+    return;
+  }
+  if (t === 'fight.event' || t === 'fight.ticks' || t === 'fight.snap' || t === 'fight.result')
+    for (const c of inHome(home)) send(c, { type: t, home_id: home, ...rest });
+}
 export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
-  initArena({ db, bus, presence });
-  initMStairs({ db, bus, presence, local: forwardMStairs, inFight: inFightAt, fightBusy: (h) => fightBusy(h) || raceBusy(h), bench: benchFighters });
+  initArena({ db, bus, presence, busyUser: inFight1v1At });
+  initFight1v1({ db, bus, presence, local: forwardFight, bench: benchFighters });
+  initMStairs({ db, bus, presence, local: forwardMStairs, inFight: inFight1v1At, fightBusy: (h) => fight1v1Busy(h) || raceBusy(h), bench: benchFighters });
   initRacing({ db, bus, presence, local: forwardRace,
-    homeBusy: (h) => (stairsInviting(h) || mmatches.has(h) ? 'STAIRS_BUSY' : fightBusy(h) ? 'FIGHT_BUSY' : null),
-    userBusy: (h, u) => inFightAt(h, u) || inStairs(h, u) });
+    homeBusy: (h) => (stairsInviting(h) || mmatches.has(h) ? 'STAIRS_BUSY' : fight1v1Busy(h) ? 'FIGHT_BUSY' : null),
+    userBusy: (h, u) => inFight1v1At(h, u) || inStairs(h, u) });
   bus.on(async (m) => {
     try {
       if (typeof m.t === 'string' && m.t.startsWith('mstairs.')) { onMStairsBus(m); forwardMStairs(m); return; }
       if (typeof m.t === 'string' && m.t.startsWith('rrace.')) { onRaceBus(m); if (!raceEcho(m)) forwardRace(m); return; }
+      if (typeof m.t === 'string' && m.t.startsWith('fight.')) {
+        onFightBus(m);
+        if (m.src !== env.instanceId) forwardFight(m);
+        return;
+      }
       if (typeof m.t === 'string' && m.t.startsWith('arena.')) {
         onArenaBus(m);
         const { t, home, ...rest } = m;
@@ -127,7 +153,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
         // 這隻寵物的主人正在拜訪別人家：同步更新那些家的在場寵物（每個執行個體都收到同一則 NOTIFY，結果一致）
         const sum = petSummary(pub);
         for (const c of conns) if (c.presenceUser && c.presenceUser.pet?.id === m.pet) c.presenceUser = { ...c.presenceUser, pet: sum }; // 心跳也帶最新的寵物
-        if (visiting) for (const h of presence.updatePet(m.pet, sum)) { broadcastPresence(h); onPresenceChange(h); }
+        if (visiting) for (const h of presence.updatePet(m.pet, sum)) { broadcastPresence(h); onPresenceChange(h); onFightPresence(h); }
       } else if (m.t === 'wallet') {
         const targets = [...conns].filter((c) => c.user.id === m.user); if (!targets.length) return;
         const w = await db.selectFrom('wallets').select('balance').where('user_id', '=', m.user).executeTakeFirst();
@@ -178,14 +204,14 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
     const okOrigin = !origin || env.publicOrigins.includes(origin) || origin === `http://${host}` || origin === `https://${host}`;
     const u = okOrigin ? await sessionUser(db, req.cookies[COOKIE]) : null;
     if (!u) { socket.send(JSON.stringify({ type: 'error', code: okOrigin ? 'UNAUTHORIZED' : 'FORBIDDEN' })); socket.close(4401); return; }
-    const c: Conn = { id: ++seq, ws: socket, user: publicUser(u), homeId: null, connectedAt: Date.now(), match: null, ip: req.ip, ua: String(req.headers['user-agent'] ?? ''), mm: null };
+    const c: Conn = { id: ++seq, ws: socket, user: publicUser(u), homeId: null, connectedAt: Date.now(), match: null, ip: req.ip, ua: String(req.headers['user-agent'] ?? ''), mm: null, touch: true };
     conns.add(c);
     send(c, { type: 'hello', user: c.user, server_time: Date.now(), instance: env.instanceId });
     void offerRooms(c.user.id).catch(() => {}); // 剛連上：好友有開著的房就邀請
     if (phaseAt(clock(), Date.now()) === 'closing') send(c, { type: 'game.closing', closes_at: clock().status(Date.now()).closes_at });
     socket.on('message', async (raw) => {
       let msg: any; try { msg = JSON.parse(String(raw)); } catch { return; }
-      const isInput = msg?.type === 'match.input' || msg?.type === 'arena.input' || msg?.type === 'race.input';
+      const isInput = msg?.type === 'match.input' || msg?.type === 'arena.input' || msg?.type === 'race.input' || msg?.type === 'fight.input';
       if (!rateLimit(`ws:${c.id}:${isInput ? 'in' : 'other'}`, isInput ? 35 : 20, 1000)) {
         if (!isInput || Math.random() < 0.1) send(c, { type: 'error', code: 'RATE_LIMITED', request_id: msg?.request_id });
         return;
@@ -193,31 +219,20 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
       const ctx = { userId: c.user.id, ip: c.ip, ua: c.ua };
       try {
         switch (msg.type) {
-          case 'time.ping': send(c, { type: 'time.pong', t0: msg.t0, server_time: Date.now(), server_tick: c.match ? currentTick(c.match) : null }); break;
+          case 'time.ping': send(c, { type: 'time.pong', t0: msg.t0, server_time: Date.now(), server_tick: c.match ? currentTick(c.match) : null, fight_tick: currentFightTick(c.homeId) }); break;
           case 'home.join': {
             if (!isUuid(msg.home_id)) throw new AppError('BAD_REQUEST');
             const view = await viewHome(db, String(msg.home_id), c.user.id);
             if (c.mm && !c.mm.home.startsWith('room:') && c.mm.home !== view.home.id) { toAuthority({ t: 'mstairs.leave', home: c.mm.home, user: c.user.id }); c.mm = null; } // 換到別的家＝出局
-            leaveHome(c); c.homeId = view.home.id;
+            leaveHome(c); c.homeId = view.home.id; c.touch = !!msg.touch;
             send(c, { type: 'home.state', ...view });
             const pet = petSummary(view.home.is_owner ? view.pet : await currentPet(db, c.user.id));
             presence.setOwner(view.home.id, view.home.owner.id);
-            c.presenceUser = { ...c.user, pet };
+            c.presenceUser = { ...c.user, pet, touch: c.touch };
             await bus.publish({ t: 'presence', home: c.homeId, owner: view.home.owner.id, key: `${env.instanceId}:${c.id}`, on: true, user: c.presenceUser });
             break;
           }
           case 'home.leave': leaveHome(c); break;
-          // v1.4 打架模式：意圖一律經過 NOTIFY 交給負責這個家的執行個體
-          case 'arena.invite': {
-            if (!c.homeId) throw new AppError('NOT_IN_HOME');
-            await bus.publish({ t: 'arena.invite', home: c.homeId, user: c.user.id });
-            break;
-          }
-          case 'arena.reply': {
-            if (!c.homeId || typeof msg.invite !== 'string' || msg.invite.length > 40) return;
-            await bus.publish({ t: 'arena.reply', home: c.homeId, user: c.user.id, invite: msg.invite, accept: !!msg.accept });
-            break;
-          }
           case 'arena.join': case 'arena.leave': {
             if (!c.homeId) throw new AppError('NOT_IN_HOME');
             await bus.publish({ t: msg.type, home: c.homeId, user: c.user.id });
@@ -225,7 +240,15 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
           }
           case 'arena.input': {
             if (!c.homeId) return;
-            await bus.publish({ t: 'arena.in', home: c.homeId, user: c.user.id, left: !!msg.left, right: !!msg.right, jump: !!msg.jump, attack: !!msg.attack, upAtk: !!msg.upAtk, item: !!msg.item, equip: typeof msg.equip === 'string' ? msg.equip.slice(0, 10) : null });
+            await bus.publish({ t: 'arena.in', home: c.homeId, user: c.user.id, left: !!msg.left, right: !!msg.right, jump: !!msg.jump, attack: false, upAtk: false, item: false, equip: null });
+            break;
+          }
+          case 'fight.invite': case 'fight.reply': case 'fight.input': {
+            if (!c.homeId) throw new AppError('NOT_IN_HOME');
+            if (c.touch) { send(c, { type: 'fight.notice', home_id: c.homeId, code: 'TOUCH_DEVICE' }); break; }
+            if (msg.type === 'fight.invite') routeFightIntent({ t: 'fight.invite', home: c.homeId, user: c.user.id, key: `${env.instanceId}:${c.id}`, to: typeof msg.to === 'string' ? msg.to.slice(0, 40) : '' });
+            else if (msg.type === 'fight.reply') routeFightIntent({ t: 'fight.reply', home: c.homeId, user: c.user.id, key: `${env.instanceId}:${c.id}`, invite: typeof msg.invite === 'string' ? msg.invite.slice(0, 40) : '', accept: !!msg.accept });
+            else routeFightIntent({ t: 'fight.in', home: c.homeId, user: c.user.id, key: `${env.instanceId}:${c.id}`, fight_id: typeof msg.fight_id === 'string' ? msg.fight_id.slice(0, 40) : '', seq: msg.seq, inputs: msg.inputs });
             break;
           }
           case 'pet.action': {

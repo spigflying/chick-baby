@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { hintFor, padPress, TOUCH_HINT, controlMode, petKey, PadState, lerpFighters, resultText, HINT, showFightbar, resultView, nextEquip, itemHud, diffFx, RESULT_AUTO_MS, type ResultMsg, fightBlocker, petBlock, ranking, resultInput, lockSecs, RESULT_LOCK_MS, inviteSecs, NOTICE_TEXT } from '../src/fight';
+import { hintFor, padPress, TOUCH_HINT, controlMode, petKey, PadState, lerpFighters, resultText, HINT, showFightbar, resultView, diffFx, RESULT_AUTO_MS, type ResultMsg, fightBlocker, petBlock, ranking, resultInput, lockSecs, RESULT_LOCK_MS, inviteSecs, NOTICE_TEXT } from '../src/fight';
 
 const base = { isOwner: false, submenuOpen: false, navOpen: false, inArena: true, inFight: false };
 describe('fight input mode (v1.4)', () => {
@@ -16,7 +16,8 @@ describe('fight input mode (v1.4)', () => {
     expect(controlMode({ ...base, isOwner: true, inFight: true, navOpen: true })).toBe('nav');
   });
   it('key mapping and pad edge detection', () => {
-    expect(petKey('ArrowLeft')).toBe('left'); expect(petKey('ArrowUp')).toBe('jump'); expect(petKey(' ')).toBe('attack'); expect(petKey('Enter')).toBe('nav'); expect(petKey('q')).toBeNull(); expect(petKey('z')).toBe('item'); expect(petKey('x')).toBe('cycle');
+    expect(petKey('ArrowLeft')).toBe('left'); expect(petKey('ArrowUp')).toBe('jump'); expect(petKey('Enter')).toBe('nav');
+    expect(petKey(' ')).toBeNull(); expect(petKey('z')).toBeNull(); expect(petKey('x')).toBeNull(); expect(petKey('q')).toBeNull();
     const p = new PadState();
     expect(p.set('left', true)).toBe(true); expect(p.set('left', true)).toBe(false);
     expect(p.clear()).toBe(true); expect(p.clear()).toBe(false);
@@ -43,15 +44,7 @@ describe('fight v2 (v1.5): owner controls', () => {
     expect(controlMode({ ...own, navOpen: true })).toBe('nav'); expect(showFightbar('nav')).toBe(true);
     expect(showFightbar(controlMode({ ...own, visitors: false }))).toBe(false); // 自己一個人
     expect(showFightbar(controlMode({ ...own, inArena: false }))).toBe(false); // 寵物不能打
-    expect(HINT.pet).toContain('上啄'); expect(HINT.pet).toContain('Z 道具');
-  });
-  it('X cycles owned items; HUD shows equipped item + fights left', () => {
-    expect(nextEquip({ sword: 3, poop: 1 }, 'sword')).toBe('poop');
-    expect(nextEquip({ sword: 3, poop: 1 }, 'poop')).toBe('sword');
-    expect(nextEquip({ kame: 0 }, null)).toBeNull();
-    expect(itemHud('sword', { sword: 9 })).toBe('長劍 剩9場');
-    expect(itemHud('poop', { poop: 4, sword: 1 })).toBe('丟大便 剩4場・X換'); // v1.6.1：不顯示彈藥
-    expect(itemHud(null, {})).toBe('');
+    expect(HINT.pet).toContain('移動'); expect(HINT.pet).not.toContain('道具');
   });
   it('detects new swings and hits between snapshots', () => {
     const f = (o: any) => ({ u: 'a', pet: 'p', sp: 'duck', name: 'A', x: 0, y: 0, dir: 1 as const, atk: 0, inv: 0, hp: 100, fight: null, sn: 0, hn: 0, ...o });
@@ -96,7 +89,7 @@ describe('mobile fight controls', () => {
     expect(padPress('menu', false).apply).toBe(true); // 放開一律送出
   });
   it('touch devices get an on-screen hint instead of keyboard keys', () => {
-    expect(hintFor('pet', true)).toBe(TOUCH_HINT); expect(TOUCH_HINT).not.toContain('Enter');
+    expect(hintFor('pet', true)).toBe(TOUCH_HINT); expect(TOUCH_HINT).not.toContain('Enter'); expect(TOUCH_HINT).not.toContain('道具');
     expect(hintFor('pet', false)).toContain('Enter');
     // 手機沒有 Enter：訪客與有訪客時的主人預設就是寵物控制
     expect(controlMode({ ...base })).toBe('pet');

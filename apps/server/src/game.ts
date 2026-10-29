@@ -1,4 +1,3 @@
-import { listItems } from './items';
 import { ownedOutfits } from './outfits';
 import * as engine from '@chick/engine';
 import { clock } from './hours';
@@ -39,9 +38,8 @@ export async function getMe(db: Db, userId: string) {
   const w = await db.selectFrom('wallets').select('balance').where('user_id', '=', userId).executeTakeFirstOrThrow();
   const home = await db.selectFrom('homes').select(['id', 'name', 'access_mode']).where('owner_id', '=', userId).executeTakeFirstOrThrow();
   const pet = await currentPet(db, userId);
-  const items = await listItems(db, userId);
   const outfits = await ownedOutfits(db, userId);
-  return { user: { ...publicUser(u), share_code: u.share_code, role: u.role }, wallet: { balance: w.balance }, home, pet, items, outfits };
+  return { user: { ...publicUser(u), share_code: u.share_code, role: u.role }, wallet: { balance: w.balance }, home, pet, outfits };
 }
 
 async function currentPetRow(db: Db | Tx, ownerId: string) {

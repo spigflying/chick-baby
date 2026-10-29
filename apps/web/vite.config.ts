@@ -21,6 +21,7 @@ export default defineConfig({
       input: {
         main: path.resolve(root, 'index.html'),
         'race-demo': path.resolve(root, 'race-demo.html'),
+        'sfv-proto': path.resolve(root, 'sfv-proto.html'),
       },
     },
   },

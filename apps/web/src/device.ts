@@ -13,7 +13,7 @@ import { StairsClient } from './stairs';
 import { boardHtml, stairsResultHtml, type Board } from './board';
 import { inviteHtml, inviterHtml, multiResultHtml, raceNotice, rankText, stairsNotice, type StairsInvite } from './mstairs';
 import { trackById } from '@chick/engine';
-import { fightBlocker, inviteSecs, resultInput, lockSecs, coinStr, hintFor, padPress, controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, nextEquip, itemHud, resultView, diffFx, RESULT_AUTO_MS, ITEM_INFO, ITEM_ORDER, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
+import { fightBlocker, inviteSecs, resultInput, lockSecs, coinStr, hintFor, padPress, controlMode, petKey, PadState, lerpFighters, NOTICE_TEXT, resultText, HINT, showFightbar, resultView, diffFx, RESULT_AUTO_MS, type ArenaMsg, type FSnap, type Pad, type ResultMsg } from './fight';
 
 const W = 120, H = 100, GROUND = 86, HUD = 14;
 const MARK = '#ee4266'; // 自己的標記：和綠色螢幕對比
@@ -25,6 +25,7 @@ export interface Ctx {
   wallet: () => number; setWallet: (n: number) => void;
   toast: (t: string) => void;
   goHome: () => void;
+  startFight?: () => void;
   /** 下樓梯房：回到房間頁 */
   goStairsRoom?: () => void;
 }
@@ -48,12 +49,11 @@ export class Device {
   // ---------- v1.4 打架模式 ----------
   arena: { prev: ArenaMsg | null; cur: ArenaMsg; at: number } | null = null;
   navOpen = false; private padState = new PadState(); private lastJoin = 0; private myPresence: PresenceUser | null = null;
-  // v1.5：決勝瞬間凍結、結算畫面、打擊特效、道具
+  // 舊場地快照仍負責家中漫遊；正式格鬥畫面由 FightView 接手。
   frozen = false; private frozenAt = 0; result: ResultMsg | null = null; private resultTimer = 0; private resultAt = 0; private lockTimer = 0;
   invite: { id: string; from: string; from_name: string; to: string[]; until: number; answered: boolean } | null = null; private inviteTimer = 0;
   // M2 一起下樓梯：邀請（自己被邀請、或自己發起／已參加時保持連線）
   sinvite: StairsInvite | null = null; private sinviteTimer = 0;
-  equip: string | null = null; myItems: Record<string, number> = {};
   private fxSwings: { u: string; kind: string; t: number }[] = []; private fxHits: { u: string; dmg: number; t: number }[] = [];
   private arenaFighters(): FSnap[] {
     const a = this.arena; if (!a || (Date.now() - a.at > 3500 && !this.frozen)) return [];
@@ -65,8 +65,7 @@ export class Device {
     const me = this.meFighter();
     return this.stairs ? 'stairs' : controlMode({ isOwner: this.isOwner, submenuOpen: !!this.menu, navOpen: this.navOpen, inArena: !!me, inFight: !!me?.fight, visitors: this.guests.length > 0 });
   }
-  private sendPad() { this.ctx.live.send({ type: 'arena.input', ...this.padState.pad, equip: this.equip }); }
-  cycleEquip() { const n = nextEquip(this.myItems, this.equip); if (n && n !== this.equip) { this.equip = n; this.sendPad(); this.updateControls(); } }
+  private sendPad() { this.ctx.live.send({ type: 'arena.input', ...this.padState.pad }); }
   private setPad(b: keyof Pad, v: boolean) { if (this.padState.set(b, v)) this.sendPad(); }
   /** 進家後：自己的寵物能打（活著、醒著、沒生病）就加入場地；斷線重連或負責的執行個體換人時自動重新加入。 */
   private ensureJoined() {
@@ -80,8 +79,6 @@ export class Device {
     const m = this.mode();
     const pet = m === 'pet' || m === 'nav';
     (this.$('.fightbar') as HTMLElement).hidden = !showFightbar(m);
-    const hud = this.$('.itemhud'); const ht = pet ? itemHud(this.equip, this.myItems) : '';
-    hud.hidden = !ht; if (hud.textContent !== ht) hud.textContent = ht;
     const h = this.$('.hint'); const txt = m === 'stairs' ? '' : hintFor(m as 'pet', matchMedia('(pointer:coarse)').matches) ?? '';
     h.hidden = !txt; if (h.textContent !== txt) h.textContent = txt;
     this.$('.navbtn').classList.toggle('on', this.navOpen);
@@ -110,12 +107,11 @@ export class Device {
     }
     el.hidden = !txt; if (el.textContent !== txt) el.textContent = txt;
     btn.classList.toggle('off', !!this.blocker() || !!me?.fight);
-    this.ctx.live.inFight = !!me?.fight || !!this.invite || !!this.result;
   }
   /** F／「發起戰鬥」：先在前端說明不能打的原因，伺服器仍會再檢查。 */
   startInvite() {
-    const why = this.blocker(); if (why) return this.say(why);
-    if (!this.ctx.live.send({ type: 'arena.invite' })) this.say('連線中斷，稍後再試');
+    if (this.ctx.live.touch) return this.say('手機只能觀戰，請用電腦發起格鬥');
+    this.ctx.startFight?.();
   }
   private showInvite() {
     const el = this.$('.invite'), v = this.invite;
@@ -142,7 +138,6 @@ export class Device {
       if (fx.hits.length) this.shake();
       this.arena = { prev: m.frozen ? m : prev, cur: m, at: now };
       const me = m.fighters.find((f: FSnap) => f.u === this.ctx.me.id);
-      if (me) { this.myItems = me.items ?? {}; if (!this.equip || !(this.myItems[this.equip] > 0)) this.equip = me.eq ?? nextEquip(this.myItems, null); }
       if (m.frozen && !this.frozen) { this.frozen = true; this.frozenAt = now; this.draw(true); }
       const nowFight = !!this.meFighter()?.fight;
       if (nowFight && !wasFight && this.isOwner) this.say('有人來挑戰！方向鍵移動、空白鍵啄');
@@ -188,7 +183,6 @@ export class Device {
     this.lockTimer = window.setInterval(() => { const t = el.querySelector('.tap'); const e = Date.now() - this.resultAt; if (t) t.textContent = resultInput(e) === 'locked' ? `${lockSecs(e)} 秒後可關閉` : '點一下或按任意鍵繼續'; if (resultInput(e) !== 'locked') clearInterval(this.lockTimer); }, 200);
     this.confettiT = 0; this.drawConfetti();
     clearTimeout(this.resultTimer); this.resultTimer = window.setTimeout(() => this.dismissResult(), RESULT_AUTO_MS);
-    if (r.parts.some((p) => p.u === this.ctx.me.id)) void this.refreshItems();
   }
   private confettiT = 0;
   private drawConfetti() {
@@ -205,7 +199,6 @@ export class Device {
     clearTimeout(this.resultTimer); clearInterval(this.lockTimer); this.result = null; this.$('.fightres').hidden = true; this.unfreeze(); this.updateFightStat();
   }
   private unfreeze() { this.frozen = false; }
-  async refreshItems() { try { const r = await api('GET', '/items'); this.myItems = r.items ?? {}; if (this.equip && !(this.myItems[this.equip] > 0)) this.equip = nextEquip(this.myItems, null); this.updateControls(); if (this.menu === 'shop') this.renderMenu(); } catch { /* 下次 */ } }
   leaveArena() { if (this.meFighter()) this.ctx.live.send({ type: 'arena.leave' }); this.arena = null; }
   /** 畫場上的寵物（打架模式中的寵物改由伺服器快照決定位置）。 */
   drawArena(fs: FSnap[]) {
@@ -328,10 +321,10 @@ export class Device {
     this.el.className = 'device';
     this.el.innerHTML = `<canvas class="shell"></canvas><div class="inner"><div class="brand">CHICK♥BABY</div><div class="lcd">
       <div class="lcd-top"><span data-k="name">—</span><span data-k="stage">—</span><span data-k="coins">${coinHtml(0)}</span><span data-k="age">—</span></div><div class="toptip" role="tooltip" hidden></div>
-      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="stathelp" role="tooltip" hidden></div><div class="itemhud" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div><div class="invite sinv" hidden></div></div>
+      <div class="scr"><canvas class="screen" width="${W}" height="${H}"></canvas><div class="tags"></div><div class="stathelp" role="tooltip" hidden></div><div class="menu" hidden></div><div class="fightres" hidden></div><div class="invite" hidden></div><div class="invite sinv" hidden></div></div>
       <p class="fightstat" hidden></p>
       <div class="labels"></div>
-      <div class="fightbar" hidden><button data-pad="left" aria-label="左">◀</button><button data-pad="jump" aria-label="跳">▲</button><button data-pad="attack">啄</button><button data-pad="upAtk">上啄</button><button data-pad="item">道具</button><button data-pad="right" aria-label="右">▶</button><button class="navbtn">選單</button><button class="fightgo">發起戰鬥</button></div>
+      <div class="fightbar" hidden><button data-pad="left" aria-label="左">◀</button><button data-pad="jump" aria-label="跳">▲</button><button data-pad="right" aria-label="右">▶</button><button class="navbtn">選單</button><button class="fightgo">發起戰鬥</button></div>
       <p class="hint" hidden></p>
       <div class="gamebar" hidden><button data-dir="left">◀</button><button class="quit">離開</button><button data-dir="right">▶</button></div>
       <p class="msg">…</p></div></div>`;
@@ -423,9 +416,9 @@ export class Device {
       else cells = [
         { act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'play', icon: 'i_play', label: '樓梯' },
         p.sleeping ? { act: 'wake', icon: 'i_wake', label: '起床' } : { act: 'sleep', icon: 'i_sleep', label: '睡覺' },
-        { act: 'clean', icon: 'i_wash', label: '清潔' }, { act: 'doctor', icon: 'i_doc', label: '醫生' }, { act: 'shop', icon: 'i_shop', label: '道具' }, { act: 'status', icon: 'i_stat', label: '狀態' }];
+        { act: 'clean', icon: 'i_wash', label: '清潔' }, { act: 'doctor', icon: 'i_doc', label: '醫生' }, { act: 'shop', icon: 'i_shop', label: '服飾' }, { act: 'status', icon: 'i_stat', label: '狀態' }];
     } else if (!p || p.status !== 'alive') cells = [{ act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'play', icon: 'i_play', label: '樓梯' }, { act: 'home', icon: 'i_home', label: '回家' }];
-    else cells = [{ act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'play', icon: 'i_play', label: '樓梯' }, { act: 'shop', icon: 'i_shop', label: '道具' }, { act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'home', icon: 'i_home', label: '回家' }];
+    else cells = [{ act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'play', icon: 'i_play', label: '樓梯' }, { act: 'shop', icon: 'i_shop', label: '服飾' }, { act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'home', icon: 'i_home', label: '回家' }];
     const key = cells.map((c) => c.act).join(',');
     const box = this.$('.labels');
     if (box.dataset.key === key) return;
@@ -544,13 +537,12 @@ export class Device {
       const b = petKey(k); if (!b) return;
       e.preventDefault(); if (e.repeat) return;
       if (b === 'nav') { this.navOpen = true; this.updateControls(); return; }
-      if (b === 'cycle') { this.cycleEquip(); return; }
       this.setPad(b, true); return;
     }
     if (mode === 'nav' && k === 'Escape') { this.navOpen = false; this.updateControls(); e.preventDefault(); return; }
     if (this.menu) {
       if (k === 'Escape' || k === 'Backspace') this.closeMenu();
-      else if ((this.menu === 'feed' || this.menu === 'shop') && (k === 'ArrowUp' || k === 'ArrowDown')) { const n = this.menu === 'feed' ? this.ctx.cfg.foods.length : ITEM_ORDER.length + OUTFIT_IDS.length; this.menuSel = (this.menuSel + (k === 'ArrowUp' ? n - 1 : 1)) % n; this.renderMenu(); }
+      else if ((this.menu === 'feed' || this.menu === 'shop') && (k === 'ArrowUp' || k === 'ArrowDown')) { const n = this.menu === 'feed' ? this.ctx.cfg.foods.length : OUTFIT_IDS.length; this.menuSel = (this.menuSel + (k === 'ArrowUp' ? n - 1 : 1)) % n; this.renderMenu(); }
       else if (this.menu === 'board' && (k === 'Enter' || k === ' ')) { this.closeMenu(); if (this.isOwner) this.startStairs(); else this.startMulti(); }
       else if (k === 'Enter' || k === ' ') { if (this.menu === 'feed') this.chooseFood(this.ctx.cfg.foods[this.menuSel]); else if (this.menu === 'shop') void this.shopPick(this.menuSel); else this.closeMenu(); }
       else return;
@@ -562,7 +554,7 @@ export class Device {
   };
   private onKeyUp = (e: KeyboardEvent) => {
     if (this.stairs) return void this.stairs.key(e.key, false);
-    const b = petKey(e.key); if (b && b !== 'nav' && b !== 'cycle') this.setPad(b, false);
+    const b = petKey(e.key); if (b && b !== 'nav') this.setPad(b, false);
   };
   bind() {
     document.addEventListener('keydown', this.onKey);
@@ -647,7 +639,7 @@ export class Device {
     this.sel = i; this.drawCells();
     const a = this.cells[i]?.act; const p = this.pet;
     if (a === 'status') return this.openMenu('status');
-    if (a === 'shop') { if (this.meFighter()?.fight) return this.say('對戰中不能買道具'); this.openMenu('shop'); void this.refreshItems(); void this.refreshOutfits(); return; }
+    if (a === 'shop') { this.openMenu('shop'); void this.refreshOutfits(); return; }
     if (a === 'home') return this.ctx.goHome();
     if (a === 'hatch') return this.openMenu('hatch');
     if (a === 'play' && !this.isOwner) return this.openBoard(); // 訪客：只能一起下樓梯（用自己的寵物）
@@ -715,13 +707,10 @@ export class Device {
         (this.isOwner ? '' : `<div class="note">今天你餵了 ${v?.today_mine ?? 0}/${f.visitorDailyPerVisitorPerPet}・全部訪客 ${v?.today_pet_total ?? 0}/${f.visitorDailyPerPet}</div>`) +
         '<div class="mi back" data-i="-1">✕ 關閉</div>';
     } else if (this.menu === 'shop') {
-      el.innerHTML = `<div class="mt">— 道具店 —  ${coinHtml(coins)}</div>` + ITEM_ORDER.map((id, i) => {
-        const it = ITEM_INFO[id], own = this.myItems[id] ?? 0;
-        return `<div class="mi${i === this.menuSel ? ' on' : ''}${it.price > coins ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(it.name)}<small>${it.fights}場</small>${own ? `<small>有${own}場</small>` : ''}</span><em>${coinHtml(it.price)}</em></div>`;
-      }).join('') + '<div class="mt">— 服飾 —</div>' + OUTFIT_IDS.map((id, j) => {
-        const i = ITEM_ORDER.length + j, o = OUTFITS[id], own = this.myOutfits.includes(id), on = (this.pet?.outfits ?? []).includes(id);
+      el.innerHTML = `<div class="mt">— 服飾 —  ${coinHtml(coins)}</div>` + OUTFIT_IDS.map((id, i) => {
+        const o = OUTFITS[id], own = this.myOutfits.includes(id), on = (this.pet?.outfits ?? []).includes(id);
         return `<div class="mi${i === this.menuSel ? ' on' : ''}${!own && o.price > coins ? ' off' : ''}" data-i="${i}"><span>${i === this.menuSel ? '▶' : '　'}${esc(o.name)}${own ? `<small>${on ? '穿著' : '已擁有'}</small>` : ''}</span><em>${own ? (on ? '脫下' : '穿上') : coinHtml(o.price)}</em></div>`;
-      }).join('') + `<div class="note">${esc(this.menuSel < ITEM_ORDER.length ? (ITEM_INFO[ITEM_ORDER[this.menuSel]]?.desc ?? '') + '・Z 使用、X 切換' : '服飾買一次永久擁有，可隨時穿脫；頭上、臉上各穿一件')}</div><div class="mi back" data-i="-1">✕ 關閉</div>`;
+      }).join('') + '<div class="note">服飾買一次永久擁有，可隨時穿脫；頭上、臉上各穿一件</div><div class="mi back" data-i="-1">✕ 關閉</div>';
     } else if (this.menu === 'status') {
       if (!p) { el.innerHTML = '<div class="mt">— 狀態 —</div><p>還沒有寵物。</p><div class="mi back">✕ 關閉</div>'; return; }
       const row = (k: string, v: unknown) => `<div><b>${k}</b><span>${v}</span></div>`;
@@ -755,7 +744,7 @@ export class Device {
   }
   myOutfits: string[] = [];
   async refreshOutfits() { try { const r = await api('GET', '/outfits'); this.myOutfits = r.owned ?? []; if (this.menu === 'shop') this.renderMenu(); } catch { /* 下次 */ } }
-  shopPick(i: number) { return i < ITEM_ORDER.length ? this.buyItem(ITEM_ORDER[i]) : this.outfitPick(OUTFIT_IDS[i - ITEM_ORDER.length]); }
+  shopPick(i: number) { return this.outfitPick(OUTFIT_IDS[i]); }
   async outfitPick(id: string) {
     if (this.busy || !id) return; this.busy = true;
     const name = (OUTFITS as any)[id].name;
@@ -768,15 +757,6 @@ export class Device {
         const r = await act('POST', '/outfits/wear', { outfit_id: id, on }); this.setPet(r.pet); this.say(on ? `穿上${name}` : `脫下${name}`);
       }
       this.renderMenu(); this.renderTop();
-    } catch (e) { this.say(errText(e)); }
-    finally { this.busy = false; }
-  }
-  async buyItem(id: string) {
-    if (this.busy) return; this.busy = true;
-    try {
-      const r = await act('POST', '/items/buy', { item_id: id });
-      this.ctx.setWallet(r.balance); this.myItems = r.items ?? this.myItems; if (!this.equip) this.equip = id;
-      this.renderMenu(); this.renderTop(); this.say(`買了 ${ITEM_INFO[id].name}！可用 ${r.fights_left} 場`);
     } catch (e) { this.say(errText(e)); }
     finally { this.busy = false; }
   }

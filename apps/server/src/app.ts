@@ -15,8 +15,6 @@ import * as g from './game';
 import { audit, rateLimit } from './core';
 import { isUuid } from './util';
 import { setupWs } from './ws';
-import { buyItem, itemCatalog, listItems } from './items';
-import { inFight } from './arena';
 import type { Bus } from './bus';
 import { clock } from './hours';
 import { createDbGate, type DbGate } from './gate';
@@ -124,14 +122,11 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
         a.delete(`/homes/:id/${route}`, async (req) => g.editList(db, ctx(req), (req.params as any).id, table, 'remove', req.body));
       }
       a.get('/homes/:id/visitors', async (req) => g.homeVisitors(db, (req.params as any).id, req.user!.id));
-      // ---- v1.5 道具 ----
       // ---- 賽車模式（零件用寵物金幣買、獎金直接發寵物金幣）----
       a.get('/race/profile', async (req) => ({ catalog: raceCatalog(), profile: await getRaceProfile(db, req.user!.id) }));
       a.post('/race/buy', async (req) => { const b = (req.body ?? {}) as any; return b.car !== undefined || b.paint !== undefined ? buyCar(db, ctx(req), b.car, b.paint) : buyPart(db, ctx(req), b.kind, b.tier); });
       a.get('/race/leaderboard/:track', async (req) => raceLeaderboard(db, (req.params as any).track));
       a.get('/leaderboard/stairs', async (req) => g.stairsLeaderboard(db, req.user!.id));
-      a.get('/items', async (req) => ({ catalog: itemCatalog(), items: await listItems(db, req.user!.id) }));
-      a.post('/items/buy', async (req) => { const b = (req.body ?? {}) as any; return buyItem(db, ctx(req), b.item_id, b.request_id, inFight); });
       // ---- v1.7 服飾（皇冠、墨鏡）----
       a.get('/outfits', async (req) => ({ catalog: outfitCatalog(), owned: await ownedOutfits(db, req.user!.id) }));
       a.post('/outfits/buy', async (req) => { const b = (req.body ?? {}) as any; return buyOutfit(db, ctx(req), b.outfit_id, b.request_id); });
