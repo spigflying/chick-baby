@@ -30,6 +30,22 @@ beforeEach(() => { setClock(ALWAYS_OPEN); _fightInvites.clear(); _fights.clear()
 afterEach(() => { vi.restoreAllMocks(); _fightInvites.clear(); _fights.clear(); _fightCooldowns.clear(); });
 
 describe('formal home 1v1', () => {
+  it('lets each player choose a mode and rejects beginner macros from a classic controller', async () => {
+    const { sent } = setup();
+    invite(home, 'a', 'b', Date.now(), 'i1:a', 'beginner');
+    const invitation = sent.find((m) => m.kind === 'invite');
+    expect(invitation.from_mode).toBe('beginner');
+    reply(home, 'b', invitation.invite, true, 'i1:b', 'classic');
+    for (let i = 0; i < 20 && !_fights.has(home); i++) await new Promise((r) => setTimeout(r, 0));
+    const f: any = _fights.get(home)!;
+    expect(f.room.state.mode).toEqual([1, 0]);
+    expect(sent.find((m) => m.kind === 'start').players.map((p: any) => p.mode)).toEqual(['beginner', 'classic']);
+    f.room.receive(2, { type: 'sfv.input', seq: 1, inputs: [{ tick: 2, mask: SFV.EASY_DP }] }, Date.now());
+    expect(f.room.stats.bad[1]).toBe(1);
+    f.room.receive(1, { type: 'sfv.input', seq: 1, inputs: [{ tick: 2, mask: SFV.EASY_DP }] }, Date.now());
+    expect(f.room.stats.bad[0]).toBe(0);
+  });
+
   it('only the named desktop opponent can accept, then DB insert finishes before start is announced', async () => {
     const { sent, rows } = setup();
     invite(home, 'a', 'b', Date.now(), 'i1:a');

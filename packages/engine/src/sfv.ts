@@ -7,7 +7,8 @@ export const SFV = (() => {
   'use strict';
   const TICK_HZ = 60, TICK_MS = 1000 / TICK_HZ;
   const UP = 1, DOWN = 2, LEFT = 4, RIGHT = 8, LP = 16, HP = 32, LK = 64, HK = 128;
-  const PUNCH = LP | HP, KICK = LK | HK, BUTTONS = 0xf0;
+  const EASY_HADO = 256, EASY_DP = 512, EASY_TATSU = 1024, EASY_CA = 2048, INPUT_MASK = 4095;
+  const PUNCH = LP | HP, KICK = LK | HK, BUTTONS = 0xff0;
   const STAGE_W = 960, WALL = 24;
   const HP_MAX = 1000, STUN_MAX = 1000, EX_BAR = 100, EX_MAX = 300, VG_MAX = 300;
   // 狀態裡的輸入環形緩衝：搓招最長看 24 tick（236236K），32 夠用，也讓快照維持在 600 bytes 以下
@@ -103,18 +104,18 @@ export const SFV = (() => {
     Object.assign(p, { x, f, mv: -1, hp: HP_MAX }); p.hist = new Array(HIST).fill(0);
     return p;
   }
-  function createState() {
+  function createState(modes = [0, 0]) {
     return { tick: 0, frz: 0, fo: 0, rs: RS.INTRO, rt: INTRO_T, rnd: 1, tm: ROUND_TICKS, win: -1, to: 0, lw: -1, w: [0, 0],
-      p: [newPlayer(STAGE_W / 2 - 120, 1), newPlayer(STAGE_W / 2 + 120, -1)], pr: [] };
+      mode: modes.slice(), p: [newPlayer(STAGE_W / 2 - 120, 1), newPlayer(STAGE_W / 2 + 120, -1)], pr: [] };
   }
-  const hexOf = (a) => a.map((v) => (v < 16 ? '0' : '') + v.toString(16)).join('');
-  const histOf = (h) => { const a = new Array(HIST); for (let i = 0; i < HIST; i++) a[i] = parseInt(h.substr(i * 2, 2), 16); return a; };
+  const hexOf = (a) => a.map((v) => v.toString(16).padStart(3, '0')).join('');
+  const histOf = (h) => { const a = new Array(HIST); for (let i = 0; i < HIST; i++) a[i] = parseInt(h.substr(i * 3, 3), 16); return a; };
   /** 快照：純數字陣列＋輸入歷史 hex 字串，整包 < 600 bytes */
   function packState(s) {
-    return JSON.stringify([S_FIELDS.map((k) => s[k]), s.w, s.p.map((p) => [...P_FIELDS.map((k) => p[k]), hexOf(p.hist)]), s.pr.map((q) => Q_FIELDS.map((k) => q[k]))]);
+    return JSON.stringify([S_FIELDS.map((k) => s[k]), s.w, s.p.map((p) => [...P_FIELDS.map((k) => p[k]), hexOf(p.hist)]), s.pr.map((q) => Q_FIELDS.map((k) => q[k])), s.mode]);
   }
   function unpackState(str) {
-    const [g, w, ps, qs] = JSON.parse(str), s = {};
+    const [g, w, ps, qs, mode] = JSON.parse(str), s = { mode: mode ?? [0, 0] };
     S_FIELDS.forEach((k, j) => { s[k] = g[j]; });
     s.w = w.slice();
     s.p = ps.map((a) => { const p = {}; P_FIELDS.forEach((k, j) => { p[k] = a[j]; }); p.hist = histOf(a[P_FIELDS.length]); return p; });
@@ -204,6 +205,14 @@ export const SFV = (() => {
   function pickCommand(s, i, o) {
     const p = s.p[i], t = s.tick, f = p.f, press = pressAt(p, t);
     if (!press) return -1;
+    if (s.mode[i] === 1) {
+      if (o.sup && p.ex >= EX_MAX && (press & EASY_CA)) return M.CA;
+      if (o.special) {
+        if (press & EASY_DP) return M.DP_H;
+        if ((press & EASY_HADO) && !s.pr.some((q) => q.o === i)) return M.HADO_L;
+        if (press & EASY_TATSU) return M.TATSU_L;
+      }
+    }
     if (o.air) return press & PUNCH ? M['8HP'] : press & KICK ? M['8HK'] : -1;
     const recent = recentPress(p, t), both = (b) => comboPressed(p, t, b);
     const has = (seq, win = CMD_WINDOW) => motion(p, t, f, seq, win);
@@ -484,7 +493,7 @@ export const SFV = (() => {
   function simulateSFVTick(s, m1, m2) {
     s.tick++;
     const t = s.tick;
-    s.p[0].hist[t % HIST] = m1 & 255; s.p[1].hist[t % HIST] = m2 & 255;
+    s.p[0].hist[t % HIST] = m1 & INPUT_MASK; s.p[1].hist[t % HIST] = m2 & INPUT_MASK;
     if (s.frz > 0) { s.frz--; return s; } // 超必殺暗場：全部凍結
     if (s.rs === RS.OVER) return s;
     if (s.rs === RS.INTRO) { if (--s.rt <= 0) s.rs = RS.FIGHT; return s; }
@@ -500,7 +509,7 @@ export const SFV = (() => {
   }
 
   return {
-    TICK_HZ, TICK_MS, THROW_ANIM, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
+    TICK_HZ, TICK_MS, THROW_ANIM, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
     ST, ST_NAME, RS, MOVE_LIST, M, PROJ, P_FIELDS, defineMove, createState, simulateSFVTick, packState, unpackState, cloneState, hashState, hashStr,
     dirOf, maskAt, motion, canBlock, hurtboxes, hitboxOf, pushbox, projBox, overlap,
   };

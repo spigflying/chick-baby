@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { SFV } from '@chick/engine';
 import { FightView, fightCandidates, smoothFightState } from '../src/fight-view';
 
 const pet = (extra: Record<string, unknown> = {}) => ({ status: 'alive', sleeping: false, sick: false, ...extra });
@@ -18,6 +19,34 @@ describe('formal fight opponent picker', () => {
 });
 
 describe('fight rendering', () => {
+  it('sends each player’s chosen mode with the invitation and acceptance', () => {
+    const view = Object.create(FightView.prototype) as any;
+    const send = vi.fn(() => true);
+    view.live = { send };
+    view.dialog = { hidden: false };
+    view.pendingMode = 'beginner';
+    view.dialogClick({ target: { closest: () => ({ dataset: { to: 'friend' } }) } });
+    expect(send).toHaveBeenLastCalledWith({ type: 'fight.invite', to: 'friend', mode: 'beginner' });
+    view.dialogClick({ target: { closest: () => ({ dataset: { accept: '1', invite: 'round-1', mode: 'classic' } }) } });
+    expect(send).toHaveBeenLastCalledWith({ type: 'fight.reply', invite: 'round-1', accept: true, mode: 'classic' });
+  });
+
+  it('shows the chosen mode’s own move list', () => {
+    const help = { innerHTML: '', textContent: '' };
+    const view = Object.create(FightView.prototype) as any;
+    view.root = { querySelector: () => help };
+    view.current = { pid: 1, players: [{ mode: 'classic' }, { mode: 'beginner' }] };
+    view.held = new Set(['KeyO']);
+    view.updateHelp();
+    expect(help.innerHTML).toContain('↓↘→＋拳');
+    expect(view.mask()).toBe(0);
+    view.current.pid = 2;
+    view.updateHelp();
+    expect(help.innerHTML).toContain('O 蛋波');
+    expect(help.innerHTML).not.toContain('↓↘→＋拳');
+    expect(view.mask()).toBe(SFV.EASY_HADO);
+  });
+
   it('clears the previous result and its timer when a new fight starts', () => {
     vi.useFakeTimers();
     try {

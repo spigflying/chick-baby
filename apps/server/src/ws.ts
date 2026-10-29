@@ -246,8 +246,8 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
           case 'fight.invite': case 'fight.reply': case 'fight.input': {
             if (!c.homeId) throw new AppError('NOT_IN_HOME');
             if (c.touch) { send(c, { type: 'fight.notice', home_id: c.homeId, code: 'TOUCH_DEVICE' }); break; }
-            if (msg.type === 'fight.invite') routeFightIntent({ t: 'fight.invite', home: c.homeId, user: c.user.id, key: `${env.instanceId}:${c.id}`, to: typeof msg.to === 'string' ? msg.to.slice(0, 40) : '' });
-            else if (msg.type === 'fight.reply') routeFightIntent({ t: 'fight.reply', home: c.homeId, user: c.user.id, key: `${env.instanceId}:${c.id}`, invite: typeof msg.invite === 'string' ? msg.invite.slice(0, 40) : '', accept: !!msg.accept });
+            if (msg.type === 'fight.invite') routeFightIntent({ t: 'fight.invite', home: c.homeId, user: c.user.id, key: `${env.instanceId}:${c.id}`, to: typeof msg.to === 'string' ? msg.to.slice(0, 40) : '', mode: msg.mode ?? 'classic' });
+            else if (msg.type === 'fight.reply') routeFightIntent({ t: 'fight.reply', home: c.homeId, user: c.user.id, key: `${env.instanceId}:${c.id}`, invite: typeof msg.invite === 'string' ? msg.invite.slice(0, 40) : '', accept: !!msg.accept, mode: msg.mode ?? 'classic' });
             else routeFightIntent({ t: 'fight.in', home: c.homeId, user: c.user.id, key: `${env.instanceId}:${c.id}`, fight_id: typeof msg.fight_id === 'string' ? msg.fight_id.slice(0, 40) : '', seq: msg.seq, inputs: msg.inputs });
             break;
           }

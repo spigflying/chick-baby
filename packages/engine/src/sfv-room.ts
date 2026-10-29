@@ -26,9 +26,9 @@ export const SFVServer = ((SFV) => {
   }
 
   class SFVRoom {
-    constructor({ matchId, now, send, closesAt = Infinity, users = ['p1', 'p2'], onTick = null }) {
+    constructor({ matchId, now, send, closesAt = Infinity, users = ['p1', 'p2'], modes = [0, 0], onTick = null }) {
       this.matchId = matchId; this.send = send; this.closesAt = closesAt; this.users = users; this.onTick = onTick;
-      this.state = SFV.createState(); this.tick = 0; this.status = 'playing'; this.nextAt = now + SFV.TICK_MS;
+      this.state = SFV.createState(modes); this.tick = 0; this.status = 'playing'; this.nextAt = now + SFV.TICK_MS;
       this.inbox = [new Map(), new Map()]; this.last = [0, 0]; this.seq = [0, 0]; this.edgeTick = [0, 0];
       this.limits = [0, 1].map(() => ({ input: new RateLimiter(INPUT_LIMIT), other: new RateLimiter(OTHER_LIMIT) }));
       this.pending = []; this.pendingFrom = 1;
@@ -45,7 +45,7 @@ export const SFVServer = ((SFV) => {
       if (!Number.isInteger(msg.seq) || msg.seq <= this.seq[i]) return; // 重送只補遺失，不讓舊狀態蓋掉新狀態
       if (!Array.isArray(msg.inputs) || msg.inputs.length > MAX_ENTRIES) { this.stats.bad[i]++; return; }
       for (const e of msg.inputs) {
-        if (!Number.isInteger(e?.tick) || !Number.isInteger(e?.mask) || e.mask < 0 || e.mask > 255) { this.stats.bad[i]++; continue; }
+        if (!Number.isInteger(e?.tick) || !Number.isInteger(e?.mask) || e.mask < 0 || e.mask > (this.state.mode[i] ? SFV.INPUT_MASK : 255)) { this.stats.bad[i]++; continue; }
         let at = e.tick;
         if (at > this.tick + MAX_AHEAD) { this.stats.bad[i]++; continue; }
         if (at <= this.edgeTick[i]) continue; // 累積重送已收過的 edge，不重複套用也不誤算遲到

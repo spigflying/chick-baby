@@ -22,9 +22,9 @@ export const SFVClient = ((SFV, SFVServer) => {
   }
 
   class NetClient {
-    constructor({ pid, sample, send }) {
+    constructor({ pid, sample, send, modes = [0, 0] }) {
       this.pid = pid; this.i = pid - 1; this.sample = sample; this.send = send;
-      this.confirmed = SFV.createState(); this.C = 0;           // 伺服器確認到第 C tick 的權威狀態
+      this.confirmed = SFV.createState(modes); this.C = 0;           // 伺服器確認到第 C tick 的權威狀態
       this.predicted = SFV.cloneState(this.confirmed); this.L = 0; // 畫面上顯示的本地預測（第 L tick）
       this.own = new Map(); this.used = new Map(); this.lastConf = [0, 0];
       this.queue = []; this.lastQueued = 0; this.lastFlushL = -BATCH_TICKS; this.seq = 0; this.acked = 0; this.sendTimes = [];
@@ -109,7 +109,7 @@ export const SFVClient = ((SFV, SFVServer) => {
       this.stats.maxPerSec = Math.max(this.stats.maxPerSec, this.sendTimes.length);
     }
     step(now) {
-      const t = this.L + 1, mask = this.sample(this.predicted, this.pid) & 255, at = t + INPUT_DELAY;
+      const t = this.L + 1, mask = this.sample(this.predicted, this.pid) & SFV.INPUT_MASK, at = t + INPUT_DELAY;
       this.own.set(at, mask);
       if (mask !== this.lastQueued) { this.queue.push({ tick: at, mask }); this.lastQueued = mask; }
       this.flush(now, t);
@@ -136,7 +136,7 @@ export const SFVClient = ((SFV, SFVServer) => {
 
   /** 觀戰只套用伺服器確認過的 tick；缺號時等下一個快照，不做預測。 */
   class SpectatorClient {
-    constructor() { this.state = SFV.createState(); this.tick = 0; this.ended = null; }
+    constructor(modes = [0, 0]) { this.state = SFV.createState(modes); this.tick = 0; this.ended = null; }
     onMessage(msg) {
       if (msg.type === 'sfv.ticks') {
         const n = msg.m.length >> 1;
@@ -271,6 +271,7 @@ export const SFVClient = ((SFV, SFVServer) => {
       if (mv.limb === 'kicks') reach = [62, mv.hitIndex(mt) & 1 ? -78 : -46];      // 火雞連環踢：高低交替
       if (mv.limb === 'arm') { P.fh = lerp2(P.fh, reach, ext); if (mv.both) P.bh = lerp2(P.bh, [reach[0] - 6, reach[1] + 6], ext); }
       else if (mv.limb) P.ff = lerp2(P.ff, reach, ext);
+      if (mv.id.startsWith('DP_')) { P.fh = [24 + 12 * ext, P.sh - 12 - 34 * ext]; P.bh = [-10, P.sh + 10]; P.lean = mt < mv.S ? -8 : 8; }
       if (mv.id === 'VT') P.lean = 8;
     }
     return P;
@@ -327,6 +328,7 @@ export const SFVClient = ((SFV, SFVServer) => {
     }
     if (P.lying) drawLying(ctx, ox, oy, p.f, sk); else drawFigure(ctx, ox, oy, p.f, P, sk);
     const mv = p.st === SFV.ST.MOVE ? SFV.MOVE_LIST[p.mv] : null;
+    if (mv?.id.startsWith('DP_') && p.mt >= mv.S - 2 && p.mt < mv.S + mv.A + 6) drawUppercut(ctx, ox, oy, p.f, p.mt - mv.S, mv.id === 'DP_EX');
     if (mv && mv.projectile !== undefined && p.mt <= mv.S + 4) drawCharge(ctx, s, i, P, ox, oy, mv);
     const top = oy + (P.lying ? -30 : P.head - 18);
     if (p.st === SFV.ST.DIZZY) {
@@ -341,6 +343,19 @@ export const SFVClient = ((SFV, SFVServer) => {
       const hit = SFV.hitboxOf(p);
       if (hit) rect(ctx, hit.box, hit.used ? '#ff3b3b22' : '#ff3b3b88', COL.hit, hit.thr);
     }
+  }
+  function drawUppercut(ctx, x, y, facing, phase, ex) {
+    ctx.save(); ctx.translate(x, y); ctx.scale(facing, 1);
+    const fade = Math.max(0, 1 - Math.max(phase, 0) / 15);
+    for (let k = 0; k < 3; k++) {
+      ctx.globalAlpha = fade * (0.8 - k * 0.2);
+      ctx.strokeStyle = ex ? '#8deaff' : k === 0 ? '#fff4a8' : '#ff9d38';
+      ctx.lineWidth = 7 - k * 2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(12 + k * 9, -14 - phase * 2);
+      ctx.quadraticCurveTo(72 + k * 5, -65 - phase * 3, 34 + k * 5, -132 - phase * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
   function drawCharge(ctx, s, i, P, ox, oy, mv) {
     const p = s.p[i], f = p.f, col = COL.proj[i], ex = mv.projectile === 2;

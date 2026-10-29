@@ -49,6 +49,26 @@ describe('defineMove', () => {
 
 describe('command parser', () => {
   const started = (s: any) => SFV.MOVE_LIST[s.p[0].mv]?.id;
+  it('beginner mode uses one key per special while classic still requires motions', () => {
+    for (const [mask, id] of [[SFV.EASY_HADO, 'HADO_L'], [SFV.EASY_DP, 'DP_H'], [SFV.EASY_TATSU, 'TATSU_L']] as const) {
+      const beginner = SFV.createState([1, 0]); beginner.rs = SFV.RS.FIGHT;
+      run(beginner, [mask]);
+      expect(started(beginner)).toBe(id);
+      const classic = fight();
+      run(classic, [mask]);
+      expect(started(classic)).not.toBe(id);
+    }
+    const superState = SFV.createState([1, 0]); superState.rs = SFV.RS.FIGHT; superState.p[0].ex = SFV.EX_MAX;
+    run(superState, [SFV.EASY_CA]);
+    expect(started(superState)).toBe('CA');
+    const restored = SFV.unpackState(SFV.packState(superState));
+    expect(restored.mode).toEqual([1, 0]);
+    expect(restored.p[0].hist[restored.tick % SFV.HIST]).toBe(SFV.EASY_CA);
+    expect(SFV.hashState(restored)).toBe(SFV.hashState(superState));
+    const secondPlayer = SFV.createState([0, 1]); secondPlayer.rs = SFV.RS.FIGHT;
+    run(secondPlayer, [0], [SFV.EASY_DP]);
+    expect(SFV.MOVE_LIST[secondPlayer.p[1].mv].id).toBe('DP_H');
+  });
   it('236P = 蛋波, 623P / 626P / 6236P = 衝天啄, 214K = 旋風翅', () => {
     expect(started(run(fight(300, 600), [DOWN, DOWN | RIGHT, RIGHT | LP]))).toBe('HADO_L');
     expect(started(run(fight(300, 600), [RIGHT, DOWN, DOWN | RIGHT | HP]))).toBe('DP_H');
