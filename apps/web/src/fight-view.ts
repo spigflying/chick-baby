@@ -29,6 +29,8 @@ export class FightView {
   private current: any = null;
   private raf = 0;
   private closeTimer = 0;
+  private visual: any = null;
+  private lastDrawAt = 0;
 
   constructor(private live: Live, private me: { id: string; display_name: string }, private toast: (s: string) => void) {
     this.root = document.createElement('div'); this.root.className = 'sfv-live'; this.root.hidden = true;
@@ -103,6 +105,11 @@ export class FightView {
         else if (!pid && this.current.pid) { this.current.player = null; this.current.pid = 0; this.live.inFight = false; }
         return;
       }
+      // 上場的結果面板與自動關閉計時器不能帶進新場次。
+      clearTimeout(this.closeTimer);
+      (this.root.querySelector('.sfv-result') as HTMLElement).hidden = true;
+      this.visual = null;
+      this.lastDrawAt = 0;
       this.current = { id: m.fight_id, players: m.players, pid, spectator: new SpectatorClient(), player: null, result: null, aborted: null };
       if (pid) this.becomePlayer(pid);
       const names = m.players.map((p: any) => p.name);
@@ -142,8 +149,8 @@ export class FightView {
     const el = this.root.querySelector('.sfv-result') as HTMLElement; el.hidden = false; el.innerHTML = `<b>${esc(title)}</b><span>${esc(detail)}</span><small>按 Enter 關閉，或 6 秒後自動返回</small>`;
     clearTimeout(this.closeTimer); this.closeTimer = window.setTimeout(() => this.finishView(), 6000);
   }
-  private finishView() { this.closeView(); this.banner.hidden = true; this.current = null; this.held.clear(); }
-  private openView() { if (!this.current) return; this.root.hidden = false; }
+  private finishView() { clearTimeout(this.closeTimer); this.closeView(); this.banner.hidden = true; this.current = null; this.visual = null; this.held.clear(); }
+  private openView() { if (!this.current) return; if (this.root.hidden) { this.visual = null; this.lastDrawAt = 0; } this.root.hidden = false; }
   private closeView() { if (!this.current || (!this.current.result && !this.current.aborted && this.current.pid)) return; this.root.hidden = true; }
   private mask() { let m = 0; for (const code of this.held) m |= KEY_BITS[code] ?? 0; return m; }
   private keyDown = (e: KeyboardEvent) => {
@@ -158,14 +165,31 @@ export class FightView {
     if (!this.root.hidden && this.current) {
       const now = Date.now(); this.current.player?.frame(now);
       const state = this.current.player?.predicted ?? this.current.spectator.state;
+      const elapsed = this.lastDrawAt ? Math.min(50, now - this.lastDrawAt) : 0;
+      this.lastDrawAt = now;
+      const shown = smoothFightState(state, this.visual, elapsed, this.current.pid);
+      this.visual = shown;
       const ended = this.current.aborted ? { aborted: true } : this.current.result ? { aborted: false, win: this.current.result.winner ? this.current.players.findIndex((p: any) => p.user_id === this.current.result.winner) : 2 } : null;
-      drawFight(this.ctx, state, { showBoxes: false, me: this.current.pid ? this.current.pid - 1 : -1, names: this.current.players.map((p: any) => p.name), ended });
+      drawFight(this.ctx, shown, { showBoxes: false, me: this.current.pid ? this.current.pid - 1 : -1, names: this.current.players.map((p: any) => p.name), ended });
       const debug = this.root.querySelector('.sfv-debug') as HTMLElement;
       debug.hidden = new URLSearchParams(location.search).get('debug') !== '1';
       if (!debug.hidden) debug.textContent = this.current.player ? `確認 ${this.current.player.C}・預測 ${this.current.player.L}・rollback ${this.current.player.stats.rollbacks}` : `觀戰確認 ${this.current.spectator.tick}`;
     }
     this.raf = requestAnimationFrame(this.draw);
   };
+}
+
+// 只平滑畫出來的位置；碰撞、輸入與回滾仍使用未修改的權威／預測狀態。
+export function smoothFightState(state: any, previous: any, elapsed: number, pid: number) {
+  if (!previous || state.rnd !== previous.rnd) return { ...state, p: state.p.map((fighter: any) => ({ ...fighter })) };
+  const p = state.p.map((fighter: any, i: number) => {
+    const before = previous.p[i];
+    if (Math.abs(fighter.x - before.x) > 100 || Math.abs(fighter.y - before.y) > 100) return { ...fighter };
+    const ms = i === pid - 1 ? 18 : 40;
+    const blend = 1 - Math.exp(-Math.max(0, elapsed) / ms);
+    return { ...fighter, x: before.x + (fighter.x - before.x) * blend, y: fighter.y === 0 ? 0 : before.y + (fighter.y - before.y) * blend };
+  });
+  return { ...state, p };
 }
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>\"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
