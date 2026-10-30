@@ -105,6 +105,17 @@ export async function invitedHomes(db: Db, userId: string) {
     .select(['h.id', 'h.name', 'h.owner_id', 'h.access_mode', 'u.display_name', 'u.avatar_url']).where('i.user_id', '=', userId).execute();
   return Promise.all(rows.map(async (r: any) => ({ id: r.id, name: r.name, owner: publicUser({ id: r.owner_id, display_name: r.display_name, avatar_url: r.avatar_url }), can_enter: await canEnter(db, r, userId) })));
 }
+/** 同事名單只依已驗證的登入信箱判斷，API 不回傳信箱。 */
+export async function companyHomes(db: Db, userId: string, online: ReadonlySet<string>) {
+  const rows = await db.selectFrom('homes as h').innerJoin('users as u', 'u.id', 'h.owner_id')
+    .select(['h.id', 'h.name', 'h.owner_id', 'h.access_mode', 'u.display_name', 'u.avatar_url'])
+    .where(sql<string>`lower(split_part(u.email, '@', 2))`, 'in', ['popin.cc', 'broadciel.com'])
+    .where('h.owner_id', '!=', userId).orderBy('u.display_name').execute();
+  return Promise.all(rows.map(async (r: any) => ({
+    id: r.id, name: r.name, owner: publicUser({ id: r.owner_id, display_name: r.display_name, avatar_url: r.avatar_url }),
+    online: online.has(r.owner_id), can_enter: await canEnter(db, r, userId),
+  })));
+}
 async function ownHome(db: Db | Tx, homeId: string, userId: string) {
   const h = await db.selectFrom('homes').selectAll().where('id', '=', homeId).executeTakeFirst();
   if (!h) fail('NOT_FOUND'); if (h!.owner_id !== userId) fail('FORBIDDEN');

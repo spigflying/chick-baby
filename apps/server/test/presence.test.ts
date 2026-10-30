@@ -3,6 +3,15 @@ import { PresenceStore, petSummary } from '../src/presence';
 
 const u = (id: string, pet: any = null) => ({ id, display_name: id, avatar_url: null, pet });
 describe('PresenceStore', () => {
+  it('counts online users across pages and instances, and expires missing heartbeats', () => {
+    const s = new PresenceStore();
+    s.setOnline('i1:1', 'a', 0); s.setOnline('i2:1', 'a', 0); s.setOnline('i2:2', 'b', 0);
+    expect([...s.onlineUserIds(1_000)]).toEqual(['a', 'b']);
+    s.setOnline('i1:1', null, 1_000); s.setOnline('i2:2', 'b', 60_000);
+    expect([...s.onlineUserIds(80_000)]).toEqual(['b']);
+    s.set('home', 'old:1', u('c'), 80_000);
+    expect([...s.onlineUserIds(80_001)]).toEqual(['b', 'c']);
+  });
   it('dedupes users across tabs/instances and keeps join order', () => {
     const s = new PresenceStore();
     s.set('h', 'i1:1', u('a')); s.set('h', 'i2:7', u('b')); s.set('h', 'i1:2', u('a'));

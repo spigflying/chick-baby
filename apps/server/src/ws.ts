@@ -34,6 +34,7 @@ const conns = new Set<Conn>();
 // 在場名單：home → (instance:conn) → user；透過 NOTIFY 在所有執行個體間同步
 const presence = new PresenceStore();
 let seq = 0;
+export function onlineUserIds() { return presence.onlineUserIds(); }
 
 function send(c: Conn, msg: unknown) { if (c.ws.readyState === 1) c.ws.send(JSON.stringify(msg)); }
 function inHome(homeId: string) { return [...conns].filter((c) => c.homeId === homeId); }
@@ -129,6 +130,7 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
     userBusy: (h, u) => inFight1v1At(h, u) || inStairs(h, u) });
   bus.on(async (m) => {
     try {
+      if (m.t === 'online') { presence.setOnline(m.key, m.on ? m.user : null); return; }
       if (typeof m.t === 'string' && m.t.startsWith('mstairs.')) { onMStairsBus(m); forwardMStairs(m); return; }
       if (typeof m.t === 'string' && m.t.startsWith('rrace.')) { onRaceBus(m); if (!raceEcho(m)) forwardRace(m); return; }
       if (typeof m.t === 'string' && m.t.startsWith('fight.')) {
@@ -185,9 +187,14 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
   // 在場心跳：每 30 秒重送自己這個執行個體的連線（新啟動的執行個體因此也會知道）；
   // 75 秒沒刷新的連線視為已離開（執行個體當掉或 SIGTERM 時 NOTIFY 沒送出）。
   const hb = setInterval(() => {
-    for (const c of conns) if (c.homeId && c.presenceUser) {
-      const home = presence.ownerOf(c.homeId);
-      void bus.publish({ t: 'presence', home: c.homeId, owner: home ?? undefined, key: `${env.instanceId}:${c.id}`, on: true, refresh: true, user: c.presenceUser }).catch(() => {});
+    for (const c of conns) {
+      const key = `${env.instanceId}:${c.id}`;
+      presence.setOnline(key, c.user.id);
+      void bus.publish({ t: 'online', key, user: c.user.id, on: true }).catch(() => {});
+      if (c.homeId && c.presenceUser) {
+        const home = presence.ownerOf(c.homeId);
+        void bus.publish({ t: 'presence', home: c.homeId, owner: home ?? undefined, key, on: true, refresh: true, user: c.presenceUser }).catch(() => {});
+      }
     }
   }, PRESENCE_REFRESH_MS);
   hb.unref();
@@ -206,6 +213,9 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
     if (!u) { socket.send(JSON.stringify({ type: 'error', code: okOrigin ? 'UNAUTHORIZED' : 'FORBIDDEN' })); socket.close(4401); return; }
     const c: Conn = { id: ++seq, ws: socket, user: publicUser(u), homeId: null, connectedAt: Date.now(), match: null, ip: req.ip, ua: String(req.headers['user-agent'] ?? ''), mm: null, touch: true };
     conns.add(c);
+    const onlineKey = `${env.instanceId}:${c.id}`;
+    presence.setOnline(onlineKey, c.user.id);
+    void bus.publish({ t: 'online', key: onlineKey, user: c.user.id, on: true }).catch(() => {});
     send(c, { type: 'hello', user: c.user, server_time: Date.now(), instance: env.instanceId });
     void offerRooms(c.user.id).catch(() => {}); // 剛連上：好友有開著的房就邀請
     if (phaseAt(clock(), Date.now()) === 'closing') send(c, { type: 'game.closing', closes_at: clock().status(Date.now()).closes_at });
@@ -342,6 +352,8 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
       }
     });
     socket.on('close', () => {
+      presence.setOnline(onlineKey, null);
+      void bus.publish({ t: 'online', key: onlineKey, user: c.user.id, on: false }).catch(() => {});
       if (c.mm) toAuthority({ t: 'mstairs.leave', home: c.mm.home, inst: c.mm.inst, user: c.user.id });
       // 斷線不等於棄賽：先放開油門，RACE_DROP_MS 內重連（race.resume）可以接回
       if (c.rr) toRaceAuthority({ t: 'rrace.drop', inst: c.rr.inst, race: c.rr.id, user: c.user.id });

@@ -125,10 +125,24 @@ function renderPresence() {
 async function visitPage() {
   live?.joinHome(null);
   app.innerHTML = `<main class="page"><div class="panel"><h2>去拜訪</h2>
+    <h3 id="companyTitle">公司同事</h3><ul id="company"><li class="muted">載入中…</li></ul>
     <form id="codeForm" class="row"><input name="code" placeholder="輸入朋友的分享碼（8 碼）" maxlength="12" required><button>找</button></form><div id="found"></div>
     <h3>最近去過</h3><ul id="recent"><li class="muted">載入中…</li></ul>
     <h3>邀請我的家</h3><ul id="invited"><li class="muted">載入中…</li></ul></div></main>`;
   const homeLi = (h: any, extra = '') => `<li><span>${esc(h.owner.display_name)} 的家 ${extra}</span>${h.can_enter ? `<a class="btn" data-nav href="/home/${h.id}">進去</a>` : '<span class="muted">不能進入</span>'}</li>`;
+  const loadCompany = async () => {
+    try {
+      const homes = await api('GET', '/homes/company');
+      const list = document.getElementById('company'); if (!list) return;
+      homes.sort((a: any, b: any) => Number(b.online) - Number(a.online) || a.owner.display_name.localeCompare(b.owner.display_name, 'zh-Hant'));
+      const online = homes.filter((h: any) => h.online).length;
+      $('#companyTitle').textContent = `公司同事・${online} 人在線`;
+      list.innerHTML = homes.length ? homes.map((h: any) => homeLi(h, `<span class="online-badge ${h.online ? 'online' : ''}">${h.online ? '● 在線' : '○ 離線'}</span>`)).join('') : '<li class="muted">目前沒有同事的家</li>';
+    } catch (e) { const list = document.getElementById('company'); if (list) list.innerHTML = `<li class="muted">名單載入失敗：${esc(errText(e))}</li>`; }
+  };
+  void loadCompany();
+  const companyTimer = window.setInterval(() => { if (!document.hidden) void loadCompany(); }, 15_000);
+  pageOff = () => clearInterval(companyTimer);
   ($('#codeForm') as HTMLFormElement).onsubmit = async (e) => {
     e.preventDefault();
     const code = ((e.target as HTMLFormElement).elements.namedItem('code') as HTMLInputElement).value.trim();

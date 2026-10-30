@@ -17,6 +17,20 @@ type Entry = { user: PresenceUser; at: number };
 export class PresenceStore {
   private homes = new Map<string, Map<string, Entry>>();
   private owners = new Map<string, string>(); // home → owner user id（不會變）
+  private online = new Map<string, { userId: string; at: number }>();
+  setOnline(key: string, userId: string | null, now = Date.now()) {
+    if (userId) this.online.set(key, { userId, at: now }); else this.online.delete(key);
+  }
+  onlineUserIds(now = Date.now()) {
+    const ids = new Set<string>();
+    for (const [key, entry] of this.online) {
+      if (now - entry.at > PRESENCE_TTL_MS) this.online.delete(key);
+      else ids.add(entry.userId);
+    }
+    // 部署切換期間，舊版連線仍會送家中在場心跳；一併計入在線名單。
+    for (const home of this.homes.values()) for (const entry of home.values()) if (now - entry.at <= PRESENCE_TTL_MS) ids.add(entry.user.id);
+    return ids;
+  }
   setOwner(home: string, owner: string) { this.owners.set(home, owner); }
   ownerOf(home: string) { return this.owners.get(home) ?? null; }
   set(home: string, key: string, user: PresenceUser | null, now = Date.now()) {

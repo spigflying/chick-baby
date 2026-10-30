@@ -207,6 +207,26 @@ describe('idempotency & wallet', () => {
 });
 
 describe('homes: access modes & blacklist', () => {
+  it('lists company homes without codes or emails and marks a user online outside homes', async () => {
+    const viewer = await login('viewer'), popin = await login('popin'), broadciel = await login('broadciel'), outsider = await login('outsider');
+    await db.updateTable('users').set({ email: 'popin@POPIN.CC' }).where('id', '=', popin.id).execute();
+    await db.updateTable('users').set({ email: 'broadciel@broadciel.com' }).where('id', '=', broadciel.id).execute();
+    await db.updateTable('users').set({ email: 'outsider@gmail.com' }).where('id', '=', outsider.id).execute();
+    const list = async () => (await viewer.call('GET', '/api/homes/company')).json;
+    expect((await list()).map((h: any) => h.owner.id).sort()).toEqual([popin.id, broadciel.id].sort());
+    expect(JSON.stringify(await list())).not.toContain('@');
+    const home = (await popin.call('GET', '/api/me')).json.home.id;
+    await popin.call('PATCH', `/api/homes/${home}`, { access_mode: 'closed', request_id: rid() });
+    expect((await list()).find((h: any) => h.owner.id === popin.id).can_enter).toBe(false);
+
+    const messages: any[] = [];
+    const ws = await app.injectWS('/ws', { headers: { cookie: broadciel.cookie }, socket: { remoteAddress: '127.0.0.1' } } as any, { onInit: (s) => s.on('message', (d) => messages.push(JSON.parse(String(d)))) });
+    for (let i = 0; i < 50 && !messages.some((m) => m.type === 'hello'); i++) await new Promise((r) => setTimeout(r, 20));
+    expect(messages.some((m) => m.type === 'hello')).toBe(true);
+    expect((await list()).find((h: any) => h.owner.id === broadciel.id).online).toBe(true);
+    ws.close();
+  });
+
   it('open / invite-only / closed / blacklist', async () => {
     const a = await login('alice'); const b = await login('bob'); const c = await login('carol');
     const me = (await a.call('GET', '/api/me')).json;

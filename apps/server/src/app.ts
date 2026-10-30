@@ -14,7 +14,7 @@ import { authHook, COOKIE, createSession, destroySession, requireAdmin, verifyGo
 import * as g from './game';
 import { audit, rateLimit } from './core';
 import { isUuid } from './util';
-import { setupWs } from './ws';
+import { onlineUserIds, setupWs } from './ws';
 import type { Bus } from './bus';
 import { clock } from './hours';
 import { createDbGate, type DbGate } from './gate';
@@ -114,6 +114,7 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
       a.get('/homes/by-code/:code', async (req) => g.homeByCode(db, (req.params as any).code, req.user!.id));
       a.get('/homes/recent', async (req) => g.recentHomes(db, req.user!.id));
       a.get('/homes/invited', async (req) => g.invitedHomes(db, req.user!.id));
+      a.get('/homes/company', async (req) => g.companyHomes(db, req.user!.id, onlineUserIds()));
       a.get('/homes/:id', async (req) => g.viewHome(db, (req.params as any).id, req.user!.id));
       a.patch('/homes/:id', async (req) => { const b = (req.body ?? {}) as any; return g.setAccessMode(db, ctx(req), (req.params as any).id, b.access_mode, b.name, b.request_id); });
       a.get('/homes/:id/lists', async (req) => g.homeLists(db, (req.params as any).id, req.user!.id));
