@@ -29,20 +29,21 @@ describe('defineMove', () => {
     expect(ca.dmg.reduce((a: number, b: number) => a + b, 0)).toBe(350);
     expect([4, 8, 9, 33, 34].map((t) => ca.hitIndex(t))).toEqual([0, 0, 1, 5, -1]);
   });
-  it('heavy and EX 衝天啄 have no hurtbox on ticks 1-6', () => {
-    for (const id of ['DP_H', 'DP_EX']) {
+  it('heavy 衝天啄 has no hurtbox on ticks 1-8, EX on ticks 1-9', () => {
+    for (const [id, last] of [['DP_H', 8], ['DP_EX', 9]] as const) {
       const s = fight(300, 600);
-      const seen: number[] = [];
       run(s, [RIGHT, DOWN, DOWN | RIGHT | (id === 'DP_EX' ? LP | HP : HP)]);
-      s.p[0].ex = 100;
-      expect(SFV.MOVE_LIST[s.p[0].mv].id).toBe(id === 'DP_EX' ? 'DP_H' : id); // 沒氣 → 不會變 EX
+      expect(SFV.MOVE_LIST[s.p[0].mv].id).toBe('DP_H'); // 沒氣 → 不會變 EX
       const s2 = fight(300, 600); s2.p[0].ex = 100;
       run(s2, [RIGHT, DOWN, DOWN | RIGHT | (id === 'DP_EX' ? LP | HP : HP)]);
       expect(SFV.MOVE_LIST[s2.p[0].mv].id).toBe(id);
-      for (let k = 0; k < 8; k++) { seen.push(SFV.hurtboxes(s2.p[0]).length); SFV.simulateSFVTick(s2, 0, 0); }
-      // 第 3 個輸入那一 tick mt=1，所以 seen[0..5] 對應 mt 1..6
-      expect(seen.slice(0, 6)).toEqual([0, 0, 0, 0, 0, 0]);
-      expect(seen[6]).toBeGreaterThan(0);
+      const seen: number[] = [];
+      for (let k = 0; k < last + 2; k++) { seen.push(SFV.hurtboxes(s2.p[0]).length); SFV.simulateSFVTick(s2, 0, 0); }
+      // 第 3 個輸入那一 tick mt=1，所以 seen[0..last-1] 對應 mt 1..last
+      expect(seen.slice(0, last)).toEqual(new Array(last).fill(0));
+      expect(seen[last]).toBeGreaterThan(0);
+      // 對空無敵還在：空中攻擊打不到
+      expect(SFV.hurtboxes(s2.p[0], true).length).toBe(0);
     }
   });
 });
@@ -150,6 +151,66 @@ describe('衝天啄 priority', () => {
   });
   it('light has no invincibility: the fireball hits it', () => {
     for (const gap of [80, 64, 50]) expect(vsFireball(LP, gap, 600).p[0].hp).toBe(940);
+  });
+});
+
+describe('input buffer & 衝天啄 in combos', () => {
+  const dpOut = (s: any) => SFV.MOVE_LIST[s.p[0].mv]?.id?.startsWith('DP');
+  /** 角落擋下站重拳；回傳防禦硬直後第一個能動的 tick */
+  function blockedHeavy(p1: (k: number) => number) {
+    const s = fight(SFV.WALL, SFV.WALL + 60);
+    let free = -1, fired = false;
+    for (let k = 0; k < 90; k++) {
+      const pre = s.p[0].st;
+      SFV.simulateSFVTick(s, p1(k), k >= 2 && k < 4 ? HP : 0);
+      if (pre === ST.BLOCK && s.p[0].st !== ST.BLOCK && free < 0) free = k;
+      if (dpOut(s)) fired = true;
+    }
+    return { s, free, fired };
+  }
+  it('reversal: 623P pressed up to BUFFER ticks before blockstun ends comes out on the first free tick', () => {
+    const { free } = blockedHeavy(() => LEFT);
+    expect(free).toBeGreaterThan(0);
+    for (let early = 0; early <= SFV.BUFFER; early++) {
+      const b = free + 1 - early; // free 那一 tick 硬直才結束，下一 tick 起可以出招
+      const r = blockedHeavy((k) => k === b - 3 ? RIGHT : k === b - 2 ? DOWN : k === b - 1 ? DOWN | RIGHT : k >= b && k < b + 4 ? DOWN | RIGHT | HP : k < b ? LEFT : 0);
+      expect(r.fired, `early ${early}`).toBe(true);
+    }
+    const tooEarly = free - SFV.BUFFER;
+    const r = blockedHeavy((k) => k === tooEarly - 3 ? RIGHT : k === tooEarly - 2 ? DOWN : k === tooEarly - 1 ? DOWN | RIGHT : k === tooEarly ? DOWN | RIGHT | HP : k < tooEarly ? LEFT : 0);
+    expect(r.fired).toBe(false);
+  });
+  it('a buffered press fires once, not again after the move ends', () => {
+    const s = fight(300, 700);
+    run(s, [LP, ...hold(0, 30)]);
+    let starts = 0, prev = -1;
+    const s2 = fight(300, 700);
+    for (let k = 0; k < 40; k++) { SFV.simulateSFVTick(s2, k === 0 ? LP : 0, 0); if (s2.p[0].st === ST.MOVE && prev !== ST.MOVE) starts++; prev = s2.p[0].st; }
+    expect(starts).toBe(1); expect(s.p[0].st).toBe(ST.IDLE);
+  });
+  it('heavy 衝天啄 anti-airs a jump-in even when pressed early', () => {
+    // 舊版（只有 1-6 全身無敵）在 t0 4-12 這段會被跳腳踢下來或相殺；t0 0-3 太早、整段打空，被罰是合理的
+    for (const t0 of [4, 6, 8, 10, 12, 14, 20]) {
+      const s = fight(380, 580);
+      const p2 = [UP | LEFT, UP | LEFT, ...hold(0, 8), HK, HK];
+      const p1 = [...hold(0, t0), RIGHT, DOWN, DOWN | RIGHT | HP, DOWN | RIGHT | HP];
+      let first = '';
+      for (let k = 0; k < 80 && !first; k++) {
+        SFV.simulateSFVTick(s, p1[k] ?? 0, p2[k] ?? 0);
+        if (s.p[0].hp < 1000) first = 'dp lost'; else if (s.p[1].hp < 1000) first = 'dp won';
+      }
+      expect(first, `t0 ${t0}`).toBe('dp won');
+    }
+  });
+  it('5HP xx 623HP combos mid-screen (cancel input may start before the hit)', () => {
+    for (const at of [4, 6, 9, 14]) { // 第 at tick 按拳；5HP 第 9 tick 才打中
+      const s = fight(450, 510), p1 = new Array(100).fill(0);
+      p1[0] = p1[1] = HP; p1[at - 3] = RIGHT; p1[at - 2] = DOWN; p1[at - 1] = DOWN | RIGHT; p1[at] = p1[at + 1] = DOWN | RIGHT | HP;
+      let maxCb = 0;
+      for (let k = 0; k < 100; k++) { SFV.simulateSFVTick(s, p1[k], 0); maxCb = Math.max(maxCb, s.p[1].cb); }
+      expect(maxCb, `at ${at}`).toBe(2);
+      expect(s.p[1].hp).toBe(1000 - 90 - 140);
+    }
   });
 });
 
