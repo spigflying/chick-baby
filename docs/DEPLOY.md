@@ -30,6 +30,19 @@
 - 只改伺服器、沒改前端也沒改 notes → id 不變 → 不提示（不需要重新載入）。想強制提示就改 notes。
 - `index.html`（含 SPA 路由）是 `Cache-Control: no-cache`；`/assets/*` 檔名帶 hash，`immutable`。
 
+## 小雞農場（`farm` 分支、`FARM_ENABLED`）
+
+農場在 git 的 `farm` 分支開發，跟 main 上的其他工作（例如格鬥）分開上線：
+
+- **只部署 main 時**：農場的程式不在裡面，什麼都不用做。
+- **`farm` 合併回 main 之後**：程式在，但伺服器沒有 `FARM_ENABLED=1` 就完全看不到（沒有 API、沒有蛋殼上的「農場」格子）。可以先合併、照常部署，等要上線再開。
+- **合併前**：確認 migration 號碼。`farm` 分支用 `0011_farm`；如果 main 已經有 `0011_*`，把農場的改成下一個沒用過的號碼（只改 `apps/server/src/migrations.ts` 的 key）。本機開發資料庫跑過舊名字的話，刪掉 `kysely_migration` 裡那一列再重跑。
+- **要上線時**：
+  1. `apps/server/release-notes.json` 寫農場的更新說明（合併時不要先寫，開關沒開玩家看不到）。
+  2. 部署新版後打開開關：`gcloud run services update $SERVICE --update-env-vars=FARM_ENABLED=1`（會換版，避開開放時間）。
+  3. 驗證：`curl -s https://chick.thesilvertrees.com/api/config` 裡 `"farm":true`。
+- **關掉**：`--update-env-vars=FARM_ENABLED=0`（資料表與玩家的農場資料保留）。
+
 ## 0. 帳號與變數
 
 ```bash
