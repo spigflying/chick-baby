@@ -23,6 +23,8 @@ export const SFV = (() => {
   const SUPER_FREEZE = 30, VT_TICKS = 480;
   const ROUND_TICKS = 99 * TICK_HZ, INTRO_T = 90, KO_T = 150, WINS = 2, JUGGLE_MAX = 3, PROJ_CD = 6;
   const AIR_RESET = [3, -6];
+  // Counter Hit：打中正在出招（發生或持續中）的對手 → 傷害 ×1.2、地面受擊硬直 +2F；CH_SHOW = 畫面提示顯示幾幀
+  const CH_DMG = 120, CH_HITSTUN = 2, CH_SHOW = 40;
   const ST = Object.freeze({ IDLE: 0, CROUCH: 1, PREJUMP: 2, JUMP: 3, MOVE: 4, HIT: 5, BLOCK: 6, AIRHIT: 7, KD: 8, THROWN: 9, THROWING: 10, DIZZY: 11, LAND: 12, KO: 13, TECH: 14 });
   const ST_NAME = Object.keys(ST);
   const RS = Object.freeze({ FIGHT: 0, KO: 1, OVER: 2, INTRO: 3 });
@@ -101,7 +103,7 @@ export const SFV = (() => {
   ];
 
   // ---------- 狀態 ----------
-  const P_FIELDS = ['x', 'y', 'vx', 'vy', 'f', 'st', 't', 'mv', 'mt', 'hm', 'cn', 'hs', 'bf', 'hp', 'wd', 'wdT', 'sg', 'sgT', 'dz', 'ex', 'vg', 'vt', 'cb', 'jg', 'kb', 'air', 'cr', 'lb'];
+  const P_FIELDS = ['x', 'y', 'vx', 'vy', 'f', 'st', 't', 'mv', 'mt', 'hm', 'cn', 'hs', 'bf', 'hp', 'wd', 'wdT', 'sg', 'sgT', 'dz', 'ex', 'vg', 'vt', 'cb', 'jg', 'kb', 'air', 'cr', 'lb', 'ch'];
   const Q_FIELDS = ['o', 'x', 'y', 'vx', 'n', 'lv', 'cd'];
   const S_FIELDS = ['tick', 'frz', 'fo', 'rs', 'rt', 'rnd', 'tm', 'win', 'to', 'lw'];
   function newPlayer(x, f) {
@@ -294,6 +296,10 @@ export const SFV = (() => {
       if (comboPressed(p, t, LP | LK) && A.st === ST.THROWING && A.t > THROW_ANIM) techPair(s);
       return;
     }
+    if ((p.st === ST.HIT || p.st === ST.BLOCK || p.st === ST.KD) && p.t <= 0 && p.hs === 0) {
+      recover(p);
+      if (p.st === ST.DIZZY) p.t++; // 同一幀的 physics 會先扣 1，補回來讓暈眩維持 DIZZY_T 幀
+    }
     const opts = optionsFor(p);
     if (p.hs > 0) { // Hitstop 中：先記下取消（打中前幾 tick 先輸入的也算），Hitstop 一結束就出
       if (p.st === ST.MOVE && opts) { const id = pickBuffered(s, i, { ...opts, normal: false }); if (id >= 0) p.bf = id + 1; }
@@ -366,7 +372,8 @@ export const SFV = (() => {
       case ST.PREJUMP: if (--p.t <= 0) { p.st = ST.JUMP; p.vy = JUMP_VY; p.air = 0; } break;
       case ST.JUMP: if (fly(p)) { p.st = ST.LAND; p.t = JUMP_LAND; p.air = 0; } break;
       case ST.MOVE: moveTick(s, i); break;
-      case ST.HIT: case ST.BLOCK: case ST.KD: if (--p.t <= 0) recover(p); break;
+      // 硬直最後一幀仍算硬直（這一幀被打到算連段）；下一幀 decide 開頭才解除 → 有利 +N 的招接發生 NF 的技剛好連上（SF 慣例）
+      case ST.HIT: case ST.BLOCK: case ST.KD: if (p.t > 0) p.t--; else if (s.rs !== RS.FIGHT) recover(p); break;
       case ST.AIRHIT: if (fly(p)) { p.st = ST.KD; p.t = KD_SOFT; p.jg = 0; } break;
       case ST.DIZZY: if (--p.t <= 0) { p.sg = 0; p.dz = 0; p.cb = 0; toIdle(p); } break;
       case ST.LAND: case ST.TECH: if (--p.t <= 0) toIdle(p); break;
@@ -430,6 +437,7 @@ export const SFV = (() => {
     } else {
       const scale = d.kind === 'super' || B.cb < 2 ? 100 : Math.max(50, 100 - 10 * (B.cb - 1));
       let dmg = (d.dmg * scale / 100) | 0;
+      if (h.counter) { dmg = (dmg * CH_DMG / 100) | 0; B.ch = CH_SHOW; }
       if (A.vt > 0) dmg = (dmg * 6 / 5) | 0; // 炸毛中攻擊力 +20%
       B.wd = 0; B.wdT = 0; B.hp -= dmg; B.cb++;
       if (B.st === ST.DIZZY) { B.sg = 0; B.dz = 0; }
@@ -439,7 +447,7 @@ export const SFV = (() => {
       B.vg = Math.min(VG_MAX, B.vg + ((dmg / 2) | 0));
       if (d.launch || B.y < 0) { const l = d.launch ?? AIR_RESET; B.st = ST.AIRHIT; B.vx = l[0] * dir; B.vy = l[1]; B.jg++; B.air = 0; }
       else if (d.kd) { B.st = ST.KD; B.t = KD_HARD; B.cr = 0; }
-      else { B.st = ST.HIT; B.t = d.hitstun; B.cr = h.crouch; pushback(A, B, dir, d.pb, !!h.q); }
+      else { B.st = ST.HIT; B.t = d.hitstun + (h.counter ? CH_HITSTUN : 0); B.cr = h.crouch; pushback(A, B, dir, d.pb, !!h.q); }
     }
     B.hs = d.hs;
     if (!h.q) A.hs = Math.max(A.hs, d.hs);
@@ -450,12 +458,18 @@ export const SFV = (() => {
     B.st = ST.THROWN; B.t = 0; B.mv = -1; B.bf = 0; B.vx = 0; B.hs = 0;
   }
   function techPair(s) { for (const p of s.p) { p.st = ST.TECH; p.t = TECH_T; p.mv = -1; p.vx = 0; p.vy = 0; p.kb = -p.f * 7; } }
+  /** 對手正在出招的發生或持續幀（不含收招、衝刺／炸毛這類系統動作） */
+  function counterable(B) {
+    if (B.st !== ST.MOVE) return false;
+    const mv = MOVE_LIST[B.mv];
+    return mv.kind !== 'system' && B.mt < mv.S + mv.A;
+  }
   function collect(s, i, h, fromX) {
     const B = s.p[1 - i], guard = h.q ? 'high' : h.mv.guard;
     const blocked = canBlock(s, B, fromX, guard);
     const toward = fromX === B.x ? B.f : fromX > B.x ? 1 : -1;
     const crouch = blocked ? dirOf(maskAt(B, s.tick), toward) === 1 : poseOf(B) === 'crouch';
-    return { i, ...h, blocked, crouch: crouch ? 1 : 0 };
+    return { i, ...h, blocked, crouch: crouch ? 1 : 0, counter: !blocked && counterable(B) ? 1 : 0 };
   }
   function combat(s) {
     for (let a = 0; a < s.pr.length; a++) for (let b = a + 1; b < s.pr.length; b++) { // 雙方的波互撞抵銷
@@ -485,6 +499,7 @@ export const SFV = (() => {
     if (p.wdT > 0) p.wdT--; else if (p.wd > 0) { const r = Math.min(p.wd, WHITE_REGEN); p.wd -= r; p.hp += r; }
     if (p.st !== ST.DIZZY && !p.dz) { if (p.sgT > 0) p.sgT--; else if (p.sg > 0) p.sg = Math.max(0, p.sg - STUN_DECAY); }
     if (p.vt > 0) p.vt--;
+    if (p.ch > 0) p.ch--;
   }
   function checkRound(s) {
     const [a, b] = s.p, ko0 = a.hp <= 0, ko1 = b.hp <= 0;
@@ -527,7 +542,7 @@ export const SFV = (() => {
   }
 
   return {
-    TICK_HZ, TICK_MS, THROW_ANIM, BUFFER, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
+    TICK_HZ, TICK_MS, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
     ST, ST_NAME, RS, MOVE_LIST, M, PROJ, P_FIELDS, defineMove, createState, simulateSFVTick, packState, unpackState, cloneState, hashState, hashStr,
     dirOf, maskAt, motion, canBlock, hurtboxes, hitboxOf, pushbox, projBox, overlap,
   };

@@ -421,6 +421,7 @@ export const SFVClient = ((SFV, SFVServer) => {
       text(ctx, `EX ${Math.floor(p.ex / SFV.EX_BAR)}`, right ? x + BW : x, H - 46, 11, COL.ex, right ? 'right' : 'left');
       const foe = s.p[1 - i];
       if (foe.cb >= 2) text(ctx, `${foe.cb} HITS`, right ? W - 70 : 70, 150, 28, '#ffe066');
+      if (foe.ch > 0) text(ctx, 'COUNTER', right ? W - 70 : 70, foe.cb >= 2 ? 185 : 150, 24, '#ff7a3b');
     }
     ctx.fillStyle = '#000c'; ctx.fillRect(W / 2 - 34, 12, 68, 44);
     text(ctx, String(Math.ceil(s.tm / SFV.TICK_HZ)).padStart(2, '0'), W / 2, 35, 30, '#fff');

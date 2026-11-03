@@ -106,12 +106,17 @@ describe('command parser', () => {
 
 describe('衝天啄 priority', () => {
   const dp = (btn: number) => [RIGHT, DOWN, DOWN | RIGHT | btn];
-  it('heavy: beats a heavy punch that is already coming (invincible ticks 1-6)', () => {
+  it('heavy: beats a heavy punch that is already coming (invincible, and a counter hit)', () => {
+    const hps: number[] = [];
     for (const late of [0, 1, 2, 3]) {
       const s = fight(440, 500), start = 6 - late;
       run(s, Array.from({ length: 40 }, (_, t) => (t >= start && t < start + 3 ? dp(HP)[t - start] : 0)), hold(HP, 40));
-      expect([s.p[0].hp, s.p[1].hp]).toEqual([1000, 860]);
+      expect(s.p[0].hp).toBe(1000);
+      // 打在重拳發生／持續中 → Counter Hit（168），打在收招中 → 一般命中（140）
+      hps.push(s.p[1].hp);
     }
+    expect(hps.every((h) => h === 1000 - 168 || h === 860)).toBe(true);
+    expect(hps).toContain(1000 - 168);
   });
   /** 提早搓好 →↓、按住 ↘ 等，波距離 ≤ gap 時才按拳（衝天啄在那一 tick 出招） */
   function vsFireball(btn: number, gap: number, x2: number, ex = 0) {
@@ -150,7 +155,7 @@ describe('衝天啄 priority', () => {
     expect(s.p[0].hp).toBe(1000); expect(s.p[1].hp).toBe(860);
   });
   it('light has no invincibility: the fireball hits it', () => {
-    for (const gap of [80, 64, 50]) expect(vsFireball(LP, gap, 600).p[0].hp).toBe(940);
+    for (const gap of [80, 64, 50]) expect(vsFireball(LP, gap, 600).p[0].hp).toBe(1000 - 60 * 1.2); // 出招中被波打到 → Counter Hit
   });
 });
 
@@ -172,11 +177,11 @@ describe('input buffer & 衝天啄 in combos', () => {
     const { free } = blockedHeavy(() => LEFT);
     expect(free).toBeGreaterThan(0);
     for (let early = 0; early <= SFV.BUFFER; early++) {
-      const b = free + 1 - early; // free 那一 tick 硬直才結束，下一 tick 起可以出招
+      const b = free - early; // free = 硬直解除、可以出招的那一幀
       const r = blockedHeavy((k) => k === b - 3 ? RIGHT : k === b - 2 ? DOWN : k === b - 1 ? DOWN | RIGHT : k >= b && k < b + 4 ? DOWN | RIGHT | HP : k < b ? LEFT : 0);
       expect(r.fired, `early ${early}`).toBe(true);
     }
-    const tooEarly = free - SFV.BUFFER;
+    const tooEarly = free - SFV.BUFFER - 1;
     const r = blockedHeavy((k) => k === tooEarly - 3 ? RIGHT : k === tooEarly - 2 ? DOWN : k === tooEarly - 1 ? DOWN | RIGHT : k === tooEarly ? DOWN | RIGHT | HP : k < tooEarly ? LEFT : 0);
     expect(r.fired).toBe(false);
   });
@@ -211,6 +216,57 @@ describe('input buffer & 衝天啄 in combos', () => {
       expect(maxCb, `at ${at}`).toBe(2);
       expect(s.p[1].hp).toBe(1000 - 90 - 140);
     }
+  });
+});
+
+describe('frames: links, punishes, counter hit', () => {
+  it('5LP (+4 on hit, 4F) links into 5LP on exactly the first free frame', () => {
+    const results: boolean[] = [];
+    for (let extra = 0; extra < 3; extra++) {
+      const s = fight(450, 500);
+      let free = -1, maxCb = 0;
+      for (let k = 1; k < 90; k++) {
+        const m = k <= 2 || (free > 0 && k >= free + extra && k < free + extra + 2) ? LP : 0;
+        SFV.simulateSFVTick(s, m, 0);
+        if (free < 0 && k > 3 && s.p[0].mv === -1 && s.p[0].st === ST.IDLE) free = k + 1;
+        maxCb = Math.max(maxCb, s.p[1].cb);
+      }
+      results.push(maxCb >= 2);
+    }
+    expect(results).toEqual([true, false, false]);
+  });
+  it('last frame of hitstun still counts as hitstun (combo), the defender acts on the next frame', () => {
+    const s = fight(450, 500);
+    run(s, [LP, LP, LP, LP]);
+    while (!(s.p[1].hs === 0 && s.p[1].t === 0)) SFV.simulateSFVTick(s, 0, 0);
+    expect(s.p[1].st).toBe(ST.HIT);
+    SFV.simulateSFVTick(s, 0, LP);
+    expect(SFV.MOVE_LIST[s.p[1].mv]?.id).toBe('5LP');
+  });
+  it('counter hit: hitting a move in startup → ×1.2 damage, +2F hitstun, COUNTER flag', () => {
+    const s = fight(450, 500);
+    for (let k = 1; k < 8; k++) SFV.simulateSFVTick(s, k >= 3 && k < 5 ? LP : 0, k <= 2 ? HP : 0);
+    expect(s.p[1].hp).toBe(1000 - 36);
+    expect(s.p[1].ch).toBeGreaterThan(0);
+    const n = fight(450, 500);
+    run(n, [LP, LP, LP, LP]);
+    expect(n.p[1].hp).toBe(970); expect(n.p[1].ch).toBe(0);
+    expect(s.p[1].t).toBe(n.p[1].t + SFV.CH_HITSTUN);
+  });
+  it('a move in its recovery is not a counter hit', () => {
+    const s = fight(400, 490); // 距離 90：P2 的 5LP 構不到，P1 的 5HP 構得到；第 9 幀打中時 P2 的輕拳已在收招
+    run(s, [HP, HP, ...hold(0, 14)], [LP, LP]);
+    expect(s.p[1].hp).toBe(910); expect(s.p[1].ch).toBe(0);
+  });
+  it('5HK (-7 on block) is punished by a 4F jab', () => {
+    const s = fight(SFV.STAGE_W - SFV.WALL - 50, SFV.STAGE_W - SFV.WALL);
+    let free = -1;
+    for (let k = 1; k < 80; k++) {
+      const pre = s.p[1].st;
+      SFV.simulateSFVTick(s, k <= 2 ? HK : 0, free > 0 && k >= free && k < free + 2 ? LP : RIGHT);
+      if (free < 0 && pre === ST.BLOCK && s.p[1].t === 0 && s.p[1].hs === 0) free = k + 1;
+    }
+    expect(s.p[0].hp).toBe(970);
   });
 });
 
@@ -261,9 +317,9 @@ describe('combat', () => {
     const s = run(fight(), [LP, LP, LP, LP]);
     expect(s.p[1].hp).toBe(970); expect(s.p[1].hs).toBe(8); expect(s.p[0].hs).toBe(8);
   });
-  it('same-tick jabs trade (both take damage)', () => {
+  it('same-tick jabs trade (both take damage, both are counter hits)', () => {
     const s = run(fight(), [LP, LP, LP, LP], [LP, LP, LP, LP]);
-    expect([s.p[0].hp, s.p[1].hp]).toEqual([970, 970]);
+    expect([s.p[0].hp, s.p[1].hp]).toEqual([964, 964]);
   });
   it('crouch block (1) stops lows, stand block (4) does not', () => {
     const c = run(fight(), hold(DOWN | LK, 5), hold(DOWN | RIGHT, 5));
