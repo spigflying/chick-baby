@@ -1,5 +1,6 @@
 import { buyCar, buyPart, getProfile as getRaceProfile, raceCatalog, raceLeaderboard } from './racing';
 import { buyOutfit, outfitCatalog, ownedOutfits, wearOutfit } from './outfits';
+import { farmAct, farmFriends, farmHelp, getFarm } from './farm';
 import Fastify, { type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimitPlugin from '@fastify/rate-limit';
@@ -25,7 +26,8 @@ export function readRelease(dir: string): { build: string | null; notes: string[
   try { const j = JSON.parse(readFileSync(path.join(dir, 'build.json'), 'utf8')); return { build: typeof j.build === 'string' ? j.build : null, notes: Array.isArray(j.notes) ? j.notes.map(String) : [] }; }
   catch { return { build: null, notes: [] }; }
 }
-export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?: DbGate; cronVerifier?: IdTokenVerifier; release?: { build: string | null; notes: string[] } } = {}) {
+export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?: DbGate; cronVerifier?: IdTokenVerifier; release?: { build: string | null; notes: string[] }; farmEnabled?: boolean } = {}) {
+  const farmOn = opts.farmEnabled ?? env.farmEnabled;
   const release = opts.release ?? readRelease(env.webDist || path.resolve(process.cwd(), '../web/dist'));
   const gate = opts.gate ?? createDbGate(db, bus);
   // Cloud Run（網域對應、沒有負載平衡器）：只信任緊鄰的那一層，req.ip = Google 附加在 X-Forwarded-For 最右邊的真實來源。
@@ -95,7 +97,7 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
       });
     }
     api.post('/auth/logout', async (req, reply) => { await destroySession(db, req.cookies[COOKIE]); reply.clearCookie(COOKIE, { path: '/' }); return { ok: true }; });
-    api.get('/config', async () => g.publicConfig());
+    api.get('/config', async () => g.publicConfig({ farm: farmOn }));
 
     // ---- 需要登入 ----
     await api.register(async (a) => {
@@ -132,6 +134,13 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
       a.get('/outfits', async (req) => ({ catalog: outfitCatalog(), owned: await ownedOutfits(db, req.user!.id) }));
       a.post('/outfits/buy', async (req) => { const b = (req.body ?? {}) as any; return buyOutfit(db, ctx(req), b.outfit_id, b.request_id); });
       a.post('/outfits/wear', async (req) => { const b = (req.body ?? {}) as any; return wearOutfit(db, ctx(req), b.outfit_id, b.on, b.request_id); });
+      // ---- 小雞農場（FARM_ENABLED=1 才有）----
+      if (farmOn) {
+        a.get('/farm/friends', async (req) => farmFriends(db, req.user!.id));
+        a.get('/farm/:id', async (req) => getFarm(db, (req.params as any).id, req.user!.id));
+        a.post('/farm/act', async (req) => { const b = (req.body ?? {}) as any; return farmAct(db, ctx(req), b.action, b.request_id); });
+        a.post('/farm/:id/help', async (req) => { const b = (req.body ?? {}) as any; return farmHelp(db, ctx(req), (req.params as any).id, b, b.request_id); });
+      }
       // 本機開發（DEV_LOGIN=1）：讓自己的寵物馬上進化，方便測試
       if (env.devLogin) a.post('/dev/pets/:id/evolve', async (req) => g.forceEvolve(db, ctx(req), (req.params as any).id, (req.body as any)?.request_id, false));
       a.post('/pets', async (req) => g.hatch(db, ctx(req), req.body));

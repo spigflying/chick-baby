@@ -1,6 +1,7 @@
 import { Migrator, sql, type Kysely, type Migration, type MigrationProvider } from 'kysely';
 
-const migrations: Record<string, Migration> = {
+/** 測試會直接呼叫個別 migration 的 up（例如重跑一次性退款）。 */
+export const migrations: Record<string, Migration> = {
   '0001_init': {
     async up(db: Kysely<unknown>) {
       await sql`
@@ -295,6 +296,25 @@ const migrations: Record<string, Migration> = {
         )
         UPDATE user_items SET fights_left = 0, updated_at = now() WHERE fights_left > 0;
       `.execute(db);
+    },
+  },
+  '0011_farm': {
+    async up(db: Kysely<unknown>) {
+      // 小雞農場（docs/superpowers/specs/2026-11-03-farm-design.md）：整座農場是一列 jsonb，規則在 @chick/engine 的 farm.ts；
+      // farm_help 記錄好友幫忙（算每日上限）。合併回 main 前若 main 已有 0011_*，改成下一個號碼。
+      await sql`CREATE TABLE farms (user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, state jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
+        CREATE TABLE farm_help (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+          helper_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE, owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          day date NOT NULL, kind text NOT NULL CHECK (kind IN ('water','rescue')), target integer NOT NULL, created_at timestamptz NOT NULL DEFAULT now());
+        CREATE INDEX farm_help_helper_day ON farm_help (helper_id, day);
+        ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+        ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus','outfit','race_part','race_prize','item_refund','farm_seed','farm_sell','farm_order','farm_upgrade','farm_level','farm_rescue'));`.execute(db);
+    },
+    async down(db: Kysely<unknown>) {
+      await sql`DROP TABLE farm_help; DROP TABLE farms;
+        DELETE FROM coin_ledger WHERE reason IN ('farm_seed','farm_sell','farm_order','farm_upgrade','farm_level','farm_rescue');
+        ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check;
+        ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check CHECK (reason IN ('signup','stairs_solo','stairs_match','feed','admin','fight','item','fight_bonus','outfit','race_part','race_prize','item_refund'));`.execute(db);
     },
   },
 };
