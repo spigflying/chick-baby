@@ -7,6 +7,8 @@ import { SFVClient } from './sfv-net';
 (() => {
   const $ = (id) => document.getElementById(id);
   const cv = $('cv'), ctx = cv.getContext('2d');
+  const fm = $('fm'), fmCtx = fm.getContext('2d');
+  let meter = SFVClient.createFrameMeter();
   const { UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK } = SFV;
   // 用 e.code（實體按鍵），開著中文輸入法也能玩
   const KEY_BITS = { KeyW: UP, KeyS: DOWN, KeyA: LEFT, KeyD: RIGHT, KeyU: LP, KeyI: HP, KeyJ: LK, KeyK: HK, KeyH: LP | LK, KeyL: HP | HK };
@@ -26,7 +28,8 @@ import { SFVClient } from './sfv-net';
 
   function startMatch() {
     ui.matchNo++;
-    ui.world = SFVClient.createWorld({ matchId: `proto-${Date.now()}-${ui.matchNo}`, now: performance.now(), net, samplers, users: ['你', 'CPU'] });
+    meter = SFVClient.createFrameMeter();
+    ui.world = SFVClient.createWorld({ matchId: `proto-${Date.now()}-${ui.matchNo}`, now: performance.now(), net, samplers, users: ['你', 'CPU'], onTick: (_t, s) => meter.push(s) });
     ui.screen = 'fight'; ui.log = '';
   }
   function toSelect() { ui.world = null; ui.screen = 'select'; ui.sel.lockedAt = -1; }
@@ -81,6 +84,7 @@ import { SFVClient } from './sfv-net';
     } else if (ui.world) {
       const c = ui.world.clients[0];
       SFVClient.drawFight(ctx, c.predicted, { showBoxes: ui.showBoxes, me: 0, names: ['MY_CHICK_BABY（你）', `MY_CHICK_BABY（${ui.opp === 'ai' ? 'CPU' : '木樁'}）`], ended: c.ended, settleText: settleText(ui.world.room) });
+      SFVClient.drawFrameMeter(fmCtx, meter, ['你', ui.opp === 'ai' ? 'CPU' : '木樁']);
     }
     requestAnimationFrame(render);
   }

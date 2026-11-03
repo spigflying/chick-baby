@@ -460,6 +460,61 @@ export const SFVClient = ((SFV, SFVServer) => {
     drawHud(ctx, s, opt);
     drawBanner(ctx, s, opt);
   }
+  // ---------- 幀數條（練習用）：一格＝一幀，從伺服器房間每個 tick 的權威狀態取樣 ----------
+  const FM_COL = { startup: '#3ddc84', active: '#ff5c5c', recovery: '#4d8dff', stun: '#ffc94d', free: '#262a36', jump: '#b36bff', move: '#2ec4c4', hs: '#6b7080' };
+  /** 有人在動就開始記；雙方都自由 idleStop 幀後停，下一個動作開始時清掉重記（像 SF6 的 frame meter） */
+  function createFrameMeter(max = 120, idleStop = 20) {
+    const m = { rows: [[], []], recording: false, idle: 0, adv: null, prev: [null, null] };
+    m.push = (s) => {
+      if (s.rs !== SFV.RS.FIGHT) return;
+      const k = [SFV.frameKind(s, 0), SFV.frameKind(s, 1)];
+      // 這一幀結束時才變回可行動（收招最後一幀、落地最後一幀）：這一幀其實還不能動，照上一格畫
+      for (let i = 0; i < 2; i++) if (k[i].k === 'free' && m.prev[i] && !m.prev[i].nx) k[i] = { ...k[i], k: m.prev[i].k === 'stun' ? 'stun' : 'recovery' };
+      m.prev = k;
+      const busy = k.some((x) => x.k !== 'free' || x.hs);
+      if (!m.recording) { if (!busy) return; m.rows = [[], []]; m.recording = true; m.idle = 0; m.adv = null; }
+      for (let i = 0; i < 2; i++) { m.rows[i].push(k[i]); if (m.rows[i].length > max) m.rows[i].shift(); }
+      if (s.ft === SFV.FA_SHOW && s.fa) m.adv = [s.fa === 1 ? s.fv : -s.fv, s.fa === 1 ? -s.fv : s.fv];
+      if (busy) m.idle = 0;
+      else if (++m.idle >= idleStop) { m.recording = false; for (const r of m.rows) r.splice(r.length - idleStop + 6); } // 尾巴留 6 格自由
+    };
+    return m;
+  }
+  /** 一列裡最後一招的發生幀數：最後一段 startup 的長度 + 1（第一個持續幀算在內，SF 慣例） */
+  function startupOf(row) {
+    let end = -1;
+    for (let j = row.length - 1; j >= 0; j--) if (row[j].k === 'active') end = j; else if (end >= 0 && row[j].k !== 'active') break;
+    if (end < 0) return null;
+    let n = 0; for (let j = end - 1; j >= 0 && row[j].k === 'startup'; j--) n++;
+    return n ? n + 1 : null;
+  }
+  function drawFrameMeter(ctx, m, names) {
+    const FW = ctx.canvas.width, FH = ctx.canvas.height, LABEL = 120, INFO = 150, CW = Math.floor((FW - LABEL - INFO) / 120), RH = 18;
+    ctx.fillStyle = '#0e0f13'; ctx.fillRect(0, 0, FW, FH);
+    for (let i = 0; i < 2; i++) {
+      const y = 8 + i * (RH + 8), row = m.rows[i];
+      text(ctx, names[i], LABEL - 8, y + RH / 2, 12, i ? '#f4f1ea' : '#ffd84d', 'right', false);
+      for (let j = 0; j < 120; j++) {
+        const x = LABEL + j * CW, c = row[j];
+        ctx.fillStyle = c ? (c.hs ? FM_COL.hs : FM_COL[c.k]) : '#16181f';
+        ctx.fillRect(x, y, CW - 1, RH);
+        if (c?.inv) { ctx.fillStyle = '#fff'; ctx.fillRect(x, y, CW - 1, 3); }
+      }
+      const su = startupOf(row), adv = m.adv?.[i];
+      const info = [su ? `發生 ${su}F` : '', adv == null ? '' : adv > 0 ? `+${adv}` : adv < 0 ? `${adv}` : '±0'].filter(Boolean).join('  ');
+      text(ctx, info, FW - INFO + 8, y + RH / 2, 13, adv > 0 ? '#5dff8a' : adv < 0 ? '#ff5c5c' : '#e8eaf0', 'left', false);
+    }
+    const legend = [['發生', 'startup'], ['持續', 'active'], ['收招', 'recovery'], ['硬直', 'stun'], ['頓幀', 'hs'], ['跳躍', 'jump'], ['移動', 'move'], ['可行動', 'free']];
+    let x = LABEL; const y = FH - 12;
+    ctx.font = '11px system-ui, sans-serif';
+    for (const [label, key] of legend) {
+      ctx.fillStyle = FM_COL[key]; ctx.fillRect(x, y - 5, 10, 10);
+      ctx.fillStyle = '#8a90a2'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(label, x + 14, y);
+      x += 14 + ctx.measureText(label).width + 14;
+    }
+    ctx.fillStyle = '#fff'; ctx.fillRect(x, y - 5, 10, 3); ctx.fillStyle = '#8a90a2'; ctx.fillText('白線＝無敵（一格＝1 幀）', x + 14, y);
+  }
+
   const ME = 'MY_CHICK_BABY';
   /** 選角：只有第一格是正常角色，其他七格是「？」；不管選哪格，鎖定後都是自己的電子雞 */
   function drawSelect(ctx, sel, frame) {
@@ -495,7 +550,7 @@ export const SFVClient = ((SFV, SFVServer) => {
       return { dir: ARROW[SFV.dirOf(m, 1)], btn, n };
     });
   }
-  return { SimLink, NetClient, SpectatorClient, createWorld, createBot, drawFight, drawSelect, inputRuns, INPUT_DELAY, BATCH_TICKS, CLIENT_MAX_PER_SEC };
+  return { SimLink, NetClient, SpectatorClient, createWorld, createBot, drawFight, drawSelect, inputRuns, createFrameMeter, drawFrameMeter, startupOf, INPUT_DELAY, BATCH_TICKS, CLIENT_MAX_PER_SEC };
 })(SFV, SFVServer);
 
 export const { NetClient, SpectatorClient, SimLink, createWorld, createBot } = SFVClient;

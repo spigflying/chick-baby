@@ -516,6 +516,30 @@ export const SFV = (() => {
     else if (s.tick - s.fs > FA_MAX) s.fx = 0;
   }
 
+  /**
+   * 幀數條用：這個角色在這一幀「在做什麼」。k = startup 發生／active 持續／recovery 收招／stun 受擊・防禦硬直／
+   * free 可自由行動／jump 跳躍／move 衝刺等移動；hs = 頓幀中（畫成灰色，但 k 照原本的階段，算發生幀數用）；inv = 全身無敵。
+   * 這是 tick 結束時的狀態；「這一幀能不能動」要看上一幀的 nx（幀數條會用它把收招最後一格改回收招）。
+   */
+  function frameKind(s, i) {
+    const p = s.p[i], hs = p.hs > 0;
+    let k = 'free', inv = false;
+    switch (p.st) {
+      case ST.MOVE: {
+        const mv = MOVE_LIST[p.mv];
+        if (mv.kind === 'system') k = 'move';
+        else { const ph = mv.phase(p.mt); k = ph === 0 ? 'startup' : ph === 1 && mv.A ? 'active' : 'recovery'; }
+        inv = mv.invulnAt(p.mt, 'full');
+        break;
+      }
+      case ST.LAND: case ST.THROWING: k = 'recovery'; break;
+      case ST.HIT: case ST.BLOCK: case ST.AIRHIT: case ST.KD: case ST.DIZZY: case ST.THROWN: case ST.TECH: case ST.KO: k = 'stun'; break;
+      case ST.PREJUMP: case ST.JUMP: k = 'jump'; break;
+      default: k = 'free';
+    }
+    return { k, hs, inv, nx: freeNext(p) }; // nx：下一幀能不能自由行動
+  }
+
   // ---------- 回合 ----------
   function gauges(p) {
     if (p.wdT > 0) p.wdT--; else if (p.wd > 0) { const r = Math.min(p.wd, WHITE_REGEN); p.wd -= r; p.hp += r; }
@@ -565,7 +589,7 @@ export const SFV = (() => {
 
   return {
     TICK_HZ, TICK_MS, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
-    ST, ST_NAME, RS, MOVE_LIST, M, PROJ, P_FIELDS, defineMove, createState, simulateSFVTick, packState, unpackState, cloneState, hashState, hashStr,
+    ST, ST_NAME, RS, MOVE_LIST, M, PROJ, P_FIELDS, defineMove, frameKind, createState, simulateSFVTick, packState, unpackState, cloneState, hashState, hashStr,
     dirOf, maskAt, motion, canBlock, hurtboxes, hitboxOf, pushbox, projBox, overlap,
   };
 })();

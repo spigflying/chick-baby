@@ -31,6 +31,8 @@ aside li i { color: var(--dim); font-style: normal; }
 #ctl button:hover { border-color: var(--warn); }
 #keys { text-align: center; color: var(--dim); padding: 0 16px 6px; }
 #log { text-align: center; color: var(--warn); min-height: 18px; padding-bottom: 12px; }
+#fmWrap { max-width: 1200px; margin: 8px auto 0; padding: 0 8px; }
+#fm { width: 100%; height: auto; image-rendering: auto; }
 kbd { background: #252836; border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; color: var(--text); }
 </style>
 </head>
@@ -42,6 +44,7 @@ kbd { background: #252836; border: 1px solid var(--line); border-radius: 3px; pa
   <aside><h3>P2 輸入紀錄（最近 4 秒）</h3><ol id="histR"></ol></aside>
   <aside id="moves"></aside>
 </main>
+<div id="fmWrap"><canvas id="fm" width="1200" height="80"></canvas></div>
 <div id="ctl">
   <label>RTT <input id="rtt" type="range" min="0" max="400" step="10" value="100"> <output id="rttOut">100ms</output></label>
   <label>抖動 <input id="jit" type="range" min="0" max="80" step="5" value="10"> <output id="jitOut">10ms</output></label>
