@@ -4,7 +4,7 @@ import { act, api, ApiError, errText } from './api';
 import type { Live } from './ws';
 import { LAYOUT, SCENE } from './farm-layout';
 import { background, barn, bakery, board, chick, coop, field, hutch, iconSymbols, jamhouse, pill, sceneDefs, tree } from './farm-art';
-import { FARM_ERR, fieldBadge, helpTargets, hudModel, plantChoices, remainText, type FarmPayload } from './farm-model';
+import { FARM_ERR, fieldBadge, helpTargets, hudModel, loadErrorAction, plantChoices, remainText, type FarmPayload } from './farm-model';
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const ic = (id: string, cls = 'fic') => `<svg class="${cls}" aria-hidden="true"><use href="#fi-${id}"/></svg>`;
@@ -26,6 +26,8 @@ export class FarmView {
   private timer = 0;
   private panel: Panel = null;
   private busy = false;
+  /** 背景重讀失敗後暫停（避免每秒一直重試），下一次成功的操作或重新打開時恢復 */
+  private paused = false;
 
   constructor(private live: Live, private me: { id: string; display_name: string }, private toast: (s: string) => void, private setWallet: (n: number) => void, private wallet: () => number) {
     if (!symbolsInjected) { document.body.insertAdjacentHTML('beforeend', iconSymbols()); symbolsInjected = true; }
@@ -38,7 +40,7 @@ export class FarmView {
 
   async open(ownerId: string, species?: string | null) {
     if (this.live.touch) return this.toast('農場只能用電腦玩');
-    this.ownerId = ownerId; this.species = species ?? null; this.panel = null;
+    this.ownerId = ownerId; this.species = species ?? null; this.panel = null; this.paused = false;
     try { await this.load(); } catch (e) { this.ownerId = null; return this.toast(this.err(e)); }
     this.root.hidden = false; requestAnimationFrame(() => this.root.classList.add('on'));
     clearInterval(this.timer); this.timer = window.setInterval(() => this.tickTimers(), 1000);
@@ -48,7 +50,7 @@ export class FarmView {
     this.root.classList.remove('on'); this.root.hidden = true; this.ownerId = null; this.data = null; this.panel = null;
     clearInterval(this.timer);
   }
-  onUpdated(userId: string) { if (this.ownerId === userId && !this.busy) void this.load().catch(() => {}); }
+  onUpdated(userId: string) { if (this.ownerId === userId && !this.busy) void this.bgLoad(); }
   destroy() { this.close(); this.root.remove(); document.removeEventListener('keydown', this.onKey, true); }
 
   // ---------- 資料 ----------
@@ -56,12 +58,21 @@ export class FarmView {
     const p = await api<FarmPayload>('GET', `/farm/${this.ownerId}`);
     this.data = p; this.loadedAt = Date.now(); this.render();
   }
+  /** 背景重讀（推播、倒數歸零）：失敗時不重試轟炸伺服器。 */
+  private async bgLoad() {
+    if (this.paused) return;
+    try { await this.load(); }
+    catch (e) {
+      if (loadErrorAction(e instanceof ApiError ? e.code : 'network') === 'close') { if (this.ownerId) { this.toast(this.err(e)); this.close(); } }
+      else this.paused = true;
+    }
+  }
   private err(e: unknown) { return e instanceof ApiError ? (FARM_ERR[e.code] ?? errText(e)) : errText(e); }
   private async doAct(action: FarmAction, okMsg?: string) {
     if (this.busy) return; this.busy = true;
     try {
       const r = await act<FarmPayload>('POST', '/farm/act', { action });
-      this.data = r; this.loadedAt = Date.now();
+      this.data = r; this.loadedAt = Date.now(); this.paused = false;
       if (typeof r.balance === 'number') this.setWallet(r.balance);
       for (const lv of r.leveled ?? []) this.toast(`升到 Lv ${lv} 了！`);
       if (okMsg) this.toast(okMsg);
@@ -86,12 +97,12 @@ export class FarmView {
   /** 倒數：伺服器給的是開放時間的剩餘毫秒，這裡用經過的牆鐘時間近似；有東西剛好熟了就重讀一次。 */
   private remain(ms: number) { return Math.max(0, ms - (Date.now() - this.loadedAt)); }
   private tickTimers() {
-    const d = this.data?.derived; if (!d || this.busy) return;
+    const d = this.data?.derived; if (!d || this.busy || this.paused) return;
     const all = [...d.fields.filter((f) => f.stage !== null && f.stage < 3).map((f) => f.remainMs),
       ...Object.values(d.animals).flatMap((a) => a.items.filter((x) => x.state === 'growing').map((x) => x.remainMs)),
       ...Object.values(d.jobs).flatMap((j) => j.items.map((x) => x.remainMs)), ...(d.tree.state === 'growing' ? [d.tree.remainMs] : []),
       ...d.orders.flatMap((o) => ('waitMs' in o && o.waitMs > 0 ? [o.waitMs] : []))];
-    if (all.some((ms) => ms > 0 && this.remain(ms) === 0)) { void this.load().catch(() => {}); return; }
+    if (all.some((ms) => ms > 0 && this.remain(ms) === 0)) { void this.bgLoad(); return; }
     const g = this.root.querySelector('.scene .pills'); if (g) g.innerHTML = this.pills();
     const pn = this.root.querySelector('.farm-panel [data-live]'); if (pn) this.renderPanel();
   }

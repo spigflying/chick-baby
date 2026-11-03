@@ -301,7 +301,8 @@ export const migrations: Record<string, Migration> = {
   '0011_farm': {
     async up(db: Kysely<unknown>) {
       // 小雞農場（docs/superpowers/specs/2026-11-03-farm-design.md）：整座農場是一列 jsonb，規則在 @chick/engine 的 farm.ts；
-      // farm_help 記錄好友幫忙（算每日上限）。合併回 main 前若 main 已有 0011_*，改成下一個號碼。
+      // farm_help 記錄好友幫忙（算每日上限）。合併回 main 前若 main 已有 0011_* 或更新的 migration：改成下一個號碼，
+      // 並把下面 coin_ledger_reason_check 的清單換成 main 最新清單＋farm_*（up 與 down 都要），見 docs/DEPLOY.md「小雞農場」。
       await sql`CREATE TABLE farms (user_id uuid PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, state jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now());
         CREATE TABLE farm_help (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
           helper_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE, owner_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,

@@ -181,6 +181,19 @@ describe('orders', () => {
   });
 });
 
+describe('orders refill on read', () => {
+  it('loadFarm fills a slot whose wait has passed; a level-up inside an action fills the new slot', () => {
+    const s = fresh(); applyFarm(s, { type: 'discard', slot: 0 }, T0, C);
+    const later = loadFarm(JSON.parse(JSON.stringify(s)), T0 + FARM.orders.discardWaitMs, C);
+    expect(later.orders[0]).not.toBeNull();
+    expect(describeFarm(later, T0 + FARM.orders.discardWaitMs, C).orders[0]).toHaveProperty('order');
+    const s2 = fresh(2); s2.xp = 59; // 到 Lv3（4 張訂單）
+    applyFarm(s2, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C);
+    applyFarm(s2, { type: 'harvest', idx: 0 }, T0 + 2 * M, C);
+    expect(s2.level).toBe(3); expect(s2.orders[3]).not.toBeNull();
+  });
+});
+
 describe('levels', () => {
   it('levels up at 30×level xp with ◎2×newLevel reward; can cross two levels at once; stops at Lv20', () => {
     const s = fresh(); s.xp = 29; applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C);

@@ -134,6 +134,14 @@ describe('farm owner', () => {
     expect(r.json.balance).toBe(before + order.coins + 4);
     expect(await balance(a.id)).toBe(before + order.coins + 4);
   });
+  it('GET refills an order slot once its wait has passed', async () => {
+    const a = await login('alice');
+    await a.call('GET', `/api/farm/${a.id}`);
+    await patchState(a.id, (s) => { s.orders[0] = null; s.orderWait[0] = Date.now() - 1000; });
+    const r = await a.call('GET', `/api/farm/${a.id}`);
+    expect(r.json.state.orders[0]).not.toBeNull();
+    expect(r.json.derived.orders[0]).toHaveProperty('order');
+  });
   it('visitor cannot act on others\' farm; visitors do not see the help log', async () => {
     const a = await login('alice'), b = await login('bob');
     await growingCarrot(a);

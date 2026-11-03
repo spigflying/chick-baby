@@ -135,7 +135,7 @@ export function loadFarm(json: unknown, now: number, clock: Clock): FarmState {
   for (const a of ANIMAL_IDS) animals[a] = pad(j.animals?.[a], FARM.animalsPerStation, () => ({ start: 0, ready: null }));
   const jobs = { ...d.jobs }; const queueSlots = { ...d.queueSlots };
   for (const k of STATION_IDS) { if (Array.isArray(j.jobs?.[k])) jobs[k] = j.jobs![k]; if (isInt(j.queueSlots?.[k])) queueSlots[k] = j.queueSlots![k]; }
-  return {
+  const s = {
     ...d, ...j, v: 1,
     fields: pad(j.fields, FARM.fieldCount, emptyField),
     animals, jobs, queueSlots,
@@ -145,6 +145,9 @@ export function loadFarm(json: unknown, now: number, clock: Clock): FarmState {
     orderWait: pad(j.orderWait, FARM.orders.maxSlots, () => 0),
     helpLog: Array.isArray(j.helpLog) ? j.helpLog : [],
   } as FarmState;
+  // 等待時間已過的訂單格直接補上（genOrder 是決定性的，沒存檔也不會跟下一次動作算出來的不一樣）
+  refreshOrders(s, now);
+  return s;
 }
 
 // ---------- 訂單 ----------
@@ -328,6 +331,7 @@ export function applyFarm(s: FarmState, a: FarmAction, now: number, clock: Clock
     case 'ackHelp': s.helpLog = []; break;
     default: fail('BAD_REQUEST');
   }
+  refreshOrders(s, now); // 這個動作升級多出來的訂單格也馬上補
   return out;
 }
 

@@ -36,7 +36,10 @@
 
 - **只部署 main 時**：農場的程式不在裡面，什麼都不用做。
 - **`farm` 合併回 main 之後**：程式在，但伺服器沒有 `FARM_ENABLED=1` 就完全看不到（沒有 API、沒有蛋殼上的「農場」格子）。可以先合併、照常部署，等要上線再開。
-- **合併前**：確認 migration 號碼。`farm` 分支用 `0011_farm`；如果 main 已經有 `0011_*`，把農場的改成下一個沒用過的號碼（只改 `apps/server/src/migrations.ts` 的 key）。本機開發資料庫跑過舊名字的話，刪掉 `kysely_migration` 裡那一列再重跑。
+- **合併前**：確認 migration。`farm` 分支用 `0011_farm`；如果 main 已經有 `0011_*` 或更新的 migration：
+  1. 把農場的 key 改成下一個沒用過的號碼。
+  2. **合併 `coin_ledger_reason_check` 的清單**：`0011_farm` 會整個重建這個約束（寫死的 reason 清單）。把 main 最新 migration 裡的清單拿來，加上六個 `farm_*`，`up` 和 `down` 都要改（`down` 還原成 main 最新的清單）。只改 key 的話，正式環境會在 `ADD CONSTRAINT` 失敗（已有 main 新 reason 的帳本列），或 main 的新功能寫不進帳本。
+  3. 本機開發資料庫跑過舊名字的話：先 `DROP TABLE farm_help; DROP TABLE farms;`，刪掉 `kysely_migration` 裡 `0011_farm` 那一列，再重跑 migration（只刪那一列會因為資料表已存在而失敗）。
 - **要上線時**：
   1. `apps/server/release-notes.json` 寫農場的更新說明（合併時不要先寫，開關沒開玩家看不到）。
   2. 部署新版後打開開關：`gcloud run services update $SERVICE --update-env-vars=FARM_ENABLED=1`（會換版，避開開放時間）。

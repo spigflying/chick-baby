@@ -73,3 +73,8 @@ export function farmCellState(cfgFarm: boolean, touch: boolean): 'hidden' | 'dis
   if (!cfgFarm) return 'hidden';
   return touch ? 'disabled' : 'enabled';
 }
+
+/** 背景重讀失敗時怎麼辦：沒有權限了（被黑名單、家關起來、登出）就關掉農場；其他錯誤先暫停自動重讀，等下一次成功的操作。 */
+export function loadErrorAction(code: string): 'close' | 'pause' {
+  return code === 'FORBIDDEN' || code === 'NOT_FOUND' || code === 'UNAUTHORIZED' ? 'close' : 'pause';
+}

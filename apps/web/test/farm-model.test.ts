@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ALWAYS_OPEN, applyFarm, describeFarm, newFarm, applyHelp, FARM_ERROR_CODES, type FarmState } from '@chick/engine';
-import { remainText, fieldBadge, plantChoices, hudModel, helpTargets, FARM_ERR, farmCellState, type FarmPayload } from '../src/farm-model';
+import { remainText, fieldBadge, plantChoices, hudModel, helpTargets, FARM_ERR, farmCellState, loadErrorAction, type FarmPayload } from '../src/farm-model';
 
 const T0 = Date.parse('2026-11-02T10:00:00+08:00');
 const M = 60_000;
@@ -78,5 +78,12 @@ describe('farmCellState', () => {
     expect(farmCellState(false, true)).toBe('hidden');
     expect(farmCellState(true, true)).toBe('disabled');
     expect(farmCellState(true, false)).toBe('enabled');
+  });
+});
+
+describe('loadErrorAction', () => {
+  it('closes the farm when access is gone, otherwise pauses auto-reload', () => {
+    expect(['FORBIDDEN', 'NOT_FOUND', 'UNAUTHORIZED'].map(loadErrorAction)).toEqual(['close', 'close', 'close']);
+    expect(['INTERNAL', 'RATE_LIMITED', 'DB_UNAVAILABLE', 'GAME_CLOSED', 'network'].map(loadErrorAction)).toEqual(['pause', 'pause', 'pause', 'pause', 'pause']);
   });
 });
