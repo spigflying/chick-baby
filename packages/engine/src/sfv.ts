@@ -25,6 +25,8 @@ export const SFV = (() => {
   const AIR_RESET = [3, -6];
   // Counter Hit：打中正在出招（發生或持續中）的對手 → 傷害 ×1.2、地面受擊硬直 +2F；CH_SHOW = 畫面提示顯示幾幀
   const CH_DMG = 120, CH_HITSTUN = 2, CH_SHOW = 40;
+  // 硬直差顯示：打中／被擋後，雙方都能動時算「誰先動幾幀」，畫面顯示 FA_SHOW 幀；FA_MAX 幀內沒結束就放棄
+  const FA_SHOW = 60, FA_MAX = 120;
   const ST = Object.freeze({ IDLE: 0, CROUCH: 1, PREJUMP: 2, JUMP: 3, MOVE: 4, HIT: 5, BLOCK: 6, AIRHIT: 7, KD: 8, THROWN: 9, THROWING: 10, DIZZY: 11, LAND: 12, KO: 13, TECH: 14 });
   const ST_NAME = Object.keys(ST);
   const RS = Object.freeze({ FIGHT: 0, KO: 1, OVER: 2, INTRO: 3 });
@@ -103,16 +105,17 @@ export const SFV = (() => {
   ];
 
   // ---------- 狀態 ----------
-  const P_FIELDS = ['x', 'y', 'vx', 'vy', 'f', 'st', 't', 'mv', 'mt', 'hm', 'cn', 'hs', 'bf', 'hp', 'wd', 'wdT', 'sg', 'sgT', 'dz', 'ex', 'vg', 'vt', 'cb', 'jg', 'kb', 'air', 'cr', 'lb', 'ch'];
+  const P_FIELDS = ['x', 'y', 'vx', 'vy', 'f', 'st', 't', 'mv', 'mt', 'hm', 'cn', 'hs', 'bf', 'hp', 'wd', 'wdT', 'sg', 'sgT', 'dz', 'ex', 'vg', 'vt', 'cb', 'jg', 'kb', 'air', 'cr', 'lb', 'ch', 'fr'];
   const Q_FIELDS = ['o', 'x', 'y', 'vx', 'n', 'lv', 'cd'];
-  const S_FIELDS = ['tick', 'frz', 'fo', 'rs', 'rt', 'rnd', 'tm', 'win', 'to', 'lw'];
+  // fx = 正在量硬直差的攻擊方（index+1，0 = 沒在量）、fs = 開始量的 tick、fa = 上次結果的攻擊方（index+1）、fv = 攻擊方的硬直差、ft = 顯示剩幾幀
+  const S_FIELDS = ['tick', 'frz', 'fo', 'rs', 'rt', 'rnd', 'tm', 'win', 'to', 'lw', 'fx', 'fs', 'fa', 'fv', 'ft'];
   function newPlayer(x, f) {
     const p = {}; for (const k of P_FIELDS) p[k] = 0;
     Object.assign(p, { x, f, mv: -1, hp: HP_MAX }); p.hist = new Array(HIST).fill(0);
     return p;
   }
   function createState(modes = [0, 0]) {
-    return { tick: 0, frz: 0, fo: 0, rs: RS.INTRO, rt: INTRO_T, rnd: 1, tm: ROUND_TICKS, win: -1, to: 0, lw: -1, w: [0, 0],
+    return { tick: 0, frz: 0, fo: 0, fx: 0, fs: 0, fa: 0, fv: 0, ft: 0, rs: RS.INTRO, rt: INTRO_T, rnd: 1, tm: ROUND_TICKS, win: -1, to: 0, lw: -1, w: [0, 0],
       mode: modes.slice(), p: [newPlayer(STAGE_W / 2 - 120, 1), newPlayer(STAGE_W / 2 + 120, -1)], pr: [] };
   }
   const hexOf = (a) => a.map((v) => v.toString(16).padStart(3, '0')).join('');
@@ -451,9 +454,12 @@ export const SFV = (() => {
     }
     B.hs = d.hs;
     if (!h.q) A.hs = Math.max(A.hs, d.hs);
+    // 地面打中／被擋才量（浮空、擊倒另計，不顯示）
+    if (B.st === ST.HIT || B.st === ST.BLOCK) { s.fx = h.i + 1; s.fs = s.tick; A.fr = 0; B.fr = 0; } else s.fx = 0;
   }
   function grab(s, i) {
     const A = s.p[i], B = s.p[1 - i];
+    s.fx = 0;
     A.st = ST.THROWING; A.t = TECH_WINDOW + THROW_ANIM; A.mv = -1; A.vx = 0; A.cn = 0; A.hs = 0;
     B.st = ST.THROWN; B.t = 0; B.mv = -1; B.bf = 0; B.vx = 0; B.hs = 0;
   }
@@ -494,6 +500,22 @@ export const SFV = (() => {
     s.pr = s.pr.filter((q) => q.n > 0);
   }
 
+  /** 這一 tick 結束時，下一 tick 能不能自由行動（硬直最後一幀 t=0 → 下一幀 decide 就解除） */
+  function freeNext(p) {
+    if (p.hs > 0) return false;
+    if (p.st === ST.IDLE || p.st === ST.CROUCH) return true;
+    return (p.st === ST.HIT || p.st === ST.BLOCK) && p.t <= 0 && !p.dz;
+  }
+  function frameAdvantage(s) {
+    if (s.ft > 0) s.ft--;
+    if (!s.fx) return;
+    const a = s.fx - 1, A = s.p[a], B = s.p[1 - a];
+    for (const p of s.p) if (!p.fr && freeNext(p)) p.fr = s.tick + 1;
+    for (const p of s.p) if (p.st === ST.KD || p.st === ST.AIRHIT || p.st === ST.THROWN || p.st === ST.KO || p.st === ST.DIZZY) { s.fx = 0; return; }
+    if (A.fr && B.fr) { s.fa = s.fx; s.fv = B.fr - A.fr; s.ft = FA_SHOW; s.fx = 0; }
+    else if (s.tick - s.fs > FA_MAX) s.fx = 0;
+  }
+
   // ---------- 回合 ----------
   function gauges(p) {
     if (p.wdT > 0) p.wdT--; else if (p.wd > 0) { const r = Math.min(p.wd, WHITE_REGEN); p.wd -= r; p.hp += r; }
@@ -519,7 +541,7 @@ export const SFV = (() => {
     const old = s.p;
     s.p = [newPlayer(STAGE_W / 2 - 120, 1), newPlayer(STAGE_W / 2 + 120, -1)];
     s.p.forEach((p, i) => { p.ex = old[i].ex; p.hist = old[i].hist; }); // EX 氣帶到下一回合
-    s.pr = []; s.rnd++; s.tm = ROUND_TICKS; s.rs = RS.INTRO; s.rt = INTRO_T; s.to = 0; s.lw = -1;
+    s.fx = 0; s.ft = 0; s.pr = []; s.rnd++; s.tm = ROUND_TICKS; s.rs = RS.INTRO; s.rt = INTRO_T; s.to = 0; s.lw = -1;
   }
 
   /** 一個 tick：記輸入 → 決策 → Phase 1 移動與推擠 → Phase 2 判定 → 量表與回合 */
@@ -536,13 +558,13 @@ export const SFV = (() => {
     s.pr = s.pr.filter((q) => q.x > -40 && q.x < STAGE_W + 40);
     resolvePush(s);
     autoFace(s);
-    if (s.rs === RS.FIGHT) { combat(s); gauges(s.p[0]); gauges(s.p[1]); checkRound(s); }
+    if (s.rs === RS.FIGHT) { combat(s); frameAdvantage(s); gauges(s.p[0]); gauges(s.p[1]); checkRound(s); }
     else if (s.rs === RS.KO && --s.rt <= 0) endRound(s);
     return s;
   }
 
   return {
-    TICK_HZ, TICK_MS, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
+    TICK_HZ, TICK_MS, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
     ST, ST_NAME, RS, MOVE_LIST, M, PROJ, P_FIELDS, defineMove, createState, simulateSFVTick, packState, unpackState, cloneState, hashState, hashStr,
     dirOf, maskAt, motion, canBlock, hurtboxes, hitboxOf, pushbox, projBox, overlap,
   };

@@ -337,6 +337,12 @@ export const SFVClient = ((SFV, SFVServer) => {
     const label = p.st === SFV.ST.MOVE ? SFV.MOVE_LIST[p.mv].name : STATE_TEXT[SFV.ST_NAME[p.st]];
     if (label) text(ctx, label, p.x, top - 14, 13, '#fff');
     if (i === opt.me) text(ctx, '▼', p.x, top - 32, 12, sk.body, 'center', false);
+    if (s.ft > 0 && s.fa) { // 硬直差：先能動的一方綠色 +N、後能動的紅色 -N；最後 15 幀淡出
+      const v = i === s.fa - 1 ? s.fv : -s.fv;
+      ctx.globalAlpha = Math.min(1, s.ft / 15);
+      text(ctx, v > 0 ? `+${v}` : v < 0 ? `${v}` : '±0', p.x, top - 54, 24, v > 0 ? '#5dff8a' : v < 0 ? '#ff5c5c' : '#fff');
+      ctx.globalAlpha = 1;
+    }
     if (opt.showBoxes) {
       rect(ctx, SFV.pushbox(p), null, COL.push);
       for (const hb of SFV.hurtboxes(p)) rect(ctx, hb, '#2ee66b22', COL.hurt);

@@ -270,6 +270,41 @@ describe('frames: links, punishes, counter hit', () => {
   });
 });
 
+describe('frame advantage display', () => {
+  /** P1 出 id，P2 不動或防禦；回傳顯示出來的攻擊方硬直差（沒顯示 = null） */
+  function shown(id: string, block: boolean) {
+    const btn = ({ LP, HP, LK, HK } as Record<string, number>)[id.slice(1)], cr = id[0] === '2' ? DOWN : 0;
+    const low = SFV.MOVE_LIST[M[id]].guard === 'low';
+    const s = fight(450, 500);
+    for (let k = 1; k < 100; k++) {
+      SFV.simulateSFVTick(s, k <= 2 ? cr | btn : cr, block ? (low ? DOWN : 0) | RIGHT : 0);
+      if (s.ft === SFV.FA_SHOW) { expect(s.fa).toBe(1); return s.fv; }
+    }
+    return null;
+  }
+  it('matches the frame data table (on hit / on block)', () => {
+    expect([shown('5LP', false), shown('5LP', true)]).toEqual([4, 2]);
+    expect([shown('2LK', false), shown('2LK', true)]).toEqual([1, -1]);
+    expect([shown('5HP', false), shown('5HP', true)]).toEqual([1, -4]);
+    expect([shown('5HK', false), shown('5HK', true)]).toEqual([-1, -7]);
+    expect(shown('2HK', true)).toBe(-13);
+  });
+  it('knockdowns are not shown', () => {
+    expect(shown('2HK', false)).toBe(null);
+  });
+  it('the value is what links: +N links into an N-frame move', () => {
+    // 5LP 命中 +4、5LP 發生 4F → 前面已驗證剛好 1 幀目押
+    expect(shown('5LP', false)).toBe(SFV.MOVE_LIST[M['5LP']].S);
+  });
+  it('display fades out after FA_SHOW frames', () => {
+    const s = fight(450, 500);
+    run(s, [LP, LP, ...hold(0, 40)]);
+    expect(s.ft).toBeGreaterThan(0);
+    run(s, hold(0, SFV.FA_SHOW));
+    expect(s.ft).toBe(0);
+  });
+});
+
 describe('dashes (double tap)', () => {
   it('←← back dash: throw-invulnerable 2 ticks, then a short hop, ends ~80px back', () => {
     const s = fight(480, 700), x0 = s.p[0].x;
