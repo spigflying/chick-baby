@@ -1,4 +1,5 @@
-// 小雞農場（docs/superpowers/specs/2026-11-03-farm-design.md）：整座農場是一個 FarmState，這裡全部是純函式。
+// 小雞農場（docs/superpowers/specs/2026-11-03-farm-design.md）：數值由 scripts/sim-farm.ts 的經濟模擬調過（test/farm-economy.test.ts）。
+// 整座農場是一個 FarmState，這裡全部是純函式。
 // 伺服器、經濟模擬與測試共用同一套規則；所有計時只算開放時間（clock.addOpen / clock.elapsed）。
 import type { Clock } from './hours';
 import { createRng, nextInt } from './rng';
@@ -48,11 +49,11 @@ export const FARM = {
   /** 第 i 格田在幾級解鎖（Lv1 開 6 格，Lv2/3/5/6/8/10 各多 1 格） */
   fieldUnlock: [1, 1, 1, 1, 1, 1, 2, 3, 5, 6, 8, 10],
   maxLevel: 20,
-  xpPerLevel: 20,          // 升到下一級需要 xpPerLevel × level
-  levelRewardPerLevel: 10, // 升級獎勵 ◎ 10 × 新等級
+  xpPerLevel: 30,          // 升到下一級需要 xpPerLevel × level
+  levelRewardPerLevel: 2,  // 升級獎勵 ◎ 2 × 新等級
   animalsPerStation: 2,
-  tree: { ms: 60 * MIN, out: { item: 'apple', qty: 3 } as Stack, witherMs: 8 * HOUR, rescueCoins: 30 },
-  orders: { maxSlots: 6, slotsByLevel: [[8, 6], [5, 5], [3, 4], [1, 3]] as [number, number][], maxKinds: 3, maxQty: 4, coinMult: 1.6, xpMult: 2, discardWaitMs: 10 * MIN },
+  tree: { ms: 120 * MIN, out: { item: 'apple', qty: 3 } as Stack, witherMs: 8 * HOUR, rescueCoins: 30 },
+  orders: { maxSlots: 6, slotsByLevel: [[8, 6], [5, 5], [3, 4], [1, 3]] as [number, number][], maxKinds: 3, maxQty: 3, coinMult: 1.8, xpMult: 2, discardWaitMs: 10 * MIN, deliverWaitMs: 90 * MIN },
   barn: { base: 50, step: 25, maxLevel: 6, costBase: 100, bonusSlots: 5, bonusCostStep: 10 },
   queue: { base: 2, max: 4, costs: [80, 160] },
   help: { waterCut: 0.2, perDay: 10, perFarm: 5, friendPoints: 1, logMax: 20 },
@@ -60,22 +61,22 @@ export const FARM = {
 
 export const FARM_ITEMS: Record<FarmItemId, { name: string; sell: number; xp: number }> = {
   wheat: { name: '小麥', sell: 1, xp: 1 }, carrot: { name: '胡蘿蔔', sell: 3, xp: 2 }, strawberry: { name: '草莓', sell: 6, xp: 4 },
-  pumpkin: { name: '愛心南瓜', sell: 12, xp: 6 }, wool: { name: '毛線球', sell: 10, xp: 3 }, egg: { name: '蛋', sell: 4, xp: 3 },
-  apple: { name: '蘋果', sell: 3, xp: 3 }, bread: { name: '麵包', sell: 12, xp: 5 }, jam: { name: '草莓果醬', sell: 25, xp: 8 },
+  pumpkin: { name: '愛心南瓜', sell: 12, xp: 6 }, wool: { name: '毛線球', sell: 4, xp: 3 }, egg: { name: '蛋', sell: 3, xp: 3 },
+  apple: { name: '蘋果', sell: 3, xp: 3 }, bread: { name: '麵包', sell: 6, xp: 5 }, jam: { name: '草莓果醬', sell: 20, xp: 8 },
 };
 export const CROPS: Record<CropId, { name: string; level: number; growMs: number; seedCoins: number; seedFriendPts: number; out: Stack }> = {
-  wheat: { name: '小麥', level: 1, growMs: 2 * MIN, seedCoins: 1, seedFriendPts: 0, out: { item: 'wheat', qty: 2 } },
-  carrot: { name: '胡蘿蔔', level: 1, growMs: 10 * MIN, seedCoins: 3, seedFriendPts: 0, out: { item: 'carrot', qty: 2 } },
-  strawberry: { name: '草莓', level: 3, growMs: 30 * MIN, seedCoins: 8, seedFriendPts: 0, out: { item: 'strawberry', qty: 2 } },
+  wheat: { name: '小麥', level: 1, growMs: 2 * MIN, seedCoins: 2, seedFriendPts: 0, out: { item: 'wheat', qty: 2 } },
+  carrot: { name: '胡蘿蔔', level: 1, growMs: 30 * MIN, seedCoins: 6, seedFriendPts: 0, out: { item: 'carrot', qty: 2 } },
+  strawberry: { name: '草莓', level: 3, growMs: 120 * MIN, seedCoins: 12, seedFriendPts: 0, out: { item: 'strawberry', qty: 2 } },
   pumpkin: { name: '愛心南瓜', level: 3, growMs: 60 * MIN, seedCoins: 0, seedFriendPts: 3, out: { item: 'pumpkin', qty: 2 } },
 };
 export const ANIMALS: Record<AnimalStation, { name: string; animal: string; level: number; ms: number; feed: Stack[]; out: Stack }> = {
-  hutch: { name: '兔兔窩', animal: '兔兔', level: 2, ms: 20 * MIN, feed: [{ item: 'carrot', qty: 1 }], out: { item: 'wool', qty: 1 } },
-  coop: { name: '雞舍', animal: '母雞', level: 4, ms: 15 * MIN, feed: [{ item: 'wheat', qty: 2 }], out: { item: 'egg', qty: 1 } },
+  hutch: { name: '兔兔窩', animal: '兔兔', level: 2, ms: 120 * MIN, feed: [{ item: 'carrot', qty: 1 }], out: { item: 'wool', qty: 1 } },
+  coop: { name: '雞舍', animal: '母雞', level: 4, ms: 90 * MIN, feed: [{ item: 'wheat', qty: 2 }], out: { item: 'egg', qty: 1 } },
 };
 export const RECIPES: Record<RecipeId, { name: string; station: CraftStation; level: number; ms: number; in: Stack[]; out: Stack }> = {
-  bread: { name: '麵包', station: 'bakery', level: 4, ms: 5 * MIN, in: [{ item: 'wheat', qty: 2 }, { item: 'egg', qty: 1 }], out: { item: 'bread', qty: 1 } },
-  jam: { name: '草莓果醬', station: 'jamhouse', level: 6, ms: 15 * MIN, in: [{ item: 'strawberry', qty: 3 }], out: { item: 'jam', qty: 1 } },
+  bread: { name: '麵包', station: 'bakery', level: 4, ms: 60 * MIN, in: [{ item: 'wheat', qty: 2 }, { item: 'egg', qty: 1 }], out: { item: 'bread', qty: 1 } },
+  jam: { name: '草莓果醬', station: 'jamhouse', level: 6, ms: 120 * MIN, in: [{ item: 'strawberry', qty: 3 }], out: { item: 'jam', qty: 1 } },
 };
 export const CRAFT_STATIONS: Record<CraftStation, { name: string; level: number }> = {
   bakery: { name: '烘焙屋', level: 4 }, jamhouse: { name: '果醬工坊', level: 6 },
@@ -244,10 +245,11 @@ export function applyFarm(s: FarmState, a: FarmAction, now: number, clock: Clock
     }
     case 'harvest': harvestField(s, fieldAt(s, a.idx), now, out); break;
     case 'collectAll': {
-      s.fields.forEach((f) => { if (f.crop && now >= f.ready) tryDo(() => harvestField(s, f, now, out)); });
+      // 值錢的先收（成品 → 動物產物 → 果樹 → 田），倉庫快滿時不會被便宜的作物塞爆
+      for (const st of STATION_IDS) collectJobs(s, st, now, out);
       for (const st of ANIMAL_IDS) if (s.level >= ANIMALS[st].level) for (const an of s.animals[st]) if (an.ready !== null && now >= an.ready) tryDo(() => collectAnimal(s, st, an, now, out));
       if (now >= s.tree.ready && !treeWithered(s, now, clock)) tryDo(() => harvestTree(s, now, clock, out));
-      for (const st of STATION_IDS) collectJobs(s, st, now, out);
+      s.fields.forEach((f) => { if (f.crop && now >= f.ready) tryDo(() => harvestField(s, f, now, out)); });
       break;
     }
     case 'feed': {
@@ -287,7 +289,7 @@ export function applyFarm(s: FarmState, a: FarmAction, now: number, clock: Clock
       take(s, o!.items);
       out.ledger.push({ reason: 'farm_order', delta: o!.coins });
       gainXp(s, o!.xp, out);
-      s.orders[i] = i < orderSlots(s.level) ? genOrder(s.seed, s.orderSeq++, s.level) : null;
+      s.orders[i] = null; s.orderWait[i] = clock.addOpen(now, FARM.orders.deliverWaitMs);
       break;
     }
     case 'discard': {

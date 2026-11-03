@@ -41,9 +41,9 @@ describe('newFarm', () => {
 });
 
 describe('fields', () => {
-  it('plant wheat costs ◎1 through farm_seed; busy/locked/level checks', () => {
+  it('plant wheat costs ◎2 through farm_seed; busy/locked/level checks', () => {
     const s = fresh();
-    expect(applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C).ledger).toEqual([{ reason: 'farm_seed', delta: -1 }]);
+    expect(applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C).ledger).toEqual([{ reason: 'farm_seed', delta: -2 }]);
     expect(code(() => applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C))).toBe('SLOT_BUSY');
     expect(code(() => applyFarm(s, { type: 'plant', idx: 6, crop: 'wheat' }, T0, C))).toBe('NOT_UNLOCKED');
     expect(code(() => applyFarm(s, { type: 'plant', idx: 1, crop: 'strawberry' }, T0, C))).toBe('NOT_UNLOCKED');
@@ -81,6 +81,14 @@ describe('fields', () => {
     const d = describeFarm(s, T0 + 2 * M, C);
     expect([d.fields[1].stage, d.fields[2].stage]).toEqual([3, 3]);
   });
+  it('collectAll takes finished goods before crops when the barn is nearly full', () => {
+    const s = fresh(4); give(s, 'wheat', 2); give(s, 'egg', 1);
+    applyFarm(s, { type: 'craft', recipe: 'bread' }, T0, C);
+    applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C);
+    give(s, 'carrot', 48); // 剩 2 格：先收小麥（2）就收不了麵包
+    applyFarm(s, { type: 'collectAll' }, T0 + 60 * M, C);
+    expect(s.inv.bread).toBe(1); expect(s.fields[0].crop).toBe('wheat');
+  });
   it('harvest into a full barn throws BARN_FULL and keeps the crop', () => {
     const s = fresh(); applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C); give(s, 'carrot', 49);
     expect(code(() => applyFarm(s, { type: 'harvest', idx: 0 }, T0 + 2 * M, C))).toBe('BARN_FULL');
@@ -89,38 +97,38 @@ describe('fields', () => {
 });
 
 describe('animals', () => {
-  it('hutch unlocks at Lv2; feeding eats a carrot; collect gives wool after 20 min', () => {
+  it('hutch unlocks at Lv2; feeding eats a carrot; collect gives wool after 2 hours', () => {
     const s = fresh(); give(s, 'carrot', 1);
     expect(code(() => applyFarm(s, { type: 'feed', station: 'hutch', i: 0 }, T0, C))).toBe('NOT_UNLOCKED');
     s.level = 2;
     applyFarm(s, { type: 'feed', station: 'hutch', i: 0 }, T0, C);
     expect(s.inv.carrot ?? 0).toBe(0);
     expect(code(() => applyFarm(s, { type: 'feed', station: 'hutch', i: 1 }, T0, C))).toBe('NOT_ENOUGH_ITEMS');
-    expect(code(() => applyFarm(s, { type: 'collect', station: 'hutch', i: 0 }, T0 + 19 * M, C))).toBe('NOT_READY');
-    applyFarm(s, { type: 'collect', station: 'hutch', i: 0 }, T0 + 20 * M, C);
+    expect(code(() => applyFarm(s, { type: 'collect', station: 'hutch', i: 0 }, T0 + 119 * M, C))).toBe('NOT_READY');
+    applyFarm(s, { type: 'collect', station: 'hutch', i: 0 }, T0 + 120 * M, C);
     expect(s.inv.wool).toBe(1); expect(s.animals.hutch[0].ready).toBeNull();
   });
 });
 
 describe('tree', () => {
-  it('gives 3 apples after 60 min, withers 8 open hours after ripening, self-rescue costs ◎30', () => {
+  it('gives 3 apples after 2 hours, withers 8 open hours after ripening, self-rescue costs ◎30', () => {
     const s = fresh();
-    expect(code(() => applyFarm(s, { type: 'tree' }, T0 + 59 * M, C))).toBe('NOT_READY');
-    expect(code(() => applyFarm(s, { type: 'rescue' }, T0 + 60 * M, C))).toBe('NOT_WITHERED');
+    expect(code(() => applyFarm(s, { type: 'tree' }, T0 + 119 * M, C))).toBe('NOT_READY');
+    expect(code(() => applyFarm(s, { type: 'rescue' }, T0 + 120 * M, C))).toBe('NOT_WITHERED');
     const s2 = structuredClone(s);
-    applyFarm(s, { type: 'tree' }, T0 + 60 * M, C); expect(s.inv.apple).toBe(3);
-    const late = T0 + 60 * M + 8 * H;
+    applyFarm(s, { type: 'tree' }, T0 + 120 * M, C); expect(s.inv.apple).toBe(3);
+    const late = T0 + 120 * M + 8 * H;
     expect(treeWithered(s2, late, C)).toBe(true);
     expect(code(() => applyFarm(s2, { type: 'tree' }, late, C))).toBe('WITHERED');
     expect(applyFarm(s2, { type: 'rescue' }, late, C).ledger).toEqual([{ reason: 'farm_rescue', delta: -30 }]);
     expect(treeWithered(s2, late, C)).toBe(false);
-    expect(s2.tree.ready).toBe(late + 60 * M);
+    expect(s2.tree.ready).toBe(late + 120 * M);
   });
   it('withering counts open time only', () => {
     const t = tpe('2026-11-02T09:00:00');
-    const s = newFarm(1, t, TPE); // 10:00 熟
-    expect(treeWithered(s, tpe('2026-11-02T19:59:00'), TPE)).toBe(true); // 10:00 + 8h = 18:00
-    const s2 = newFarm(1, tpe('2026-11-02T18:00:00'), TPE); // 19:00 熟
+    const s = newFarm(1, t, TPE); // 11:00 熟
+    expect(treeWithered(s, tpe('2026-11-02T19:59:00'), TPE)).toBe(true); // 11:00 + 8h = 19:00
+    const s2 = newFarm(1, tpe('2026-11-02T17:00:00'), TPE); // 19:00 熟
     expect(treeWithered(s2, tpe('2026-11-03T09:30:00'), TPE)).toBe(false); // 只過了 1.5 開放小時
   });
 });
@@ -130,10 +138,10 @@ describe('crafting', () => {
     const s = fresh(4); give(s, 'wheat', 6); give(s, 'egg', 3);
     applyFarm(s, { type: 'craft', recipe: 'bread' }, T0, C);
     applyFarm(s, { type: 'craft', recipe: 'bread' }, T0, C);
-    expect(s.jobs.bakery.map((j) => j.ready)).toEqual([T0 + 5 * M, T0 + 10 * M]);
+    expect(s.jobs.bakery.map((j) => j.ready)).toEqual([T0 + 60 * M, T0 + 120 * M]);
     expect([s.inv.wheat, s.inv.egg]).toEqual([2, 1]);
     expect(code(() => applyFarm(s, { type: 'craft', recipe: 'bread' }, T0, C))).toBe('QUEUE_FULL');
-    applyFarm(s, { type: 'collectJobs', station: 'bakery' }, T0 + 6 * M, C);
+    applyFarm(s, { type: 'collectJobs', station: 'bakery' }, T0 + 61 * M, C);
     expect(s.inv.bread).toBe(1); expect(s.jobs.bakery).toHaveLength(1);
     expect(code(() => applyFarm(fresh(1), { type: 'craft', recipe: 'bread' }, T0, C))).toBe('NOT_UNLOCKED');
   });
@@ -146,14 +154,14 @@ describe('orders', () => {
       expect(o.items.length).toBeGreaterThanOrEqual(1); expect(o.items.length).toBeLessThanOrEqual(3);
       for (const it of o.items) {
         expect(itemLevel(it.item)).toBeLessThanOrEqual(level);
-        expect(it.qty).toBeGreaterThanOrEqual(1); expect(it.qty).toBeLessThanOrEqual(4);
+        expect(it.qty).toBeGreaterThanOrEqual(1); expect(it.qty).toBeLessThanOrEqual(3);
       }
       expect(new Set(o.items.map((i) => i.item)).size).toBe(o.items.length);
-      expect(o.coins).toBe(Math.round(o.items.reduce((a, i) => a + FARM_ITEMS[i.item].sell * i.qty, 0) * 1.6));
+      expect(o.coins).toBe(Math.round(o.items.reduce((a, i) => a + FARM_ITEMS[i.item].sell * i.qty, 0) * 1.8));
     }
     expect(genOrder(7, 3, 5)).toEqual(genOrder(7, 3, 5));
   });
-  it('deliver pays farm_order, adds xp and refills immediately; discard waits 10 minutes', () => {
+  it('deliver pays farm_order, adds xp, refills after deliverWaitMs; discard waits 10 minutes', () => {
     const s = fresh();
     const o = s.orders[0]!;
     expect(code(() => applyFarm(s, { type: 'deliver', slot: 0 }, T0, C))).toBe('NOT_ENOUGH_ITEMS');
@@ -161,7 +169,10 @@ describe('orders', () => {
     const seq = s.orderSeq;
     const out = applyFarm(s, { type: 'deliver', slot: 0 }, T0, C);
     expect(out.ledger[0]).toEqual({ reason: 'farm_order', delta: o.coins });
-    expect(s.orderSeq).toBe(seq + 1); expect(s.orders[0]).not.toBeNull(); expect(invCount(s)).toBe(0);
+    expect(s.orders[0]).toBeNull(); expect(invCount(s)).toBe(0);
+    expect(describeFarm(s, T0, C).orders[0]).toEqual({ waitMs: FARM.orders.deliverWaitMs });
+    refreshOrders(s, T0 + FARM.orders.deliverWaitMs);
+    expect(s.orders[0]).not.toBeNull(); expect(s.orderSeq).toBe(seq + 1);
     applyFarm(s, { type: 'discard', slot: 1 }, T0, C);
     expect(describeFarm(s, T0 + 9 * M, C).orders[1]).toEqual({ waitMs: M });
     refreshOrders(s, T0 + 10 * M);
@@ -171,17 +182,17 @@ describe('orders', () => {
 });
 
 describe('levels', () => {
-  it('levels up at 20×level xp with ◎10×newLevel reward; can cross two levels at once; stops at Lv20', () => {
-    const s = fresh(); s.xp = 19; applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C);
+  it('levels up at 30×level xp with ◎2×newLevel reward; can cross two levels at once; stops at Lv20', () => {
+    const s = fresh(); s.xp = 29; applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C);
     const out = applyFarm(s, { type: 'harvest', idx: 0 }, T0 + 2 * M, C);
     expect(s.level).toBe(2); expect(s.xp).toBe(0); expect(out.leveled).toEqual([2]);
-    expect(out.ledger).toContainEqual({ reason: 'farm_level', delta: 20 });
-    const s2 = fresh(4); s2.xp = 79; s2.inv = {}; // 到 Lv5 要 80、到 Lv6 再 100
+    expect(out.ledger).toContainEqual({ reason: 'farm_level', delta: 4 });
+    const s2 = fresh(4); s2.xp = 119; s2.inv = {}; // 到 Lv5 要 120、到 Lv6 再 150
     const o = s2.orders[0]!; for (const it of o.items) give(s2, it.item, it.qty);
-    s2.orders[0] = { ...o, xp: 200 };
+    s2.orders[0] = { ...o, xp: 200 }; // 319 − 120 − 150 = 49 < 180
     const out2 = applyFarm(s2, { type: 'deliver', slot: 0 }, T0, C);
-    expect(out2.leveled).toEqual([5, 6]); expect(s2.level).toBe(6); expect(s2.xp).toBe(99); // 279 − 80 − 100
-    expect(out2.ledger.filter((l) => l.reason === 'farm_level')).toEqual([{ reason: 'farm_level', delta: 50 }, { reason: 'farm_level', delta: 60 }]);
+    expect(out2.leveled).toEqual([5, 6]); expect(s2.level).toBe(6); expect(s2.xp).toBe(49);
+    expect(out2.ledger.filter((l) => l.reason === 'farm_level')).toEqual([{ reason: 'farm_level', delta: 10 }, { reason: 'farm_level', delta: 12 }]);
     const s3 = fresh(20); s3.xp = 0; applyFarm(s3, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C);
     s3.xp = 10_000; applyFarm(s3, { type: 'harvest', idx: 0 }, T0 + 2 * M, C);
     expect(s3.level).toBe(20);
@@ -223,14 +234,14 @@ describe('sell & upgrades', () => {
 describe('help', () => {
   const bob = { id: 'b0b', name: 'Bob' };
   it('water cuts remaining open time by 20% once; empty or ripe fields reject; log capped at 20; ackHelp clears', () => {
-    const s = fresh(); applyFarm(s, { type: 'plant', idx: 0, crop: 'carrot' }, T0, C); // 10 分
+    const s = fresh(); applyFarm(s, { type: 'plant', idx: 0, crop: 'carrot' }, T0, C); // 30 分
     applyHelp(s, { kind: 'water', idx: 0 }, bob, T0 + 5 * M, C);
-    expect(s.fields[0].ready).toBe(T0 + 5 * M + 4 * M);
+    expect(s.fields[0].ready).toBe(T0 + 5 * M + 20 * M); // 剩 25 分 × 0.8
     expect(s.fields[0].wateredBy).toBe('b0b');
     expect(s.helpLog).toEqual([{ by: 'b0b', name: 'Bob', kind: 'water', at: T0 + 5 * M }]);
     expect(code(() => applyHelp(s, { kind: 'water', idx: 0 }, bob, T0 + 6 * M, C))).toBe('ALREADY_WATERED');
     expect(code(() => applyHelp(s, { kind: 'water', idx: 1 }, bob, T0, C))).toBe('NOT_GROWING');
-    expect(code(() => applyHelp(s, { kind: 'water', idx: 0 }, bob, T0 + 20 * M, C))).toBe('ALREADY_WATERED');
+    expect(code(() => applyHelp(s, { kind: 'water', idx: 0 }, bob, T0 + 40 * M, C))).toBe('ALREADY_WATERED');
     const r = fresh(); r.barnLevel = 6; applyFarm(r, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C);
     expect(code(() => applyHelp(r, { kind: 'water', idx: 0 }, bob, T0 + 3 * M, C))).toBe('NOT_GROWING');
     for (let i = 0; i < 25; i++) applyFarm(r, { type: 'plant', idx: 1 + (i % 5), crop: 'wheat' }, T0 + i * 10 * M, C), applyHelp(r, { kind: 'water', idx: 1 + (i % 5) }, { id: `h${i}`, name: `H${i}` }, T0 + i * 10 * M, C), applyFarm(r, { type: 'collectAll' }, T0 + i * 10 * M + 5 * M, C);
@@ -238,7 +249,7 @@ describe('help', () => {
     applyFarm(r, { type: 'ackHelp' }, T0, C); expect(r.helpLog).toEqual([]);
   });
   it('friends rescue a withered tree for free', () => {
-    const s = fresh(); const late = T0 + 60 * M + 8 * H;
+    const s = fresh(); const late = T0 + 120 * M + 8 * H;
     expect(code(() => applyHelp(s, { kind: 'rescue' }, bob, T0, C))).toBe('NOT_WITHERED');
     applyHelp(s, { kind: 'rescue' }, bob, late, C);
     expect(treeWithered(s, late, C)).toBe(false); expect(s.helpLog[0].kind).toBe('rescue');
@@ -250,7 +261,7 @@ describe('help', () => {
     expect(describeFarm(s, T0 + M, C).needsHelp).toBe(true);
     applyHelp(s, { kind: 'water', idx: 0 }, bob, T0 + M, C);
     expect(describeFarm(s, T0 + 2 * M, C).needsHelp).toBe(false);
-    expect(describeFarm(s, T0 + 60 * M + 8 * H, C).needsHelp).toBe(true); // 樹枯了
+    expect(describeFarm(s, T0 + 120 * M + 8 * H, C).needsHelp).toBe(true); // 樹枯了
   });
 });
 
