@@ -285,7 +285,7 @@ describe('loadFarm', () => {
     const l = loadFarm(JSON.parse(JSON.stringify(s)), T0, C);
     expect(l.fields).toHaveLength(18);
     expect(l.jobs).toEqual({ bakery: [], jamhouse: [], dairy: [] });
-    expect(l.queueSlots).toEqual({ bakery: 2, jamhouse: 2 });
+    expect(l.queueSlots).toEqual({ bakery: 2, jamhouse: 2, dairy: 2 });
     expect(l.helpLog).toEqual([]);
     expect(code(() => loadFarm(null, T0, C))).toBe('BAD_REQUEST');
   });
