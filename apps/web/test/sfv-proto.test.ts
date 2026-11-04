@@ -348,9 +348,9 @@ describe('physics', () => {
 });
 
 describe('combat', () => {
-  it('5LP lands on tick 4 with 8T hitstop', () => {
+  it('5LP lands on tick 4 with 9T hitstop (SF6)', () => {
     const s = run(fight(), [LP, LP, LP, LP]);
-    expect(s.p[1].hp).toBe(970); expect(s.p[1].hs).toBe(8); expect(s.p[0].hs).toBe(8);
+    expect(s.p[1].hp).toBe(970); expect(s.p[1].hs).toBe(9); expect(s.p[0].hs).toBe(9);
   });
   it('same-tick jabs trade (both take damage, both are counter hits)', () => {
     const s = run(fight(), [LP, LP, LP, LP], [LP, LP, LP, LP]);

@@ -3,6 +3,7 @@
 // === [MODULE 1: packages/engine/sfv.ts] ===
 // 純決定性格鬥引擎：零 DOM、不用 Math.random、不讀時間，全部整數運算 → 伺服器（Node）與瀏覽器跑出來一模一樣。
 // 座標：x = 角色中心（px），y = 腳底高度（0 = 地面，往上為負），vy 往上為負。
+import { createFit } from './sfv-fit';
 export const SFV = (() => {
   'use strict';
   const TICK_HZ = 60, TICK_MS = 1000 / TICK_HZ;
@@ -16,7 +17,8 @@ export const SFV = (() => {
   // 預輸入緩衝：硬直／落地／收招中按的鍵，在可以動的第一個 tick 補出（看 BUFFER tick 內、還沒用掉的按鍵）。
   // 最遠往回看 BUFFER + CA_WINDOW = 32 tick，不能超過 HIST。
   const BUFFER = 8;
-  const HS_LIGHT = 8, HS_HEAVY = 13;
+  // 頓幀（hit-stop）採 SF6 數值：輕攻擊 9、重攻擊 13；必殺／超必殺逐段見各招 hs（可為逐段陣列）
+  const HS_LIGHT = 9, HS_HEAVY = 13;
   const GRAVITY = 1, JUMP_VY = -15, WALK_F = 4, WALK_B = 3, JUMP_VX = 4, PREJUMP_T = 3, JUMP_LAND = 3;
   const KD_SOFT = 40, KD_HARD = 60, DIZZY_T = 120, TECH_WINDOW = 7, TECH_T = 16, THROW_RECOVERY = 14, THROW_ANIM = 24, DASH_WINDOW = 10;
   const WHITE_DELAY = 90, WHITE_REGEN = 3, STUN_DELAY = 120, STUN_DECAY = 3;
@@ -81,11 +83,11 @@ export const SFV = (() => {
     })),
     // 衝天啄：重／EX 版出招到攻擊判定前段完全無敵（重 1～8、EX 1～9 tick），整段上升不吃空中攻擊、也穿波；
   // 輕版沒有全身無敵，但前 10 tick 不吃空中攻擊（對空用）。起手往前滑一點、判定加寬，普通技取消接得上。
-    defineMove({ id: 'DP_L', limb: 'arm', reach: [22, -112], name: '衝天啄（輕）', kind: 'special', untilLand: true, landRec: 14, startup: 3, active: 8, dmg: 100, stun: 150, blockstun: 20, launch: [2, -12], hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 10, 'air']], vel: [[1, 2, DP_LUNGE, null], [3, 3, 2, -15]], cancel: ['super'] }),
-    defineMove({ id: 'DP_H', limb: 'arm', reach: [22, -112], name: '衝天啄（重）', kind: 'special', untilLand: true, landRec: 22, startup: 5, active: 8, dmg: 140, stun: 200, blockstun: 20, launch: [2, -12], hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 8, 'full'], [1, 16, 'air'], [1, 12, 'proj']], vel: [[1, 4, DP_LUNGE, null], [5, 5, 3, -15]], cancel: ['super'] }),
-    defineMove({ id: 'DP_EX', limb: 'arm', reach: [22, -112], name: '衝天啄（EX）', kind: 'special', ex: true, untilLand: true, landRec: 22, startup: 4, active: 10, hits: 2, dmg: [80, 80], stun: 120, blockstun: 20, launch: [2, -12], launchLast: true, hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 9, 'full'], [1, 18, 'air'], [1, 13, 'proj']], vel: [[1, 3, DP_LUNGE, null], [4, 4, 3, -15]], cancel: ['super'] }),
+    defineMove({ id: 'DP_L', hs: 15, limb: 'arm', reach: [22, -112], name: '衝天啄（輕）', kind: 'special', untilLand: true, landRec: 14, startup: 3, active: 8, dmg: 100, stun: 150, blockstun: 20, launch: [2, -12], hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 10, 'air']], vel: [[1, 2, DP_LUNGE, null], [3, 3, 2, -15]], cancel: ['super'] }),
+    defineMove({ id: 'DP_H', hs: 20, limb: 'arm', reach: [22, -112], name: '衝天啄（重）', kind: 'special', untilLand: true, landRec: 22, startup: 5, active: 8, dmg: 140, stun: 200, blockstun: 20, launch: [2, -12], hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 8, 'full'], [1, 16, 'air'], [1, 12, 'proj']], vel: [[1, 4, DP_LUNGE, null], [5, 5, 3, -15]], cancel: ['super'] }),
+    defineMove({ id: 'DP_EX', hs: [20, 13], limb: 'arm', reach: [22, -112], name: '衝天啄（EX）', kind: 'special', ex: true, untilLand: true, landRec: 22, startup: 4, active: 10, hits: 2, dmg: [80, 80], stun: 120, blockstun: 20, launch: [2, -12], launchLast: true, hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 9, 'full'], [1, 18, 'air'], [1, 13, 'proj']], vel: [[1, 3, DP_LUNGE, null], [4, 4, 3, -15]], cancel: ['super'] }),
     ...variants([['L', 4, [40, 40, 40], null, '輕'], ['H', 6, [45, 45, 45], null, '重'], ['EX', 6, [50, 50, 60], [1, 7, 'full'], 'EX']], ([v, spd, dmg, inv, n]) => defineMove({
-      id: 'TATSU_' + v, limb: 'spin', name: `旋風翅（${n}）`, kind: 'special', ex: v === 'EX', untilLand: true, landRec: 10, startup: 7, active: 24, hits: 3, dmg, stun: 60,
+      id: 'TATSU_' + v, hs: v === 'EX' ? [6, 2, 15] : 15, limb: 'spin', name: `旋風翅（${n}）`, kind: 'special', ex: v === 'EX', untilLand: true, landRec: 10, startup: 7, active: 24, hits: 3, dmg, stun: 60,
       hitstun: 18, blockstun: 14, pb: 4, launch: [3, -9], launchLast: true, hitbox: [-56, -58, 112, 40], hover: [5, 30],
       // 下半身沒有受擊判定、飛行道具穿過（越過下段與波）
       invuln: [[7, 30, 'lower'], [7, 30, 'proj'], ...(inv ? [inv] : [])],
@@ -94,14 +96,19 @@ export const SFV = (() => {
     defineMove({
       id: 'CA', limb: 'kicks', name: '火雞連環踢', kind: 'super', startup: 4, active: 30, recovery: 24, hits: 6, dmg: [55, 55, 55, 55, 55, 75], hitstun: 24, blockstun: 12, pb: 2,
       launch: [4, -10], launchLast: true, hitbox: [10, -90, 56, 80], hurtExt: [10, -86, 46, 70], invuln: [[1, 10, 'full']],
-      vel: (mt, cn) => [mt < 4 ? 0 : mt < 34 ? (cn ? 3 : 11) : 0, null],
+      vel: (mt, cn) => [mt < 4 ? 0 : mt < 34 ? (cn ? 3 : 11) : 0, null], hs: [8, 8, 8, 8, 8, 13],
+    }),
+    // 真空蛋波：第二個超必殺（↓↘→↓↘→＋拳，3 格 EX）。前方一條長判定（光束）分 5 段，最後一段打飛
+    defineMove({
+      id: 'SHINKU', limb: 'arm', both: true, name: '真空蛋波', kind: 'super', startup: 6, active: 25, recovery: 46, hits: 5, dmg: [60, 60, 60, 60, 110], hitstun: 24, blockstun: 20, pb: 2,
+      launch: [4, -10], launchLast: true, hitbox: [20, -84, 380, 56], hurtExt: [10, -84, 50, 34], invuln: [[1, 10, 'full']], hs: [8, 8, 8, 8, 8],
     }),
   ];
   const M = {}; MOVE_LIST.forEach((m, i) => { M[m.id] = i; });
   const PROJ = [
-    { speed: 5, n: 1, dmg: 60, stun: 100, hitstun: 20, blockstun: 16, hs: HS_HEAVY, pb: 8, kind: 'special', w: 32, h: 24 },
-    { speed: 8, n: 1, dmg: 60, stun: 100, hitstun: 20, blockstun: 16, hs: HS_HEAVY, pb: 8, kind: 'special', w: 32, h: 24 },
-    { speed: 7, n: 2, dmg: 50, stun: 80, hitstun: 20, blockstun: 16, hs: HS_HEAVY, pb: 8, kind: 'special', w: 40, h: 30 },
+    { speed: 5, n: 1, dmg: 60, stun: 100, hitstun: 20, blockstun: 16, hs: 8, pb: 8, kind: 'special', w: 32, h: 24 },
+    { speed: 8, n: 1, dmg: 60, stun: 100, hitstun: 20, blockstun: 16, hs: 8, pb: 8, kind: 'special', w: 32, h: 24 },
+    { speed: 7, n: 2, dmg: 50, stun: 80, hitstun: 20, blockstun: 16, hs: 9, pb: 8, kind: 'special', w: 40, h: 30 },
   ];
 
   // ---------- 狀態 ----------
@@ -175,25 +182,36 @@ export const SFV = (() => {
     const lying = (p.st === ST.KD || p.st === ST.KO) && p.y === 0;
     return wbox(p, PUSH[lying ? 'down' : poseOf(p)]);
   }
+  // 貼合美術的判定（sfv-fit.ts）：玩家狀態的純函數，回傳 null 時用下面原本的方框
+  let FIT = null;
+  const setFit = (h) => { FIT = h; };
   /** vsAir：攻擊方人在空中（對空無敵 'air' 只擋這種） */
   function hurtboxes(p, vsAir = false) {
     const st = p.st;
     if (st === ST.KD || st === ST.KO || st === ST.THROWN || st === ST.THROWING || st === ST.TECH) return [];
     if (st === ST.AIRHIT && p.jg >= JUGGLE_MAX) return [];
     let boxes = HURT[poseOf(p)];
+    const fit = FIT && FIT.hurt(p);
     if (st === ST.MOVE) {
       const mv = MOVE_LIST[p.mv];
       if (mv.invulnAt(p.mt, 'full') || (vsAir && mv.invulnAt(p.mt, 'air'))) return [];
-      if (mv.invulnAt(p.mt, 'lower')) boxes = boxes.slice(0, 1);
-      if (mv.hurtExt && p.mt >= mv.S) boxes = [...boxes, mv.hurtExt];
-    }
+      if (fit) {
+        boxes = mv.invulnAt(p.mt, 'lower') ? fit.slice(0, 1) : fit;
+        // 普通技收招：保留原本伸出去的受擊框，揮空被確反的距離不因為收招圖比較短而變小
+        if (mv.kind === 'normal' && mv.hurtExt && p.mt >= mv.S + mv.A) boxes = [...boxes, mv.hurtExt];
+      }
+      else {
+        if (mv.invulnAt(p.mt, 'lower')) boxes = boxes.slice(0, 1);
+        if (mv.hurtExt && p.mt >= mv.S) boxes = [...boxes, mv.hurtExt];
+      }
+    } else if (fit) boxes = fit;
     return boxes.map((b) => wbox(p, b));
   }
   function hitboxOf(p) {
     if (p.st !== ST.MOVE) return null;
     const mv = MOVE_LIST[p.mv], k = mv.hitIndex(p.mt);
     if (k < 0) return null;
-    return { box: wbox(p, mv.throwBox ?? mv.hitbox), used: (p.hm >> k) & 1, thr: !!mv.throwBox, k };
+    return { box: wbox(p, mv.throwBox ?? ((FIT && FIT.hit(p)) || mv.hitbox)), used: (p.hm >> k) & 1, thr: !!mv.throwBox, k };
   }
   const projBox = (q) => { const d = PROJ[q.lv]; return [q.x - d.w / 2, q.y - d.h / 2, d.w, d.h]; };
   const projInvuln = (p) => p.st === ST.MOVE && MOVE_LIST[p.mv].invulnAt(p.mt, 'proj');
@@ -229,6 +247,8 @@ export const SFV = (() => {
     const has = (seq, win = CMD_WINDOW) => motion(p, t, f, seq, win);
     if (o.vt && p.vt === 0 && p.vg >= VG_MAX && both(HP | HK)) return M.VT;
     if (o.sup && p.ex >= EX_MAX && (press & KICK) && has([2, 3, 6, 2, 3, 6], CA_WINDOW)) return M.CA;
+    // 真空蛋波要排在昇龍／蛋波前面（236236 裡面同時有 623 和 236）
+    if (o.sup && p.ex >= EX_MAX && (press & PUNCH) && has([2, 3, 6, 2, 3, 6], CA_WINDOW)) return M.SHINKU;
     if (o.special) {
       const exP = (recent & PUNCH) === PUNCH && p.ex >= EX_BAR, exK = (recent & KICK) === KICK && p.ex >= EX_BAR;
       if ((press & PUNCH) && (has([6, 2, 3]) || has([6, 2, 6]))) return exP ? M.DP_EX : press & HP ? M.DP_H : M.DP_L;
@@ -415,7 +435,7 @@ export const SFV = (() => {
   function strikeData(h) {
     if (h.q) return { ...PROJ[h.q.lv], launch: null, kd: false };
     const mv = h.mv, last = h.k === mv.hits - 1;
-    return { dmg: mv.dmg[h.k], stun: mv.stun, hitstun: mv.hitstun, blockstun: mv.blockstun, hs: mv.hs, pb: mv.pb, kind: mv.kind, kd: !!mv.kd,
+    return { dmg: mv.dmg[h.k], stun: mv.stun, hitstun: mv.hitstun, blockstun: mv.blockstun, hs: Array.isArray(mv.hs) ? mv.hs[Math.min(h.k, mv.hs.length - 1)] : mv.hs, pb: mv.pb, kind: mv.kind, kd: !!mv.kd,
       launch: mv.launch && (!mv.launchLast || last) ? mv.launch : null };
   }
   function pushback(A, B, dir, pb, isProj) {
@@ -590,6 +610,9 @@ export const SFV = (() => {
   return {
     TICK_HZ, TICK_MS, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
     ST, ST_NAME, RS, MOVE_LIST, M, PROJ, P_FIELDS, defineMove, frameKind, createState, simulateSFVTick, packState, unpackState, cloneState, hashState, hashStr,
-    dirOf, maskAt, motion, canBlock, hurtboxes, hitboxOf, pushbox, projBox, overlap,
+    dirOf, maskAt, motion, canBlock, hurtboxes, hitboxOf, setFit, pushbox, projBox, overlap,
   };
 })();
+/** 美術姿勢（畫面用）與貼合判定（引擎用）同一個純函數 */
+export const SFV_FIT = createFit(SFV);
+SFV.setFit(SFV_FIT);
