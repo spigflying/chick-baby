@@ -1,6 +1,8 @@
 // @ts-nocheck
 import { SFV, SFVServer } from '@chick/engine';
 import { SFVClient } from './sfv-net';
+import { preloadFightArt } from './sfv-art';
+preloadFightArt();
 
 
 // === [BOOT: 頁面接線（鍵盤、監控面板、按鈕）] ===
@@ -92,7 +94,7 @@ import { SFVClient } from './sfv-net';
 
   // ---------- 招式表（發生／傷害直接讀引擎的招式資料） ----------
   const MOVE_TABLE = [
-    ['大招（超必殺）', [['火雞連環踢', '↓↘→↓↘→ + 腳', 'CA', '要 3 格 EX；暗場後連踢 6 段']]],
+    ['大招（超必殺）', [['火雞連環踢', '↓↘→↓↘→ + 腳', 'CA', '要 3 格 EX；暗場後連踢 6 段'], ['真空蛋波', '↓↘→↓↘→ + 拳', 'SHINKU', '要 3 格 EX；1～10 幀無敵；暗場後前方長光束 5 段，最後一段打飛']]],
     ['必殺技', [
       ['蛋波', '↓↘→ + 拳', 'HADO_L', 'U 慢、I 快；畫面上一次一顆'],
       ['衝天啄', '→↓↘ + 拳（或 →↓→）', 'DP_H', 'I 版 1～8 幀、EX 版 1～9 幀全身無敵，上升中不吃空中攻擊、穿波；U 版只有對空無敵'],

@@ -616,3 +616,4 @@ export const SFV = (() => {
 /** 美術姿勢（畫面用）與貼合判定（引擎用）同一個純函數 */
 export const SFV_FIT = createFit(SFV);
 SFV.setFit(SFV_FIT);
+export { FIT_IMAGES } from './sfv-fit';

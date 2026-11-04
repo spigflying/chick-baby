@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { SFV, SFVServer } from '@chick/engine';
+import { drawArtChick, drawInkOrb, drawFightFx, fightShake } from './sfv-art';
 
 // 預測、回滾與原型共用的繪圖函式；繪圖另由 sfv-draw.ts 對外重匯出。
 // 客戶端：自己與對手都不插值。每 tick 本地預測（對手沿用最後確認的輸入），收到伺服器確認的輸入跟預測不同 → 回到確認狀態用 while 迴圈重算到目前 tick。
@@ -326,10 +327,12 @@ export const SFVClient = ((SFV, SFVServer) => {
         ctx.beginPath(); ctx.moveTo(fx - 8, oy + P.hip); ctx.lineTo(fx, oy + P.head - fh); ctx.lineTo(fx + 8, oy + P.hip); ctx.fill();
       }
     }
-    if (P.lying) drawLying(ctx, ox, oy, p.f, sk); else drawFigure(ctx, ox, oy, p.f, P, sk);
+    // 有水墨圖就畫圖（招式、走路、受擊都有）；還沒畫的招式（跳攻、摔、炸毛、衝刺、暈眩…）退回火柴雞
+    const art = drawArtChick(ctx, s, i);
+    if (!art) { if (P.lying) drawLying(ctx, ox, oy, p.f, sk); else drawFigure(ctx, ox, oy, p.f, P, sk); }
     const mv = p.st === SFV.ST.MOVE ? SFV.MOVE_LIST[p.mv] : null;
-    if (mv?.id.startsWith('DP_') && p.mt >= mv.S - 2 && p.mt < mv.S + mv.A + 6) drawUppercut(ctx, ox, oy, p.f, p.mt - mv.S, mv.id === 'DP_EX');
-    if (mv && mv.projectile !== undefined && p.mt <= mv.S + 4) drawCharge(ctx, s, i, P, ox, oy, mv);
+    if (!art && mv?.id.startsWith('DP_') && p.mt >= mv.S - 2 && p.mt < mv.S + mv.A + 6) drawUppercut(ctx, ox, oy, p.f, p.mt - mv.S, mv.id === 'DP_EX');
+    if (!art && mv && mv.projectile !== undefined && p.mt <= mv.S + 4) drawCharge(ctx, s, i, P, ox, oy, mv);
     const top = oy + (P.lying ? -30 : P.head - 18);
     if (p.st === SFV.ST.DIZZY) {
       for (let k = 0; k < 3; k++) { const a = tick * 0.12 + k * 2.09; ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(p.x + Math.cos(a) * 22, top - 4 + Math.sin(a) * 6, 4, 0, Math.PI * 2); ctx.fill(); }
@@ -390,6 +393,7 @@ export const SFVClient = ((SFV, SFVServer) => {
   function drawProjectiles(ctx, s, opt) {
     for (const q of s.pr) {
       const b = SFV.projBox(q), col = COL.proj[q.o], cx = q.x, cy = sy(q.y), r = b[3] / 2;
+      if (drawInkOrb(ctx, cx, cy, r, Math.sign(q.vx) || 1, q.x | 0, col)) { if (opt.showBoxes) rect(ctx, b, null, COL.hit); continue; }
       for (let k = 3; k >= 1; k--) { ctx.globalAlpha = 0.18 * (4 - k); glow(ctx, cx - q.vx * k * 2.2, cy, r * (1 - k * 0.15), col); } // 尾巴
       ctx.globalAlpha = 1; glow(ctx, cx, cy, r, col);
       ctx.strokeStyle = '#ffffffaa'; ctx.lineWidth = 2; // 旋轉的光圈
@@ -445,6 +449,8 @@ export const SFVClient = ((SFV, SFVServer) => {
     }
   }
   function drawFight(ctx, s, opt) {
+    const [shx, shy] = fightShake(s);
+    ctx.save(); ctx.translate(shx, shy);
     drawStage(ctx);
     const freezeOwner = s.frz > 0 ? s.fo - 1 : -1;
     drawProjectiles(ctx, s, opt);
@@ -455,8 +461,10 @@ export const SFVClient = ((SFV, SFVServer) => {
       ctx.strokeStyle = (s.tick >> 1) & 1 ? '#ffe066' : '#ff3b3b'; ctx.lineWidth = 4;
       ctx.beginPath(); ctx.arc(p.x, sy(-50), 40 + (30 - s.frz) * 6, 0, Math.PI * 2); ctx.stroke();
       drawChick(ctx, s, freezeOwner, opt);
-      text(ctx, '火雞連環踢!!', W / 2, 200, 56, (s.tick >> 2) & 1 ? '#ffe066' : '#ff7a3b');
+      text(ctx, `${SFV.MOVE_LIST[p.mv]?.name ?? '大招'}!!`, W / 2, 200, 56, (s.tick >> 2) & 1 ? '#ffe066' : '#ff7a3b');
     }
+    drawFightFx(ctx);
+    ctx.restore();
     drawHud(ctx, s, opt);
     drawBanner(ctx, s, opt);
   }

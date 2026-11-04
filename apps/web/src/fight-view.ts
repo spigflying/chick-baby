@@ -2,6 +2,7 @@
 import { SFV } from '@chick/engine';
 import { NetClient, SpectatorClient } from './sfv-net';
 import { drawFight } from './sfv-draw';
+import { preloadFightArt } from './sfv-art';
 import type { Live } from './ws';
 
 const KEY_BITS = { KeyW: SFV.UP, KeyS: SFV.DOWN, KeyA: SFV.LEFT, KeyD: SFV.RIGHT, KeyU: SFV.LP, KeyI: SFV.HP, KeyJ: SFV.LK, KeyK: SFV.HK, KeyH: SFV.LP | SFV.LK, KeyL: SFV.HP | SFV.HK };
@@ -36,6 +37,7 @@ export class FightView {
   private lastDrawAt = 0;
 
   constructor(private live: Live, private me: { id: string; display_name: string }, private toast: (s: string) => void) {
+    preloadFightArt(); // 水墨圖約 0.7 MB，進家裡就先載，開打時已就緒
     this.root = document.createElement('div'); this.root.className = 'sfv-live'; this.root.hidden = true;
     this.root.innerHTML = `<div class="sfv-top"><b class="sfv-title">1v1 格鬥</b><button class="sfv-close" aria-label="關閉">✕</button></div>
       <canvas width="960" height="540"></canvas><div class="sfv-help"></div><div class="sfv-result" hidden></div><div class="sfv-debug" hidden></div>`;
@@ -171,7 +173,7 @@ export class FightView {
     const mode = this.current.players[this.current.pid - 1].mode;
     help.innerHTML = mode === 'beginner'
       ? '<b>初心模式出招表</b>　WASD 移動／後退防禦　U/I 拳　J/K 腳<br>O 蛋波　P 衝天啄（昇龍）　N 旋風翅　M 火雞連環踢（3 格 EX）　H 摔　L 炸毛'
-      : '<b>經典模式出招表</b>　WASD 移動／後退防禦　U/I 拳　J/K 腳（面向左時左右相反）<br>↓↘→＋拳 蛋波　→↓↘＋拳 衝天啄（昇龍）　↓↙←＋腳 旋風翅　↓↘→↓↘→＋腳 大招（3 格 EX）　H 摔　L 炸毛';
+      : '<b>經典模式出招表</b>　WASD 移動／後退防禦　U/I 拳　J/K 腳（面向左時左右相反）<br>↓↘→＋拳 蛋波　→↓↘＋拳 衝天啄（昇龍）　↓↙←＋腳 旋風翅　↓↘→↓↘→＋腳 火雞連環踢／＋拳 真空蛋波（3 格 EX）　H 摔　L 炸毛';
   }
   private mask() { let m = 0; for (const code of this.held) m |= KEY_BITS[code] ?? (this.current?.players[this.current.pid - 1]?.mode === 'beginner' ? EASY_BITS[code] : 0) ?? 0; return m; }
   private keyDown = (e: KeyboardEvent) => {
