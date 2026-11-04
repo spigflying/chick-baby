@@ -211,3 +211,94 @@ describe('farm help', () => {
     } finally { ws.terminate(); }
   });
 });
+
+// ---------- 第二階段 ----------
+async function alivePet(c: Client, patch: Record<string, unknown> = {}) {
+  const r = await c.call('POST', '/api/pets', { species: 'chicken', name: 'P', request_id: rid() });
+  expect(r.status).toBe(200);
+  const id = r.json.pet.id;
+  await db.updateTable('pets').set({ status: 'alive', born_at: sql`now() - interval '2 minutes'`, hatched_at: sql`now()`, last_simulated_at: sql`now()`, hunger: 30, health: 80, ...patch } as any).where('id', '=', id).execute();
+  return id as string;
+}
+const ledger = async (id: string) => (await db.selectFrom('coin_ledger').select(['reason', 'delta']).where('user_id', '=', id).orderBy('created_at').execute()).map((r: any) => `${r.reason}:${r.delta}`);
+async function seller(name = 'sel') {
+  const s = await login(name);
+  await s.call('GET', `/api/farm/${s.id}`);
+  await patchState(s.id, (x) => { x.level = 5; x.inv = { jam: 6, wheat: 2 }; });
+  expect((await act(s, { type: 'stallList', slot: 0, item: 'jam', qty: 2, price: 50 })).status).toBe(200);
+  return s;
+}
+const buy = (c: Client, owner: string, slot: number, request_id = rid()) => c.call('POST', `/api/farm/${owner}/buy`, { slot, request_id });
+
+describe('farm phase 2', () => {
+  it('expand charges farm_expand', async () => {
+    const a = await login('exp'); await a.call('GET', `/api/farm/${a.id}`);
+    await patchState(a.id, (x) => { x.level = 7; }); await setBalance(a.id, 500);
+    const r = await act(a, { type: 'expand' });
+    expect(r.status).toBe(200); expect(r.json.balance).toBe(380); expect(r.json.state.expand).toBe(1);
+    expect(await ledger(a.id)).toContain('farm_expand:-120');
+  });
+  it('stall: list, visitor buys, coins move, both ledgers, seller sees the sale', async () => {
+    const s = await seller(); const b = await login('buyer'); await setBalance(b.id, 200);
+    const before = await balance(s.id);
+    await s.call('PATCH', `/api/homes/${s.home}`, { access_mode: 'closed', request_id: rid() });
+    expect((await buy(b, s.id, 0)).json.error).toBe('FORBIDDEN'); // 進不了家
+    await s.call('PATCH', `/api/homes/${s.home}`, { access_mode: 'open', request_id: rid() });
+    const r = await buy(b, s.id, 0);
+    expect(r.status).toBe(200); expect(r.json).toMatchObject({ ok: true, item: 'jam', qty: 2, price: 50, balance: 150 });
+    expect(await balance(s.id)).toBe(before + 50);
+    expect(await ledger(b.id)).toContain('farm_stall_buy:-50'); expect(await ledger(s.id)).toContain('farm_stall_sale:50');
+    expect((await state(b.id)).inv).toEqual({ jam: 2 });
+    const own = await s.call('GET', `/api/farm/${s.id}`);
+    expect(own.json.state.saleLog).toMatchObject([{ name: 'buyer', item: 'jam', qty: 2, price: 50 }]);
+    const vis = await b.call('GET', `/api/farm/${s.id}`);
+    expect(vis.json.state.saleLog).toEqual([]); expect(vis.json.state.decoBag).toEqual([]);
+    expect((await buy(b, s.id, 0)).json.error).toBe('NO_LISTING');
+    expect((await buy(s, s.id, 0)).json.error).toBe('BUY_SELF');
+  });
+  it('stall buy: two buyers at once, exactly one wins', async () => {
+    const s = await seller('sel2');
+    const [b1, b2] = [await login('b1'), await login('b2')];
+    await setBalance(b1.id, 200); await setBalance(b2.id, 200);
+    const rs = await Promise.all([buy(b1, s.id, 0), buy(b2, s.id, 0)]);
+    expect(rs.map((r) => r.status).sort()).toEqual([200, 400]);
+    expect(rs.find((r) => r.status === 400)!.json.error).toBe('NO_LISTING');
+    expect(await ledger(s.id)).toEqual(expect.arrayContaining(['farm_stall_sale:50']));
+    expect((await ledger(s.id)).filter((x) => x.startsWith('farm_stall_sale'))).toHaveLength(1);
+  });
+  it('stall buy: daily cap and insufficient coins', async () => {
+    const s = await seller('sel3');
+    const b = await login('b3'); await b.call('GET', `/api/farm/${b.id}`); await setBalance(b.id, 10);
+    expect((await buy(b, s.id, 0)).json.error).toBe('INSUFFICIENT_COINS');
+    expect((await state(s.id)).stall[0]).toMatchObject({ item: 'jam' });
+    for (let i = 0; i < 10; i++) await db.insertInto('farm_stall_buys' as any).values({ buyer_id: b.id, seller_id: s.id, day: sql`(now() AT TIME ZONE 'Asia/Taipei')::date`, item: 'wheat', qty: 1, price: 1 } as any).execute();
+    await setBalance(b.id, 500);
+    expect((await buy(b, s.id, 0)).json.error).toBe('BUY_DAILY_CAP');
+  });
+  it('feed-pet uses a barn item and updates the pet; a sleeping pet is rejected and the item stays', async () => {
+    const a = await login('feeder'); await a.call('GET', `/api/farm/${a.id}`);
+    expect((await a.call('POST', '/api/farm/feed-pet', { item: 'bread', request_id: rid() })).json.error).toBe('NO_PET');
+    const pet = await alivePet(a);
+    await patchState(a.id, (x) => { x.inv = { bread: 2, wheat: 1 }; });
+    expect((await a.call('POST', '/api/farm/feed-pet', { item: 'wheat', request_id: rid() })).json.error).toBe('NOT_EDIBLE');
+    const r = await a.call('POST', '/api/farm/feed-pet', { item: 'bread', request_id: rid() });
+    expect(r.status).toBe(200); expect(r.json.pet.hunger).toBeGreaterThanOrEqual(59);
+    expect((await state(a.id)).inv).toEqual({ bread: 1, wheat: 1 });
+    const ev = await db.selectFrom('pet_events').select(['type', 'payload']).where('pet_id', '=', pet).where('type', '=', 'feed').execute();
+    expect(ev.map((e: any) => e.payload.food)).toEqual(['farm:bread']);
+    await db.updateTable('pets').set({ sleeping: true } as any).where('id', '=', pet).execute();
+    expect((await a.call('POST', '/api/farm/feed-pet', { item: 'bread', request_id: rid() })).json.error).toBe('PET_SLEEPING');
+    expect((await state(a.id)).inv).toEqual({ bread: 1, wheat: 1 });
+  });
+  it('chickWater uses the pet stamina from the DB', async () => {
+    const a = await login('chicky'); await growingCarrot(a, 0); await growingCarrot(a, 1); await growingCarrot(a, 2);
+    expect((await act(a, { type: 'chickWater', idx: 0 })).json.error).toBe('NO_PET');
+    await alivePet(a, { stamina: 35 });
+    const g = await a.call('GET', `/api/farm/${a.id}`);
+    expect(g.json.derived.chickWater).toEqual({ left: 2, limit: 2 });
+    expect((await act(a, { type: 'chickWater', idx: 0 })).status).toBe(200);
+    const r = await act(a, { type: 'chickWater', idx: 1 });
+    expect(r.status).toBe(200); expect(r.json.derived.chickWater).toEqual({ left: 0, limit: 2 });
+    expect((await act(a, { type: 'chickWater', idx: 2 })).json.error).toBe('CHICK_TIRED');
+  });
+});

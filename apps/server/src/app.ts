@@ -1,6 +1,6 @@
 import { buyCar, buyPart, getProfile as getRaceProfile, raceCatalog, raceLeaderboard } from './racing';
 import { buyOutfit, outfitCatalog, ownedOutfits, wearOutfit } from './outfits';
-import { farmAct, farmFriends, farmHelp, getFarm } from './farm';
+import { farmAct, farmBuy, farmFeedPet, farmFriends, farmHelp, getFarm } from './farm';
 import Fastify, { type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimitPlugin from '@fastify/rate-limit';
@@ -140,6 +140,8 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
         a.get('/farm/:id', async (req) => getFarm(db, (req.params as any).id, req.user!.id));
         a.post('/farm/act', async (req) => { const b = (req.body ?? {}) as any; return farmAct(db, ctx(req), b.action, b.request_id); });
         a.post('/farm/:id/help', async (req) => { const b = (req.body ?? {}) as any; return farmHelp(db, ctx(req), (req.params as any).id, b, b.request_id); });
+        a.post('/farm/feed-pet', async (req) => { const b = (req.body ?? {}) as any; return farmFeedPet(db, ctx(req), b.item, b.request_id); });
+        a.post('/farm/:id/buy', async (req) => { const b = (req.body ?? {}) as any; return farmBuy(db, ctx(req), (req.params as any).id, b.slot, b.request_id); });
       }
       // 本機開發（DEV_LOGIN=1）：讓自己的寵物馬上進化，方便測試
       if (env.devLogin) a.post('/dev/pets/:id/evolve', async (req) => g.forceEvolve(db, ctx(req), (req.params as any).id, (req.body as any)?.request_id, false));
