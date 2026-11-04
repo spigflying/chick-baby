@@ -5,7 +5,8 @@ import { EAST, LAYOUT, SCENE, type Box } from './farm-layout';
 
 const INK = '#4b3a33';
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
-const fit = (b: Box, nw: number, nh: number, inner: string) => `<g transform="translate(${b.x} ${b.y}) scale(${(b.w / nw).toFixed(4)} ${(b.h / nh).toFixed(4)})">${inner}</g>`;
+// 透明底：整個框都點得到（小攤、熱氣球這種中間有空隙的圖也一樣）
+const fit = (b: Box, nw: number, nh: number, inner: string) => `<g transform="translate(${b.x} ${b.y}) scale(${(b.w / nw).toFixed(4)} ${(b.h / nh).toFixed(4)})"><rect class="hitbg" width="${nw}" height="${nh}" fill="transparent"/>${inner}</g>`;
 const shadow = (cx: number, cy: number, rx: number, ry: number, o = 0.08) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="#000" opacity="${o}"/>`;
 const sparkle = (x: number, y: number, s: number, d2 = false) => `<path class="tw${d2 ? ' d2' : ''}" d="M${x} ${y - s} Q${x} ${y} ${x + s} ${y} Q${x} ${y} ${x} ${y + s} Q${x} ${y} ${x - s} ${y} Q${x} ${y} ${x} ${y - s} Z" fill="#fff"/>`;
 const use = (id: string, x: number, y: number, s: number) => `<use href="#fi-${id}" x="${x}" y="${y}" width="${s}" height="${s}"/>`;

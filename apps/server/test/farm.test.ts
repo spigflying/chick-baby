@@ -231,6 +231,15 @@ async function seller(name = 'sel') {
 const buy = (c: Client, owner: string, slot: number, request_id = rid()) => c.call('POST', `/api/farm/${owner}/buy`, { slot, request_id });
 
 describe('farm phase 2', () => {
+  it('owner GET saves the balloon schedule, so viewing does not restart its timer', async () => {
+    const a = await login('bal'); await a.call('GET', `/api/farm/${a.id}`);
+    await patchState(a.id, (x) => { x.level = 7; });
+    const g1 = await a.call('GET', `/api/farm/${a.id}`);
+    const saved = (await state(a.id)).balloon;
+    expect(saved.crates).toHaveLength(4); expect(saved.leave).toBe(g1.json.state.balloon.leave);
+    await new Promise((r) => setTimeout(r, 15));
+    expect((await a.call('GET', `/api/farm/${a.id}`)).json.state.balloon.leave).toBe(saved.leave);
+  });
   it('expand charges farm_expand', async () => {
     const a = await login('exp'); await a.call('GET', `/api/farm/${a.id}`);
     await patchState(a.id, (x) => { x.level = 7; }); await setBalance(a.id, 500);

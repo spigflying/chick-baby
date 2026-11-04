@@ -83,5 +83,7 @@ describe('phase 2 art', () => {
     expect(parts.join('').toLowerCase()).not.toMatch(/#9bbc0f|#8bac0f|#306230|#0f380f/);
     expect(dairy(EAST.dairy, false, false, 12)).toContain('起司小屋');
     expect(balloon(EAST.balloon, { state: 'locked' }, 7)).toContain('Lv 7');
+    // 中間有空隙的圖也整個框都點得到
+    expect(stall(EAST.stall, [null, null, null, null], false, 5)).toContain('<rect class="hitbg" width="200" height="96" fill="transparent"/>');
   });
 });

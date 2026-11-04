@@ -68,7 +68,8 @@ function payload(owner: { id: string; display_name: string }, viewerId: string, 
 export async function getFarm(db: Db, ownerId: string, viewerId: string) {
   const now = Date.now();
   if (ownerId === viewerId) {
-    const s = await db.transaction().execute((tx) => lockFarm(tx, ownerId, now));
+    // 讀的時候也存回去：熱氣球第一次排班（arrive＝現在）、訂單補格都要落地，不然每次打開計時都重來
+    const s = await db.transaction().execute(async (tx) => { const x = await lockFarm(tx, ownerId, now); await saveFarm(tx, ownerId, x); return x; });
     return payload(await ownerInfo(db, ownerId), viewerId, s, now, await farmCtx(db, ownerId, now, false));
   }
   const home = await homeOf(db, ownerId);
