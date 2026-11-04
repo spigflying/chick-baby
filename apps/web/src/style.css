@@ -402,4 +402,17 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .fbar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#a8dcff,#63b6f2)}
 .fav{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#ffe066;font-weight:800}
 .fhelp{flex:none;background:#ff5f7e;color:#fff;border-radius:99px;font-size:12px;font-weight:800;padding:2px 9px}
+/* 小雞農場第二階段：裝飾、小攤表單、風車 */
+.farm .scene .spin { transform-box: fill-box; transform-origin: center; animation: farm-spin 6s linear infinite; }
+@keyframes farm-spin { to { transform: rotate(360deg); } }
+.fsub{margin:10px 0 4px;font-size:14px;display:flex;gap:8px;align-items:baseline}.fsub small{color:var(--f-muted);font-weight:400}
+.fdecos{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.fdeco{background:#fff;border-radius:14px;padding:4px;display:flex;flex-direction:column;align-items:center;gap:2px;border:2px solid #efe3fb;font:inherit;color:inherit;cursor:pointer}
+button.fdeco:hover{border-color:#c38cff}.fdeco small{font-size:11.5px}
+.fdeco-art{width:64px;height:58px}
+.fform{display:flex;flex-direction:column;gap:8px;font-weight:700}
+.fform label{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.finput{width:110px;font:inherit;font-weight:800;padding:6px 10px;border-radius:12px;border:2px solid var(--f-line);background:#fff;text-align:right}
+.finput:focus{outline:3px solid #ffd0dc;outline-offset:1px}
+button.ftile{font:inherit;color:inherit;cursor:pointer}button.ftile:hover{border-color:#63b6f2}
 @media (prefers-reduced-motion: reduce){.farm{transition:none}.ftool:hover{transform:none}}

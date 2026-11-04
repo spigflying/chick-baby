@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ALWAYS_OPEN, applyFarm, describeFarm, newFarm, applyHelp, FARM_ERROR_CODES, type FarmState } from '@chick/engine';
-import { remainText, fieldBadge, plantChoices, hudModel, helpTargets, FARM_ERR, farmCellState, loadErrorAction, type FarmPayload } from '../src/farm-model';
+import { remainText, fieldBadge, plantChoices, hudModel, helpTargets, FARM_ERR, farmCellState, loadErrorAction, feedChoices, stallDefaults, expandOffer, type FarmPayload } from '../src/farm-model';
 
 const T0 = Date.parse('2026-11-02T10:00:00+08:00');
 const M = 60_000;
@@ -68,7 +68,7 @@ describe('helpTargets', () => {
 
 describe('FARM_ERR', () => {
   it('has copy for every farm error and help error', () => {
-    for (const c of [...FARM_ERROR_CODES, 'HELP_DAILY_CAP', 'HELP_FARM_CAP', 'HELP_SELF']) expect(FARM_ERR[c], c).toBeTruthy();
+    for (const c of [...FARM_ERROR_CODES, 'HELP_DAILY_CAP', 'HELP_FARM_CAP', 'HELP_SELF', 'BUY_SELF', 'BUY_DAILY_CAP', 'PET_SLEEPING', 'PET_DEAD', 'PET_EGG', 'TOO_FULL', 'SNACK_ONLY']) expect(FARM_ERR[c], c).toBeTruthy();
   });
 });
 
@@ -85,5 +85,24 @@ describe('loadErrorAction', () => {
   it('closes the farm when access is gone, otherwise pauses auto-reload', () => {
     expect(['FORBIDDEN', 'NOT_FOUND', 'UNAUTHORIZED'].map(loadErrorAction)).toEqual(['close', 'close', 'close']);
     expect(['INTERNAL', 'RATE_LIMITED', 'DB_UNAVAILABLE', 'GAME_CLOSED', 'network'].map(loadErrorAction)).toEqual(['pause', 'pause', 'pause', 'pause', 'pause']);
+  });
+});
+
+describe('phase 2 models', () => {
+  it('feedChoices lists edible barn items with counts', () => {
+    const s = newFarm(1, T0, ALWAYS_OPEN); s.inv = { wheat: 4, bread: 2, honeycake: 1, egg: 3 };
+    expect(feedChoices(payload(s))).toEqual([{ item: 'bread', name: '麵包', n: 2, snack: false }, { item: 'honeycake', name: '蜂蜜蛋糕', n: 1, snack: true }]);
+  });
+  it('stallDefaults: price range per qty, default at 2x, qty capped by stock and 10', () => {
+    expect(stallDefaults('strawberry', 3, 20)).toEqual({ qty: 3, min: 18, max: 54, price: 36 });
+    expect(stallDefaults('wheat', 15, 15)).toEqual({ qty: 10, min: 10, max: 30, price: 20 });
+    expect(stallDefaults('jam', 0, 0)).toEqual({ qty: 0, min: 0, max: 0, price: 0 });
+  });
+  it('expandOffer: which locked east field can be bought now', () => {
+    const s = newFarm(1, T0, ALWAYS_OPEN); s.level = 9; s.expand = 1;
+    expect(expandOffer(payload(s), 13)).toEqual({ kind: 'buy', cost: 200 });
+    expect(expandOffer(payload(s), 14)).toEqual({ kind: 'later', text: '先買前一格' });
+    s.expand = 2; expect(expandOffer(payload(s), 14)).toEqual({ kind: 'later', text: 'Lv 11 才能買' });
+    expect(expandOffer(payload(s), 12)).toEqual({ kind: 'open' });
   });
 });

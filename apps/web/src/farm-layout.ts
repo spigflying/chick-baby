@@ -25,4 +25,25 @@ export const LAYOUT = {
   /** 池塘（裝飾）與小雞起點 */
   pond: { x: 540, y: 490, w: 180, h: 70 },
   chick: { x: 484, y: 380 },
+  /** 第二階段：小路右端的路牌「東邊新地 →」 */
+  eastSign: { x: 878, y: 398, w: 78, h: 46 } as Box,
+};
+
+/** 第二階段「東邊新地」：第二個 960×600 畫面。田 12–17、蜂箱、牛棚、起司小屋、熱氣球、小攤、6 個裝飾格。 */
+const ECOLS = [136, 244, 352], EROWS = [116, 210];
+export const EAST = {
+  fields: EROWS.flatMap((y) => ECOLS.map((x) => ({ x, y, w: FW, h: FH }))) as Box[],
+  beehive: { x: 534, y: 104, w: 150, h: 120 } as Box,
+  cowshed: { x: 704, y: 104, w: 236, h: 120 } as Box,
+  dairy: { x: 534, y: 244, w: 190, h: 146 } as Box,
+  balloon: { x: 752, y: 236, w: 188, h: 154 } as Box,
+  stall: { x: 244, y: 296, w: 200, h: 96 } as Box,
+  decos: [40, 190, 340, 490, 640, 790].map((x) => ({ x, y: 466, w: 120, h: 110 })) as Box[],
+  /** 小路左端的路牌「← 回農場」 */
+  back: { x: 4, y: 398, w: 78, h: 46 } as Box,
+  path: [
+    { x: 0, y: 396, w: 960, h: 50 },
+    { x: 464, y: 80, w: 56, h: 316 },
+  ] as Box[],
+  chick: { x: 492, y: 380 },
 };

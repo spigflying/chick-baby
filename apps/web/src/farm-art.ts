@@ -1,7 +1,7 @@
 // 小雞農場的原創向量美術（SVG 字串片段）。風格基準：草圖第 3 版——彩色可愛插畫、圓角、腮紅、柔和陰影。
 // 每個建築在自己的「標準尺寸」座標裡畫，再依 farm-layout 的 Box 縮放。動畫只用 CSS class（style.css 的 .farm 範圍）。
-import type { CropId, Stage } from '@chick/engine';
-import { LAYOUT, SCENE, type Box } from './farm-layout';
+import type { Crate, CropId, DecoId, FarmItemId, Stage, StallSlot } from '@chick/engine';
+import { EAST, LAYOUT, SCENE, type Box } from './farm-layout';
 
 const INK = '#4b3a33';
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -62,6 +62,12 @@ export function iconSymbols(): string {
   <symbol id="fi-home" viewBox="0 0 40 40"><path d="M5 19 L20 7 L35 19" fill="#ff9b85"/><path d="M5 19 L20 7 L35 19" fill="none" stroke="#ff7a63" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/><rect x="9" y="18" width="22" height="17" rx="2" fill="#fff1dc"/><rect x="17" y="24" width="6" height="11" rx="2" fill="#c38cff"/></symbol>
   <symbol id="fi-oven" viewBox="0 0 40 40"><path d="M6 34 V20 Q6 8 20 8 Q34 8 34 20 V34 Z" fill="#ffb59a"/><path d="M12 34 V24 Q12 17 20 17 Q28 17 28 24 V34 Z" fill="#5a3427"/><path d="M14 34 Q16 26 20 30 Q24 25 26 34 Z" fill="#ffb33d"/></symbol>
   <symbol id="fi-water" viewBox="0 0 40 40"><path d="M20 6 Q30 20 30 26 Q30 35 20 35 Q10 35 10 26 Q10 20 20 6 Z" fill="#7fc8ff"/><ellipse cx="16" cy="25" rx="2.5" ry="4" fill="#fff" opacity=".7"/></symbol>
+  <symbol id="fi-honey" viewBox="0 0 40 40"><path d="M10 14 Q10 9 15 9 H25 Q30 9 30 14 V30 Q30 36 20 36 Q10 36 10 30 Z" fill="#ffc53d"/><rect x="11" y="5" width="18" height="6" rx="3" fill="#f39c3d"/><path d="M10 17 Q14 22 17 17 Q20 24 23 17 Q26 21 30 17" fill="none" stroke="#fff3c4" stroke-width="2.4" stroke-linecap="round"/><ellipse cx="15" cy="27" rx="2" ry="4" fill="#fff" opacity=".55"/></symbol>
+  <symbol id="fi-milk" viewBox="0 0 40 40"><path d="M13 6 H27 V12 L31 18 V34 Q31 37 28 37 H12 Q9 37 9 34 V18 L13 12 Z" fill="#fff" stroke="#bfe3ff" stroke-width="1.6"/><rect x="12" y="4" width="16" height="5" rx="2" fill="#6cc4f2"/><path d="M9 24 Q20 20 31 24 V34 Q31 37 28 37 H12 Q9 37 9 34 Z" fill="#dff1ff"/><circle cx="20" cy="29" r="4" fill="#ff9fb8"/></symbol>
+  <symbol id="fi-honeycake" viewBox="0 0 40 40"><path d="M6 22 Q6 16 12 16 H28 Q34 16 34 22 V31 Q34 35 30 35 H10 Q6 35 6 31 Z" fill="#f6c27a"/><path d="M6 22 Q6 16 12 16 H28 Q34 16 34 22 Q30 26 26 22 Q22 27 18 22 Q14 26 10 22 Q8 24 6 22 Z" fill="#ffd34d"/><rect x="6" y="27" width="28" height="3" fill="#fff1d8"/><circle cx="20" cy="12" r="4.5" fill="#ff5f6d"/><path d="M20 8 q2 -4 5 -4" stroke="#5fcf6a" stroke-width="2" fill="none" stroke-linecap="round"/></symbol>
+  <symbol id="fi-cheese" viewBox="0 0 40 40"><path d="M5 28 L30 9 Q36 14 35 22 V31 Q35 34 32 34 H8 Q5 34 5 31 Z" fill="#ffd84d"/><path d="M5 28 L30 9 Q36 14 35 22 L5 28 Z" fill="#ffe98a"/><g fill="#f5bd45"><circle cx="14" cy="30" r="2.4"/><circle cx="25" cy="28" r="3"/><circle cx="30" cy="20" r="1.8"/></g></symbol>
+  <symbol id="fi-balloon" viewBox="0 0 40 40"><path d="M20 3 Q34 3 34 16 Q34 24 24 29 H16 Q6 24 6 16 Q6 3 20 3 Z" fill="#ff8fab"/><path d="M20 3 Q27 3 27 16 Q27 24 22 29 H18 Q13 24 13 16 Q13 3 20 3 Z" fill="#ffd166"/><path d="M20 3 V29" stroke="#7fd6b4" stroke-width="3"/><rect x="15" y="31" width="10" height="7" rx="2" fill="#c9844a"/><path d="M16 29 L16 31 M24 29 L24 31" stroke="#8a5a32" stroke-width="1.4"/></symbol>
+  <symbol id="fi-stall" viewBox="0 0 40 40"><rect x="7" y="18" width="26" height="16" rx="3" fill="#fff1dc" stroke="#e0b48a" stroke-width="1.5"/><path d="M5 18 Q8 9 12 9 H28 Q32 9 35 18 Z" fill="#7fd6b4"/><path d="M5 18 q3.75 4 7.5 0 q3.75 4 7.5 0 q3.75 4 7.5 0 q3.75 4 7.5 0" fill="#fff"/><circle cx="14" cy="26" r="3" fill="#ff5f6d"/><circle cx="22" cy="26" r="3" fill="#ffd34d"/><rect x="8" y="34" width="3" height="4" fill="#b8763f"/><rect x="29" y="34" width="3" height="4" fill="#b8763f"/></symbol>
   </svg>`;
 }
 
@@ -261,4 +267,141 @@ export function pill(cx: number, y: number, text: string, tone: 'ready' | 'timer
   const w = Math.max(44, [...text].reduce((a, ch) => a + (ch.charCodeAt(0) > 255 ? 15 : 8.5), 0) + (clockIcon ? 34 : 22));
   const tx = clockIcon ? 9 : 0;
   return `<g transform="translate(${cx} ${y})" pointer-events="none"><path d="M-8 14 L0 22 L8 14" fill="${bg}"/><rect x="${-w / 2}" y="-14" width="${w}" height="29" rx="14.5" fill="${bg}"/>${clockIcon ? `<g transform="translate(${-w / 2 + 16} 1)"><circle r="8" fill="#ffd166"/><path d="M0 -4 V0 H3.5" stroke="#5a4310" stroke-width="1.8" fill="none" stroke-linecap="round"/></g>` : ''}<text x="${tx}" y="6" text-anchor="middle" font-size="15" font-weight="800" fill="${fg}">${esc(text)}</text></g>`;
+}
+
+// ======================================================================
+// 第二階段：東邊新地
+// ======================================================================
+/** 東邊新地的背景：草坡、小路、花叢、遠方山丘上的風車。 */
+export function eastBackground(): string {
+  const W = SCENE.w, H = SCENE.h;
+  let o = `<rect width="${W}" height="${H}" fill="url(#fg-sky)"/>`;
+  o += `<g class="cloud c2"><g transform="translate(300 54) scale(.7)" fill="#fff"><ellipse cx="0" cy="10" rx="58" ry="16"/><circle cx="-22" cy="0" r="20"/><circle cx="8" cy="-8" r="26"/><circle cx="32" cy="4" r="17"/></g></g>`;
+  o += `<g class="cloud"><g transform="translate(760 44) scale(.55)" fill="#fff"><ellipse cx="0" cy="10" rx="58" ry="16"/><circle cx="-22" cy="0" r="20"/><circle cx="8" cy="-8" r="26"/><circle cx="32" cy="4" r="17"/></g></g>`;
+  o += `<path d="M0 96 Q160 70 320 92 T640 86 T960 92 V170 H0 Z" fill="#c4ecaa"/>`;
+  // 遠方的風車小屋（裝飾）
+  o += `<g transform="translate(120 66)"><rect x="-8" y="0" width="16" height="30" rx="3" fill="#fff6ea"/><path d="M-11 2 L0 -8 L11 2 Z" fill="#c38cff"/><g class="spin"><path d="M0 -2 l-3 -20 h6 Z M0 -2 l20 -3 v6 Z M0 -2 l3 20 h-6 Z M0 -2 l-20 3 v-6 Z" fill="#fff"/></g><circle cy="-2" r="2.4" fill="#ff8fab"/></g>`;
+  o += `<path d="M0 108 Q200 86 420 104 T960 104 V190 H0 Z" fill="#a9e28e"/>`;
+  o += `<path d="M0 118 Q240 100 480 112 T960 116 V${H} H0 Z" fill="url(#fg-grass)"/>`;
+  for (let i = 0; i < 40; i++) { const x = (i * 197) % 940 + 10, y = 140 + (i * 151) % 450; o += `<path d="M${x} ${y} l3 -8 l2 8 l3 -6 l1 6" stroke="#69bf57" stroke-width="2" fill="none" stroke-linecap="round" opacity=".6"/>`; }
+  for (const p of EAST.path) o += `<rect x="${p.x - 4}" y="${p.y - 4}" width="${p.w + 8}" height="${p.h + 8}" rx="${Math.min(p.w, p.h) / 2 + 4}" fill="#e7c58d"/>`;
+  for (const p of EAST.path) o += `<rect x="${p.x + 2}" y="${p.y + 2}" width="${p.w - 4}" height="${p.h - 4}" rx="${Math.min(p.w, p.h) / 2 - 2}" fill="#f8e2b3"/>`;
+  [[480, 150], [504, 250], [140, 420], [330, 424], [640, 418], [830, 414]].forEach(([x, y]) => { o += `<ellipse cx="${x}" cy="${y}" rx="6" ry="4" fill="#e3c08a"/>`; });
+  o += bush(24, 300, 0.6) + bush(950, 456, 0.55) + bush(470, 592, 0.5);
+  [[60, 250], [100, 300], [470, 460], [930, 590], [20, 592], [610, 452]].forEach(([x, y], i) => { o += flower(x, y, ['#ff9fb8', '#fff', '#c38cff', '#ffb38a'][i % 4]); });
+  return o;
+}
+
+/** 木頭路牌（標準尺寸 78×46，箭頭朝左或右）。locked：寫「Lv N 開放」。 */
+export function sign(b: Box, text: string, locked: boolean, left = false): string {
+  const arrow = left ? 'M4 18 L18 4 H74 V32 H18 Z' : 'M74 18 L60 4 H4 V32 H60 Z';
+  let o = shadow(39, 44, 22, 4) + `<rect x="35" y="24" width="8" height="22" rx="3" fill="#b8763f"/>`;
+  o += `<path d="${arrow}" transform="translate(0 2)" fill="#d8955a"/><path d="${arrow}" fill="${locked ? '#e8d6c0' : '#f3c08c'}" stroke="#d8955a" stroke-width="2" stroke-linejoin="round"/>`;
+  o += `<text x="${left ? 44 : 34}" y="23" text-anchor="middle" font-size="12" font-weight="800" fill="${locked ? '#9a8470' : '#7a4a2c'}">${esc(text)}</text>`;
+  return fit(b, 78, 46, o);
+}
+
+function bee(x: number, y: number, d2: boolean) {
+  return `<g class="hop${d2 ? ' d2' : ''}"><g transform="translate(${x} ${y})"><ellipse cx="-4" cy="-8" rx="5" ry="7" fill="#fff" opacity=".85" transform="rotate(-25 -4 -8)"/><ellipse cx="4" cy="-8" rx="5" ry="7" fill="#fff" opacity=".85" transform="rotate(25 4 -8)"/>
+    <ellipse cx="0" cy="0" rx="10" ry="8" fill="#ffd34d"/><path d="M-3 -7.5 V7.5 M3 -7 V7" stroke="${INK}" stroke-width="2.6"/><circle cx="7" cy="-2" r="1.4" fill="${INK}"/><ellipse cx="6" cy="2" rx="2" ry="1.3" fill="#ffb3c7"/></g></g>`;
+}
+function hive(x: number, y: number) {
+  let o = shadow(x, y + 46, 30, 6);
+  o += `<rect x="${x - 10}" y="${y + 30}" width="20" height="16" rx="3" fill="#b8763f"/>`;
+  o += `<rect x="${x - 30}" y="${y - 6}" width="60" height="38" rx="12" fill="#ffc53d"/><rect x="${x - 34}" y="${y - 30}" width="68" height="28" rx="12" fill="#ffd34d"/>`;
+  o += `<path d="M${x - 30} ${y + 6} H${x + 30} M${x - 34} ${y - 16} H${x + 34}" stroke="#f5a623" stroke-width="3" opacity=".6"/>`;
+  o += `<path d="M${x - 38} ${y - 30} Q${x} ${y - 52} ${x + 38} ${y - 30} Z" fill="url(#fg-tilesP)"/><circle cx="${x}" cy="${y + 18}" r="6" fill="#7a4a2c"/>`;
+  return o;
+}
+/** 蜂箱（標準尺寸 150×120）。ready[i]：第 i 箱有蜂蜜。 */
+export function beehive(b: Box, ready: boolean[], locked: boolean, unlockLevel: number): string {
+  if (locked) return fit(b, 150, 120, lockedLot(150, 120, `Lv ${unlockLevel}：蜂箱`));
+  let o = `<rect x="4" y="30" width="142" height="86" rx="20" fill="#d8f3c0"/>`;
+  for (let i = 0; i < 6; i++) o += flower(14 + i * 24, 108 - (i % 2) * 8, ['#ff9fb8', '#fff', '#c38cff'][i % 3], 4);
+  o += hive(42, 62) + hive(110, 64);
+  o += bee(76, 30, false) + bee(20, 40, true) + bee(132, 36, true);
+  ready.forEach((r, i) => { if (r) o += `<g class="bob">${use('honey', i ? 96 : 28, 4, 26)}</g>`; });
+  return fit(b, 150, 120, o);
+}
+function cow(x: number, y: number, flip: number, d2: boolean) {
+  return `<g class="hop${d2 ? ' d2' : ''}"><g transform="translate(${x} ${y}) scale(${flip} 1)">${shadow(0, 26, 26, 5)}
+    <path d="M-16 18 v10 M-4 20 v8 M8 20 v8 M18 18 v10" stroke="#fff" stroke-width="6" stroke-linecap="round"/><path d="M-16 26 v2 M-4 26 v2 M8 26 v2 M18 26 v2" stroke="#c9a08a" stroke-width="6" stroke-linecap="round"/>
+    <ellipse cx="0" cy="8" rx="28" ry="17" fill="#fff"/><ellipse cx="-10" cy="4" rx="8" ry="6" fill="#c9a08a"/><ellipse cx="10" cy="14" rx="6" ry="4.5" fill="#c9a08a"/>
+    <path d="M-27 4 q-8 4 -6 12" stroke="#fff" stroke-width="3" fill="none" stroke-linecap="round"/>
+    <circle cx="24" cy="-6" r="13" fill="#fff"/><ellipse cx="30" cy="0" rx="9" ry="7" fill="#ffc2d1"/><circle cx="27" cy="0" r="1.3" fill="#e9668a"/><circle cx="33" cy="0" r="1.3" fill="#e9668a"/>
+    <circle cx="20" cy="-10" r="2.4" fill="${INK}"/><circle cx="21" cy="-11" r=".8" fill="#fff"/><ellipse cx="12" cy="-16" rx="5" ry="2.6" fill="#fff" transform="rotate(-25 12 -16)"/><path d="M18 -18 q-2 -6 2 -8 M28 -18 q2 -6 -2 -8" stroke="#f3c08c" stroke-width="3" fill="none" stroke-linecap="round"/></g></g>`;
+}
+/** 牛棚（標準尺寸 230×110）。 */
+export function cowshed(b: Box, ready: boolean[], locked: boolean, unlockLevel: number): string {
+  if (locked) return fit(b, 230, 110, lockedLot(230, 110, `Lv ${unlockLevel}：牛棚`));
+  let o = pen(230, 110, '#c8f0a8');
+  o += `<rect x="150" y="18" width="68" height="54" rx="10" fill="#fff6ea"/><path d="M142 24 Q184 -14 226 24 Z" fill="#8fd8c0"/><path d="M142 24 Q184 -14 226 24" fill="none" stroke="#5fbf9f" stroke-width="4" stroke-linecap="round"/><rect x="170" y="44" width="28" height="28" rx="4" fill="#ffad99"/><path d="M170 44 L198 72 M198 44 L170 72" stroke="#fff6ea" stroke-width="3"/>`;
+  o += cow(50, 66, 1, false) + cow(116, 74, -1, true);
+  ready.forEach((r, i) => { if (r) o += `<g class="bob">${use('milk', i ? 122 : 56, 18, 26)}</g>`; });
+  o += penFence(230, 110);
+  return fit(b, 230, 110, o);
+}
+/** 起司小屋（標準尺寸 170×170）。 */
+export function dairy(b: Box, busy: boolean, locked: boolean, unlockLevel: number): string {
+  if (locked) return fit(b, 170, 170, lockedLot(170, 170, `Lv ${unlockLevel}：起司小屋`));
+  return fit(b, 170, 170, cottage('url(#fg-tilesY)', '#f0a630', '起司小屋', '#d88a10', busy, '#8fbfe6') + use('cheese', 134, 132, 28));
+}
+
+/** 熱氣球停機坪（標準尺寸 190×154）。here：氣球停著、貨箱放在旁邊（裝好的有勾）。 */
+export function balloon(b: Box, st: { state: 'locked' } | { state: 'away'; remainMs: number } | { state: 'here'; remainMs: number; crates: (Crate & { canFill?: boolean })[] }, unlockLevel: number): string {
+  if (st.state === 'locked') return fit(b, 190, 154, lockedLot(190, 154, `Lv ${unlockLevel}：熱氣球`));
+  let o = shadow(95, 150, 90, 8);
+  o += `<ellipse cx="95" cy="134" rx="88" ry="18" fill="#e9d2b0"/><ellipse cx="95" cy="130" rx="80" ry="14" fill="#f8e2b3"/><path d="M40 130 h110" stroke="#ff8fab" stroke-width="3" stroke-dasharray="10 8"/>`;
+  if (st.state === 'away') {
+    o += `<g opacity=".5"><path d="M95 30 Q130 30 130 62 Q130 82 106 96 H84 Q60 82 60 62 Q60 30 95 30 Z" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="7 6"/></g>`;
+    o += `<g class="cloud"><g transform="translate(150 26) scale(.5)">${use('balloon', -16, -16, 32)}</g></g>`;
+    return fit(b, 190, 154, o);
+  }
+  o += `<g class="bob"><path d="M78 96 L84 110 M112 96 L106 110" stroke="#8a5a32" stroke-width="2"/>`;
+  o += `<path d="M95 6 Q140 6 140 48 Q140 74 110 96 H80 Q50 74 50 48 Q50 6 95 6 Z" fill="#ff8fab"/>`;
+  o += `<path d="M95 6 Q118 6 118 48 Q118 74 102 96 H88 Q72 74 72 48 Q72 6 95 6 Z" fill="#ffd166"/><path d="M95 6 Q102 6 102 48 Q102 74 97 96 H93 Q88 74 88 48 Q88 6 95 6 Z" fill="#7fd6b4"/>`;
+  o += `<ellipse cx="72" cy="30" rx="6" ry="12" fill="#fff" opacity=".45"/><rect x="80" y="108" width="30" height="20" rx="5" fill="#c9844a"/><path d="M80 114 h30" stroke="#e8a96b" stroke-width="3"/></g>`;
+  st.crates.slice(0, 4).forEach((c, i) => {
+    const x = [8, 36, 134, 162][i], y = 112;
+    o += `<g><rect x="${x - 2}" y="${y}" width="26" height="22" rx="4" fill="${c.filled ? '#ffd166' : '#e8a96b'}" stroke="#c9844a" stroke-width="1.5"/>${use(c.item, x + 2, y - 16, 18)}${c.filled ? `<circle cx="${x + 20}" cy="${y + 2}" r="6" fill="#7fd6b4" stroke="#fff" stroke-width="1.5"/><path d="M${x + 17} ${y + 2} l2 2 l4 -4" stroke="#fff" stroke-width="1.8" fill="none"/>` : ''}</g>`;
+  });
+  return fit(b, 190, 154, o);
+}
+
+/** 小攤（標準尺寸 200×96）。slots：上架中的東西。 */
+export function stall(b: Box, slots: (StallSlot | null)[], locked: boolean, unlockLevel: number): string {
+  if (locked) return fit(b, 200, 96, lockedLot(200, 96, `Lv ${unlockLevel}：小攤`));
+  let o = shadow(100, 94, 96, 6);
+  o += `<rect x="18" y="20" width="8" height="60" rx="3" fill="#b8763f"/><rect x="174" y="20" width="8" height="60" rx="3" fill="#b8763f"/>`;
+  o += `<rect x="10" y="54" width="180" height="34" rx="8" fill="#fff1dc" stroke="#e0b48a" stroke-width="2"/><rect x="10" y="80" width="180" height="8" rx="4" fill="#e7a86a"/>`;
+  o += `<path d="M4 26 Q14 2 30 2 H170 Q186 2 196 26 Z" fill="#ff8fab"/>`;
+  for (let i = 0; i < 8; i++) o += `<path d="M${4 + i * 24} 26 q12 12 24 0" fill="${i % 2 ? '#ff8fab' : '#fff'}"/>`;
+  o += `<rect x="64" y="-8" width="72" height="20" rx="10" fill="#fff"/><text x="100" y="7" text-anchor="middle" font-size="12" font-weight="800" fill="#e9668a">小攤</text>`;
+  slots.slice(0, 4).forEach((l, i) => {
+    const x = 28 + i * 38;
+    o += l ? `<g>${use(l.item, x, 46, 28)}<rect x="${x - 2}" y="74" width="32" height="12" rx="6" fill="#ffd166"/><text x="${x + 14}" y="84" text-anchor="middle" font-size="9" font-weight="800" fill="#7a4a2c">◎${l.price}</text></g>`
+      : `<rect x="${x + 4}" y="58" width="20" height="16" rx="4" fill="#f3e3cc"/>`;
+  });
+  return fit(b, 200, 96, o);
+}
+
+/** 裝飾格（標準尺寸 120×110）。id null：空格（主人看得到虛線＋「＋」，訪客只看到草地）。 */
+export function deco(b: Box, id: DecoId | null, owner: boolean): string {
+  let o = '';
+  if (!id) {
+    if (owner) o += `<rect x="10" y="20" width="100" height="80" rx="22" fill="#fff" opacity=".25" stroke="#fff" stroke-width="3" stroke-dasharray="9 7"/><text x="60" y="70" text-anchor="middle" font-size="30" font-weight="800" fill="#fff" opacity=".9">＋</text>`;
+    return `<g>${fit(b, 120, 110, o)}</g>`;
+  }
+  o += shadow(60, 100, 44, 7);
+  const D: Record<DecoId, string> = {
+    flowerbed: `<ellipse cx="60" cy="86" rx="50" ry="16" fill="#a6683f"/><ellipse cx="60" cy="82" rx="46" ry="13" fill="#c98a5b"/>${[[24, 72, '#ff9fb8'], [44, 64, '#fff'], [62, 70, '#c38cff'], [80, 62, '#ffb38a'], [96, 72, '#ff9fb8'], [52, 80, '#ffd166'], [74, 80, '#fff']].map(([x, y, c]) => `<path d="M${x} ${+y + 12} V${+y + 2}" stroke="#4fae55" stroke-width="2.4"/>${flower(+x, +y, String(c), 6)}`).join('')}`,
+    scarecrow: `<rect x="56" y="30" width="8" height="70" rx="3" fill="#b8763f"/><rect x="24" y="48" width="72" height="7" rx="3" fill="#b8763f"/><path d="M40 50 H80 L74 86 H46 Z" fill="#7fc8ff"/><rect x="56" y="58" width="8" height="10" rx="2" fill="#ffd166"/><circle cx="60" cy="32" r="16" fill="#f9dc9b"/><circle cx="54" cy="31" r="2.4" fill="${INK}"/><circle cx="66" cy="31" r="2.4" fill="${INK}"/><path d="M54 38 q6 4 12 0" stroke="${INK}" stroke-width="2" fill="none" stroke-linecap="round"/><ellipse cx="60" cy="18" rx="28" ry="6" fill="#f5cf85"/><path d="M46 18 Q46 2 60 2 Q74 2 74 18 Z" fill="#ff8fab"/>`,
+    bench: `<rect x="14" y="44" width="92" height="12" rx="6" fill="#e3a46e"/><rect x="14" y="60" width="92" height="12" rx="6" fill="#d08f5a"/><rect x="10" y="74" width="100" height="12" rx="6" fill="#e3a46e"/><rect x="20" y="84" width="8" height="18" rx="3" fill="#b8763f"/><rect x="92" y="84" width="8" height="18" rx="3" fill="#b8763f"/>${use('heart', 52, 26, 16)}`,
+    mushroom: `<rect x="50" y="56" width="20" height="40" rx="9" fill="#fff6ea"/><path d="M18 62 Q18 22 60 22 Q102 22 102 62 Z" fill="#ff5f6d"/><circle cx="40" cy="44" r="7" fill="#fff"/><circle cx="70" cy="36" r="6" fill="#fff"/><circle cx="86" cy="52" r="5" fill="#fff"/><circle cx="60" cy="74" r="8" fill="url(#fg-glow)" class="tw"/>`,
+    fountain: `<ellipse cx="60" cy="88" rx="52" ry="14" fill="#c9d6e3"/><ellipse cx="60" cy="84" rx="46" ry="11" fill="url(#fg-pond)"/><rect x="52" y="44" width="16" height="40" rx="5" fill="#dfe8f1"/><ellipse cx="60" cy="46" rx="24" ry="7" fill="#dfe8f1"/><ellipse cx="60" cy="44" rx="20" ry="5" fill="url(#fg-pond)"/><g class="bob"><path d="M60 40 Q52 18 60 10 Q68 18 60 40" fill="#bfeaff"/><circle cx="46" cy="28" r="3" fill="#bfeaff"/><circle cx="74" cy="26" r="3" fill="#bfeaff"/></g>`,
+    arch: `${['#ff5f6d', '#ffb33d', '#ffd84d', '#7fd6b4', '#7fc8ff', '#c38cff'].map((c, i) => `<path d="M${14 + i * 6} 100 V60 Q${14 + i * 6} ${16 + i * 6} 60 ${16 + i * 6} Q${106 - i * 6} ${16 + i * 6} ${106 - i * 6} 60 V100" fill="none" stroke="${c}" stroke-width="6"/>`).join('')}<ellipse cx="22" cy="100" rx="14" ry="6" fill="#fff"/><ellipse cx="98" cy="100" rx="14" ry="6" fill="#fff"/>`,
+    heartballoon: `<path d="M60 96 Q52 80 60 62" stroke="#c9844a" stroke-width="2" fill="none"/><g class="bob">${use('heart', 30, 8, 60)}<ellipse cx="46" cy="26" rx="6" ry="4" fill="#fff" opacity=".6"/></g><rect x="50" y="90" width="20" height="10" rx="4" fill="#e3a46e"/>`,
+    statue: `<rect x="30" y="80" width="60" height="20" rx="5" fill="#dfe8f1"/><rect x="36" y="74" width="48" height="10" rx="4" fill="#c9d6e3"/><ellipse cx="60" cy="54" rx="26" ry="22" fill="#ffe98a"/><circle cx="52" cy="50" r="2.6" fill="${INK}"/><circle cx="68" cy="50" r="2.6" fill="${INK}"/><path d="M57 56 L60 60 L63 56 Z" fill="#ff9f43"/><ellipse cx="46" cy="58" rx="4" ry="2.6" fill="#ffa6bd"/><ellipse cx="74" cy="58" rx="4" ry="2.6" fill="#ffa6bd"/><path d="M48 34 q12 -14 24 0" fill="#ffd34d"/>${sparkle(92, 30, 7)}`,
+  };
+  return `<g>${fit(b, 120, 110, o + D[id])}</g>`;
 }

@@ -1,5 +1,5 @@
 // 小雞農場畫面的資料模型（純函式，給 farm-view.ts 用）：把伺服器回的 state + derived 轉成畫面要顯示的文字與狀態。
-import { CROPS, FARM, type CropId, type FarmDerived, type FarmState } from '@chick/engine';
+import { CROPS, FARM, FARM_FOODS, FARM_ITEMS, stallPriceRange, type CropId, type FarmDerived, type FarmItemId, type FarmState } from '@chick/engine';
 
 export interface FarmPayload { owner: { id: string; display_name: string }; is_owner: boolean; state: FarmState; derived: FarmDerived; server_time: number; balance?: number; leveled?: number[] }
 
@@ -66,7 +66,43 @@ export const FARM_ERR: Record<string, string> = {
   HELP_DAILY_CAP: '今天已經幫忙 10 次了，明天再來',
   HELP_FARM_CAP: '今天已經幫這座農場 5 次了',
   HELP_SELF: '自己的農場不能幫自己喔',
+  // 第二階段
+  NO_PET: '要先有一隻活著的寵物才行',
+  CHICK_TIRED: '小雞今天澆累了，明天再來（寵物體力越高，每天能澆越多次）',
+  NO_BALLOON: '熱氣球現在不在',
+  CRATE_DONE: '這個貨箱已經裝好了',
+  NO_LISTING: '這格已經賣掉或下架了',
+  BAD_PRICE: '價格要在範圍內',
+  NOT_EDIBLE: '這個不能給寵物吃',
+  BUY_SELF: '自己的小攤不能買',
+  BUY_DAILY_CAP: '今天已經在小攤買 10 次了，明天再來',
+  PET_SLEEPING: '寵物在睡覺，等牠醒來再餵',
+  PET_DEAD: '寵物已經不在了',
+  PET_EGG: '還是蛋，孵出來才能吃東西',
+  TOO_FULL: '寵物吃太飽了',
+  SNACK_ONLY: '寵物快吃飽了，只能吃點心（草莓、果醬、蜂蜜、蜂蜜蛋糕）',
 };
+
+/** 倉庫裡可以餵寵物的東西。 */
+export function feedChoices(p: FarmPayload): { item: FarmItemId; name: string; n: number; snack: boolean }[] {
+  return (Object.keys(FARM_FOODS) as FarmItemId[]).filter((i) => (p.state.inv[i] ?? 0) > 0)
+    .map((item) => ({ item, name: FARM_ITEMS[item].name, n: p.state.inv[item]!, snack: FARM_FOODS[item]!.snack }));
+}
+/** 小攤上架表單的預設：數量（最多 10、不超過庫存）、價格範圍與預設價（2 倍）。 */
+export function stallDefaults(item: FarmItemId, have: number, want: number) {
+  const qty = Math.max(0, Math.min(FARM.stall.maxQty, have, want));
+  if (!qty) return { qty: 0, min: 0, max: 0, price: 0 };
+  const [min, max] = stallPriceRange(item, qty);
+  return { qty, min, max, price: min * 2 };
+}
+/** 東邊新地的田（idx 12–17）：已開、現在能買、還不能買。 */
+export function expandOffer(p: FarmPayload, idx: number): { kind: 'open' } | { kind: 'buy'; cost: number } | { kind: 'later'; text: string } {
+  const k = idx - FARM.baseFields, s = p.state;
+  if (k < s.expand) return { kind: 'open' };
+  if (k > s.expand) return { kind: 'later', text: '先買前一格' };
+  if (s.level < FARM.expand.levels[k]) return { kind: 'later', text: `Lv ${FARM.expand.levels[k]} 才能買` };
+  return { kind: 'buy', cost: FARM.expand.costs[k] };
+}
 
 /** 蛋殼動作列上的「農場」格子：開關沒開就不出現，手機上變灰。 */
 export function farmCellState(cfgFarm: boolean, touch: boolean): 'hidden' | 'disabled' | 'enabled' {
