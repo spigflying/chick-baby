@@ -40,6 +40,7 @@
   1. 把農場的 key 改成下一個沒用過的號碼。
   2. **合併 `coin_ledger_reason_check` 的清單**：`0011_farm` 會整個重建這個約束（寫死的 reason 清單）。把 main 最新 migration 裡的清單拿來，加上六個 `farm_*`，`up` 和 `down` 都要改（`down` 還原成 main 最新的清單）。只改 key 的話，正式環境會在 `ADD CONSTRAINT` 失敗（已有 main 新 reason 的帳本列），或 main 的新功能寫不進帳本。
   3. 本機開發資料庫跑過舊名字的話：先 `DROP TABLE farm_help; DROP TABLE farms;`，刪掉 `kysely_migration` 裡 `0011_farm` 那一列，再重跑 migration（只刪那一列會因為資料表已存在而失敗）。
+  4. **第二階段 `0012_farm_phase2`** 同樣處理：號碼接在 `0011_farm`（改名後的號碼）後面；它也整個重建 `coin_ledger_reason_check`，`up` 要用「main 最新清單＋十一個 `farm_*`」，`down` 用「main 最新清單＋六個第一階段 `farm_*`」。本機改名重跑：`DROP TABLE farm_stall_buys;`、刪掉 `kysely_migration` 裡 `0012_farm_phase2` 那一列。
 - **要上線時**：
   1. `apps/server/release-notes.json` 寫農場的更新說明（合併時不要先寫，開關沒開玩家看不到）。
   2. 部署新版後打開開關：`gcloud run services update $SERVICE --update-env-vars=FARM_ENABLED=1`（會換版，避開開放時間）。

@@ -340,7 +340,16 @@
 - **訂單**：Lv1–2 3 張、Lv3–4 4、Lv5–7 5、Lv8+ 6；每張 1–3 種、各 1–3 個，金幣＝賣價總和 ×1.8，經驗＝內容物經驗 ×2；交貨或丟掉後那一格分別等 90 分／10 分（開放時間）補新的。只出已解鎖、做得出來的東西（決定性：seed + 序號）。
 - **等級**：升到下一級要 30 × 等級經驗，獎勵 ◎2 × 新等級，最高 Lv20。
 - **好友幫忙**（`POST /api/farm/:id/help`）：進得了主人的家（§4.2）就能幫；澆水＝還在長的田剩餘時間 −20%（每輪一次）、救枯樹；每人每天 10 次、同一座農場 5 次（Asia/Taipei 日期）；每次 +1 友情點數；主人下次打開農場時看到「X 幫你澆了水」。自己不能幫自己（`HELP_SELF`）。
-- **經濟**（`packages/engine/scripts/sim-farm.ts`）：一天上線 4 次的玩家第 3–5 天平均 ◎156–204／天；每 15 分鐘看一次平均 ◎280–370、單日最高約 ◎450。
+- **經濟**（`packages/engine/scripts/sim-farm.ts`，含第二階段內容）：一天上線 4 次的玩家第 3–5 天平均 ◎167–232／天；每 15 分鐘看一次第 2–5 天平均 ◎277–357、5 天內單日最高 ◎498。30 天、星期一到五、第 8 天起平均：4 次 ◎139–195，每 15 分鐘 ◎205–236（測試上限 ◎300／◎450）。賣價 ≥ ◎14 的東西（果醬、蜂蜜蛋糕、起司）在訂單裡每種最多 2 個。
+- **第二階段（v2.1，同一個開關；設計文件 `docs/superpowers/specs/2026-11-04-farm-phase2-design.md`）**：
+  - **東邊新地**：主畫面小路右端的路牌「東邊新地」（Lv5 開放）切到第二個畫面；左端「回農場」。
+  - **加買田**：田 13–18，照順序用金幣買（`expand`）：Lv7／9／11／13／15／17，◎120／200／300／450／650／900（`farm_expand`）。
+  - **蜂箱**（Lv8，草莓 → 3 小時蜂蜜）、**牛棚**（Lv10，小麥 ×3 → 2 小時牛奶），各 2 隻；烘焙屋加「蜂蜜蛋糕」（Lv9，小麥 ×2＋蛋＋蜂蜜，90 分）；**起司小屋**（Lv12，牛奶 ×2 → 2 小時起司）。賣價：蜂蜜 9、牛奶 5、蜂蜜蛋糕 18、起司 14。
+  - **熱氣球貨運**（Lv7）：4 個貨箱（每箱一種東西 ×3–6，決定性），停 6 小時、飛走 3 小時再來（開放時間）。裝滿一箱拿 賣價 × 數量 × 1.5（四捨五入）和經驗；4 箱全裝好「出發」再 ◎20＋30 經驗（`farm_balloon`）。主人打開農場（GET）時也會存檔，排班才不會每次重算。
+  - **裝飾**：8 種（◎40–200 或友情 15／30 點，`farm_deco`），買了放收納，擺到東邊新地 6 個裝飾格，可收回、可換；純外觀，訪客看得到。
+  - **小攤**（Lv5，4 格）：主人從倉庫上架（1–10 個，價格＝賣價 × 數量 的 1–3 倍），可下架。訪客在主人的東邊新地買：`POST /api/farm/:id/buy`，金幣直接從買的人轉給主人（`farm_stall_buy` −／`farm_stall_sale` ＋），東西進買的人倉庫；每人每天 10 次（`farm_stall_buys`）；自己不能買（`BUY_SELF`）；兩座農場與兩個錢包依 id 排序上鎖，同一格只會賣出一次。主人打開農場時看到「X 買了你的 …」。
+  - **餵寵物**：`POST /api/farm/feed-pet {item}` 拿倉庫的東西餵自己目前的寵物，不花金幣，檢查與效果跟蛋殼餵食一樣（`checkFeed`／`applyFood`）；寵物事件 `feed` 的 `food` 是 `farm:<品項>`。能吃：胡蘿蔔、草莓（點心）、愛心南瓜、蘋果、麵包、果醬（點心）、蜂蜜（點心）、牛奶、蜂蜜蛋糕（點心）、起司。
+  - **小雞澆水**（跟寵物連動）：寵物活著時，主人點還在長的田可以「小雞澆水」（剩餘 −20%，跟好友澆水分開算）；每天（台北日期）1 次，寵物體力 ≥ 30、≥ 60 各多 1 次（`NO_PET`、`CHICK_TIRED`）。
 - **即時**：農場有變化時 `NOTIFY {t:'farm'}`，主人本人和正在主人家裡的人收到 `farm.updated` 後重新讀取。
 
 ## 5. M2 網路同步規格（v1.8 上線）
@@ -486,6 +495,7 @@ Cloud SQL for PostgreSQL ─────────────────┘
 | `audit_log` | id, at, user_id, action, target_type, target_id, result, detail (jsonb), ip（30 天後清成 NULL）, user_agent, request_id | 只新增 |
 | `farms`（v2.0） | user_id (PK), state (jsonb：整座農場，見 §4.12), updated_at | 一人一座 |
 | `farm_help`（v2.0） | id, helper_id, owner_id, day (date, Asia/Taipei), kind (`water`/`rescue`), target, created_at | 每日幫忙上限 |
+| `farm_stall_buys`（v2.1） | id, buyer_id, seller_id, day (date, Asia/Taipei), item, qty, price, created_at | 小攤每日購買上限 |
 
 ## 10. API 與事件
 
@@ -513,6 +523,8 @@ Cloud SQL for PostgreSQL ─────────────────┘
 | GET | `/farm/:id` | 農場（`:id`＝主人 user id；主人第一次讀時建立；訪客看不到 `helpLog`）（v2.0，`FARM_ENABLED`） |
 | POST | `/farm/act` | 主人的所有農場動作 `{action: {type, …}, request_id}`（v2.0） |
 | POST | `/farm/:id/help` | 幫忙 `{kind: water/rescue, idx?, request_id}`（v2.0） |
+| POST | `/farm/:id/buy` | 買小攤 `{slot, request_id}` → `{ok, balance, item, qty, price}`（v2.1） |
+| POST | `/farm/feed-pet` | 拿倉庫的東西餵自己的寵物 `{item, request_id}` → `{ok, pet, state, derived}`（v2.1） |
 | GET | `/farm/friends` | 最近拜訪／邀請我的家裡有農場的人與 `needs_help`（v2.0） |
 
 **WebSocket**（`wss://…/ws`）
