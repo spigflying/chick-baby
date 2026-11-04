@@ -325,21 +325,27 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 @keyframes farm-flap { from { transform: rotate(-12deg); } to { transform: rotate(14deg); } }
 @media (prefers-reduced-motion: reduce) { .farm .scene * { animation: none !important; } }
 
-/* ---------- 小雞農場：全頁畫面（彩色可愛插畫風，跟蛋殼的像素風刻意不同） ---------- */
-.farm{--f-ink:#4b3a33;--f-muted:#8d786d;--f-card:#fffaf3;--f-line:#f2dfd0;--f-pink:#ff8fab;--f-pink-d:#e9668a;--f-mint:#7fd6b4;--f-mint-d:#1f4d3d;--f-sun:#ffd166;--f-sky:#9ad7ff;
+/* ---------- 小雞農場：全頁畫面 ---------- */
+.farm{--f-ink:#3d352c;--f-muted:#766b5b;--f-card:#f8f2e7;--f-line:#d9c9ad;--f-pink:#b18b62;--f-pink-d:#7d6b4c;--f-mint:#9fbd90;--f-mint-d:#34523c;--f-sun:#d9bb7d;--f-sky:#aed5e9;
   position:fixed;inset:0;z-index:1150;display:flex;flex-direction:column;align-items:center;gap:10px;padding:14px 16px 18px;overflow:auto;
-  background:linear-gradient(#fff7ef,#ffeede);color:var(--f-ink);font-family:"Huninn","PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
+  background:linear-gradient(#f1ebdc,#dfe6d3);color:var(--f-ink);font-family:"Huninn","PingFang TC","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
   opacity:0;transition:opacity .25s ease}
 .farm.on{opacity:1}
 .farm[hidden]{display:none}
+.farm.classic{--f-ink:#4b3a33;--f-muted:#8d786d;--f-card:#fffaf3;--f-line:#f2dfd0;--f-pink:#ff8fab;--f-pink-d:#e9668a;--f-mint:#7fd6b4;--f-mint-d:#1f4d3d;--f-sun:#ffd166;--f-sky:#9ad7ff;background:linear-gradient(#fff7ef,#ffeede)}
 .farm button{font-family:inherit}
 .farm button:focus-visible,.farm .hit:focus-visible{outline:3px solid var(--f-pink-d);outline-offset:2px}
 /* 滑鼠點 SVG 物件時 Chrome 會套預設的藍色 outline（:focus），只留鍵盤操作時的粉紅框 */
 .farm .hit:focus:not(:focus-visible){outline:none}
 .farm-top{width:min(100%,1100px);display:flex;align-items:center;justify-content:space-between}
-.farm-title{font-size:22px;letter-spacing:.03em}
-.farm-x{all:unset;cursor:pointer;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#fff;box-shadow:0 3px 0 rgba(200,140,110,.3);font-size:18px}
-.farm-stage{position:relative;width:min(100%,1100px);border-radius:26px;overflow:hidden;box-shadow:0 8px 24px rgba(170,110,80,.18);background:#bfe8ff}
+.farm-title{flex:1;font-size:22px;letter-spacing:.03em}
+.farm-theme{cursor:pointer;margin-right:10px;padding:7px 12px;border:1px solid #a9987b;border-radius:999px;background:#f8f2e7;color:var(--f-ink);font-size:14px;font-weight:700;white-space:nowrap}
+.farm-theme:hover{filter:brightness(.96)}
+.farm.classic .farm-theme{border-color:#e9b8c4;background:#fff}
+.farm-x{all:unset;cursor:pointer;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#f8f2e7;box-shadow:0 3px 0 rgba(88,75,53,.3);font-size:18px}
+.farm.classic .farm-x{background:#fff;box-shadow:0 3px 0 rgba(200,140,110,.3)}
+.farm-stage{position:relative;width:min(100%,1100px);border-radius:26px;overflow:hidden;box-shadow:0 8px 24px rgba(67,73,48,.22);background:#90b777}
+.farm.classic .farm-stage{box-shadow:0 8px 24px rgba(170,110,80,.18);background:#bfe8ff}
 .farm-stage .scene{display:block;width:100%;height:auto}
 .farm .scene text{font-family:"Huninn","PingFang TC","Noto Sans TC",system-ui,sans-serif}
 .farm .scene .hit{cursor:pointer;transition:filter .15s}
@@ -353,11 +359,13 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .fxp{width:7em;height:.7em;border-radius:99px;background:#ffe0e8;overflow:hidden}
 .fxp i{display:block;height:100%;background:linear-gradient(90deg,#8fe3c2,#5fcf9f);border-radius:99px}
 .farm-tools{width:min(100%,1100px);display:flex;justify-content:center;gap:12px;flex-wrap:wrap}
-.ftool{all:unset;position:relative;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;width:96px;padding:8px 0 6px;border-radius:18px;background:#fff;box-shadow:0 4px 0 rgba(200,140,110,.3);font-weight:700;font-size:15px}
+.ftool{all:unset;position:relative;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;width:96px;padding:8px 0 6px;border-radius:18px;background:#f8f2e7;box-shadow:0 4px 0 rgba(88,75,53,.3);font-weight:700;font-size:15px}
+.farm.classic .ftool{background:#fff;box-shadow:0 4px 0 rgba(200,140,110,.3)}
 .ftool:hover{transform:translateY(-2px)}
 .ftool .fic.big{width:40px;height:40px}
 .fbadge{position:absolute;top:-6px;right:10px;min-width:22px;height:22px;border-radius:99px;background:#ff5f7e;color:#fff;font-size:13px;display:grid;place-items:center}
-.fic{width:28px;height:28px;flex:none}
+.fic{width:28px;height:28px;flex:none;filter:saturate(.7)}
+.farm.classic .fic{filter:none}
 .fic.mid{width:32px;height:32px}
 /* 子畫面 */
 .farm-panel{position:absolute;right:2%;top:12%;bottom:4%;width:min(380px,46%);display:flex;flex-direction:column;background:var(--f-card);border-radius:22px;box-shadow:0 10px 30px rgba(120,70,50,.28);overflow:hidden}

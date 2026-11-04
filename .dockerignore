@@ -2,4 +2,6 @@
 **/dist
 .git
 *.png
+!apps/web/public/farm/*.png
+design/
 apps/server/.env
