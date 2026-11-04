@@ -2,10 +2,11 @@
  * 小雞農場經濟模擬（spec「經濟護欄」）：固定策略的玩家，從星期一 09:00 開新農場，每天記淨賺金幣。
  * 模型 A：09:30、12:30、15:30、19:00 各上線 5 分鐘（上線時做一輪，5 分鐘後再做一輪）。
  * 模型 B：09:00 起每 15 分鐘上線一次。模型 none：只在第一天 09:30 種滿田。
+ * 第二階段：會買東邊新地的田、用熱氣球；netPerDay 不扣買田和裝飾（自願花的錢，扣了會把收入藏起來），花掉的另外記在 stats.spentExpand。
  * 用法：npx tsx scripts/sim-farm.ts [days] [seed]
  */
 import {
-  makeClock, parseOpenHours, newFarm, applyFarm, describeFarm, invCount, barnCap, fieldsUnlocked,
+  makeClock, parseOpenHours, newFarm, applyFarm, describeFarm, invCount, barnCap, fieldOpen, FARM,
   CROPS, ANIMALS, RECIPES, FARM_ITEMS, FarmError,
   type FarmState, type FarmAction, type CropId, type FarmItemId, type Stack,
 } from '../src';
@@ -30,7 +31,8 @@ export function simulateFarm(opts: { days: number; sessions: 'A' | 'B' | 'none';
       const delta = out.ledger.reduce((x, l) => x + l.delta, 0);
       const spend = out.ledger.filter((l) => l.delta < 0).reduce((x, l) => x + l.delta, 0);
       if (coins + spend < 0) { Object.assign(s, snap); return false; }
-      coins += delta; netPerDay[day] += delta;
+      coins += delta;
+      netPerDay[day] += out.ledger.filter((l) => l.reason !== 'farm_expand' && l.reason !== 'farm_deco').reduce((x, l) => x + l.delta, 0);
       stats[a.type] = (stats[a.type] ?? 0) + 1;
       for (const l of out.ledger) stats[l.reason] = (stats[l.reason] ?? 0) + l.delta;
       return true;
@@ -60,6 +62,14 @@ export function simulateFarm(opts: { days: number; sessions: 'A' | 'B' | 'none';
     tryAct({ type: 'collectAll' }, now);
     // 交得出的訂單全交
     for (let i = 0; i < s.orders.length; i++) if (s.orders[i]) tryAct({ type: 'deliver', slot: i }, now);
+    // 熱氣球：倉庫有、訂單不需要的就裝；全裝滿就出發
+    if (s.balloon.crates.length && now < s.balloon.leave) {
+      const keep = orderNeeds(s);
+      s.balloon.crates.forEach((c, i) => { if (!c.filled && (s.inv[c.item] ?? 0) - (keep[c.item] ?? 0) >= c.qty) tryAct({ type: 'fillCrate', i }, now); });
+      if (s.balloon.crates.every((c) => c.filled)) tryAct({ type: 'sendBalloon' }, now);
+    }
+    // 買東邊新地的田（留 ◎100 週轉）
+    if (s.expand < FARM.expand.costs.length && s.level >= FARM.expand.levels[s.expand] && coins >= FARM.expand.costs[s.expand] + 100) tryAct({ type: 'expand' }, now);
     // 加工：原料夠就做（訂單要的優先）
     for (const id of Object.keys(RECIPES) as (keyof typeof RECIPES)[]) while (tryAct({ type: 'craft', recipe: id }, now));
     // 動物：能餵就餵
@@ -70,8 +80,8 @@ export function simulateFarm(opts: { days: number; sessions: 'A' | 'B' | 'none';
     const best = unlockedCrops
       .filter((c) => CROPS[c].growMs <= Math.max(nextGap, 2 * MIN))
       .sort((a, b) => profit(b) - profit(a))[0] ?? 'wheat';
-    for (let i = 0; i < fieldsUnlocked(s.level); i++) {
-      if (s.fields[i].crop) continue;
+    for (let i = 0; i < FARM.fieldCount; i++) {
+      if (!fieldOpen(s, i) || s.fields[i].crop) continue;
       const want = unlockedCrops.find((c) => (need[c] ?? 0) > 0);
       if (!want && invCount(s) >= barnCap(s) * 0.5) continue; // 沒人要的作物只在倉庫還空時種（賺經驗）
       const crop = want ?? best;
@@ -85,7 +95,7 @@ export function simulateFarm(opts: { days: number; sessions: 'A' | 'B' | 'none';
     }
     // 倉庫超過一半：從最便宜的賣到 40%（訂單要的先留著）
     if (invCount(s) > barnCap(s) * 0.5) {
-      const keep = orderNeeds(s);
+      const keep = allNeeds(s);
       const items = (Object.keys(s.inv) as FarmItemId[]).sort((a, b) => FARM_ITEMS[a].sell - FARM_ITEMS[b].sell);
       for (const it of items) {
         while (invCount(s) > barnCap(s) * 0.4 && (s.inv[it] ?? 0) > (keep[it] ?? 0)) if (!tryAct({ type: 'sell', item: it, qty: 1 }, now)) break;
@@ -98,6 +108,12 @@ const profit = (c: CropId) => CROPS[c].out.qty * FARM_ITEMS[CROPS[c].out.item].s
 function orderNeeds(s: FarmState) {
   const need: Partial<Record<FarmItemId, number>> = {};
   for (const o of s.orders) if (o) for (const it of o.items) need[it.item] = (need[it.item] ?? 0) + it.qty;
+  return need;
+}
+/** 訂單＋還沒裝的熱氣球貨箱（種田、加工時一起算）。 */
+function allNeeds(s: FarmState) {
+  const need = orderNeeds(s);
+  for (const c of s.balloon.crates) if (!c.filled) need[c.item] = (need[c.item] ?? 0) + c.qty;
   return need;
 }
 /** 正在長／正在做、之後會進倉庫的東西。 */
@@ -117,7 +133,7 @@ function pipeline(s: FarmState) {
 function cropNeeds(s: FarmState) {
   const need: Partial<Record<FarmItemId, number>> = {};
   const add = (st: Stack, k = 1) => { need[st.item] = (need[st.item] ?? 0) + st.qty * k; };
-  for (const [item, qty] of Object.entries(orderNeeds(s)) as [FarmItemId, number][]) {
+  for (const [item, qty] of Object.entries(allNeeds(s)) as [FarmItemId, number][]) {
     const r = Object.values(RECIPES).find((x) => x.out.item === item && x.level <= s.level);
     const a = Object.values(ANIMALS).find((x) => x.out.item === item && x.level <= s.level);
     if (r) r.in.forEach((st) => add(st, qty)); else if (a) a.feed.forEach((st) => add(st, qty)); else add({ item, qty });

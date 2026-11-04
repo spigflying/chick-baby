@@ -29,7 +29,7 @@ describe('newFarm', () => {
     const s = fresh();
     const d = describeFarm(s, T0, C);
     expect(s.level).toBe(1); expect(s.seed).toBe(42);
-    expect(s.fields).toHaveLength(12);
+    expect(s.fields).toHaveLength(18); // 第二階段：12–17 是東邊新地要買的田
     expect(d.fields.filter((f) => !f.locked)).toHaveLength(6);
     expect(d.orders.filter((o) => 'order' in o)).toHaveLength(3);
     expect(d.barn).toEqual({ used: 0, cap: 50 });
@@ -283,8 +283,8 @@ describe('loadFarm', () => {
     const s: any = fresh();
     delete s.jobs; delete s.queueSlots; delete s.helpLog; s.fields = s.fields.slice(0, 6);
     const l = loadFarm(JSON.parse(JSON.stringify(s)), T0, C);
-    expect(l.fields).toHaveLength(12);
-    expect(l.jobs).toEqual({ bakery: [], jamhouse: [] });
+    expect(l.fields).toHaveLength(18);
+    expect(l.jobs).toEqual({ bakery: [], jamhouse: [], dairy: [] });
     expect(l.queueSlots).toEqual({ bakery: 2, jamhouse: 2 });
     expect(l.helpLog).toEqual([]);
     expect(code(() => loadFarm(null, T0, C))).toBe('BAD_REQUEST');
