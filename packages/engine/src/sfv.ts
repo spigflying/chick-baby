@@ -378,7 +378,7 @@ export const SFV = (() => {
     A.ex = Math.min(EX_MAX, A.ex + ((dmg / 5) | 0)); B.vg = Math.min(VG_MAX, B.vg + ((dmg / 2) | 0));
     B.st = ST.KD; B.t = KD_HARD; B.y = 0; B.vx = 0; B.x = Math.max(WALL, Math.min(STAGE_W - WALL, A.x + 64 * A.f));
     B.hs = HS_HEAVY; // 摔到地上的震動
-    A.st = ST.LAND; A.t = THROW_RECOVERY;
+    A.st = ST.LAND; A.t = THROW_RECOVERY; A.mv = M.THROW; // 摔完收招的標記（只給畫面／判定挑圖用，LAND 結束 toIdle 會清掉）
   }
   /** 摔的動畫：抓住 → 舉過頭頂 → 往前摔（整數拋物線，伺服器與瀏覽器算得一樣） */
   function throwArc(s, i) {

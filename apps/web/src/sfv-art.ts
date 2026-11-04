@@ -108,16 +108,35 @@ export function drawArtChick(ctx, s, i) {
   let shake = 0, tint = i === 1 ? 'rgba(90,110,140,0.25)' : null;
   if (p.hs > 0 && fx && fx.t < 4) shake = (s.tick % 2 ? 1 : -1) * (fx.heavy ? 2 : 1);
   if (fx && fx.kind === 'hit') { if (fx.t < 1) tint = 'rgba(255,240,230,0.85)'; else if (fx.t < 2) tint = 'rgba(255,90,60,0.45)'; }
-  const rot = st === 'HIT' && !p.cr && name === 'n_hitL' ? -0.09 : 0;
+  let rot = st === 'HIT' && !p.cr && name === 'n_hitL' ? -0.09 : 0, off = q.off;
+  // 只影響畫面：被摔的翻轉（抓住時用重受擊圖，拋起後依摔的進度轉半圈）、暈眩搖晃
+  const op = s.p[1 - i];
+  if (st === 'THROWN') {
+    if (op.st === SFV.ST.THROWING && op.t > SFV.THROW_ANIM) { name = 'n_hitH'; off = SFV_FIT.NEUT + SFV_FIT.scale('n_hitH')[1]; }
+    else rot = -Math.PI * Math.min(1, (SFV.THROW_ANIM - (op.st === SFV.ST.THROWING ? op.t : 0)) / SFV.THROW_ANIM);
+  }
+  if (st === 'DIZZY') rot = 0.04 * Math.sin(p.t * 2 * Math.PI / 40);
   const o = { s: q.s, sy: q.breath, shake, tint, rot };
   if (q.fb && q.tag) {
     const fr = q.tag;
     if (!['3', '4', '6'].includes(fr.split('_')[0]) || fr === '7_5') drawLayer(ctx, 'fxb_' + fr, p, q.off, { s: q.s });
-    drawLayer(ctx, name, p, q.off, o);
+    drawLayer(ctx, name, p, off, o);
     if (!['6', '7'].includes(fr)) drawLayer(ctx, 'fxf_' + fr, p, q.off, { s: q.s });
-  } else drawLayer(ctx, name, p, q.off, o);
+  } else drawLayer(ctx, name, p, off, o);
+  if (st === 'DIZZY') dizzyStars(ctx, s, p);
   if (q.id === 'SHINKU' && q.ph === 'active') drawBeam(ctx, s, p);
   return true;
+}
+/** 暈眩：頭上繞圈的小星星（只畫面） */
+function dizzyStars(ctx, s, p) {
+  ctx.save(); ctx.strokeStyle = '#2a1a10'; ctx.fillStyle = '#f3d27a'; ctx.lineWidth = 1;
+  for (let k = 0; k < 3; k++) {
+    const an = s.tick * 0.12 + k * 2.094, x = p.x + Math.cos(an) * 16, y = GROUND + p.y - 112 + Math.sin(an) * 4, r = 4;
+    ctx.beginPath();
+    for (let j = 0; j < 10; j++) { const rr = j % 2 ? r * 0.45 : r, a2 = j * Math.PI / 5 - Math.PI / 2; ctx.lineTo(x + Math.cos(a2) * rr, y + Math.sin(a2) * rr); }
+    ctx.closePath(); ctx.fill(); ctx.stroke();
+  }
+  ctx.restore();
 }
 /** 真空蛋波的光束：沿著引擎的長判定畫（圖只有推掌，光束要另外畫才看得出打多遠）；每段開始時亮一下 */
 function drawBeam(ctx, s, p) {

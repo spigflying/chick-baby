@@ -1,7 +1,7 @@
 // @ts-nocheck
 // 美術姿勢 ↔ 判定：每個 tick 畫哪張圖是玩家狀態的純函數（不讀時間、不用亂數），
 // 引擎用同一個函數換出貼合美術的受擊判定，所以伺服器與瀏覽器算出來完全一樣。
-// 移植自 fight-art poc3 fit_pose.js（只拿掉 ?walkfit / ?live / ?nofit 等原型開關）。
+// 移植自 fight-art poc4 fit_pose.js（只拿掉 ?walkfit / ?live / ?nofit 等原型開關）。
 import { FIT_DATA as D } from './sfv-fit-data';
 
 const MOVES = {
@@ -13,6 +13,13 @@ const MOVES = {
   '2HK': { startup: [['n_crouch', 3], ['n_2lk', '*']], active: [['n_sweep', '*']], recovery: [['n_sweep', 14], ['n_2lk', 5], ['n_crouch', '*']] },
   '2LK': { startup: [['n_crouch', '*']], active: [['n_2lk', '*']], recovery: [['n_2lk', 4], ['n_crouch', '*']] },
   '2HP': { startup: [['n_crouch', '*']], active: [['n_2hp', '*']], recovery: [['n_2hp', 10], ['n_crouch', '*']] },
+  // 跳躍重攻擊、摔、系統動作（衝刺／炸毛）：cap = 非持續幀的受擊前緣封頂（跳 18、其他 22 = 原本方框前緣）
+  '8HP': { startup: [['n_japex', '*']], active: [['n_j_hp', '*']], recovery: [['n_j_hp', 3], ['n_japex', '*']], cap: 18 },
+  '8HK': { startup: [['n_japex', '*']], active: [['n_j_hk', '*']], recovery: [['n_j_hk', 3], ['n_japex', '*']], cap: 18 },
+  THROW: { startup: [['body_1', 2], ['n_th_grab', '*']], active: [['n_th_grab', '*']], recovery: [['n_th_grab', 8], ['body_1', '*']], cap: 22 },
+  VT: { recovery: [['n_vt_dash', 14], ['body_1', '*']], cap: 22 },
+  FDASH: { recovery: [['n_dash_f', 12], ['n_w9_contact', '*']], cap: 22 },
+  BDASH: { recovery: [['n_dash_b', 14], ['n_crouch', 4], ['body_1', '*']], cap: 22 },
   HADO: { fireball: true, startup: [['1', 1], ['1_5', 1], ['2', 2], ['3', 3], ['4', 2], ['5', '*']], recovery: [['6', 10], ['7', 10], ['7_5', 6], ['8', '*']] },
 };
 const ALIAS = { HADO_L: 'HADO', HADO_H: 'HADO', HADO_EX: 'HADO' };
@@ -22,16 +29,19 @@ export const FIT_IMAGES = [
   'body_1', 'body_1_5', 'body_2', 'body_3', 'body_4', 'body_5', 'body_6', 'body_7', 'body_7_5', 'body_8',
   'fxb_1', 'fxb_1_5', 'fxb_2', 'fxb_5', 'fxb_7', 'fxb_7_5', 'fxb_8', 'fxf_1', 'fxf_1_5', 'fxf_2', 'fxf_3', 'fxf_4', 'fxf_5', 'fxf_7_5', 'fxf_8',
   'a1', 'a4', 'a5', 'a8', 'n_a6fix', 'n_lowkick', 'n_walkB', 'n_2lp', 'n_2lk', 'n_2hp', 'n_sweep', 'n_crouch', 'n_cblock', 'n_sblock', 'n_crouchhit',
-  'n_hitL', 'n_hitH', 'n_kd', 'n_getup', 'n_jrise', 'n_japex', 'n_jfall', 'n_sland', 'n_w8_contact', 'n_w8_down', 'n_w8_pass', 'n_w8_up',
+  'n_hitL', 'n_hitH', 'n_kd', 'n_getup', 'n_jrise', 'n_japex', 'n_jfall', 'n_sland', 'n_wk0', 'n_wk1', 'n_wk3', 'n_wk8', 'n_wk11', 'n_wk5', 'n_w9_contact',
+  'n_j_hp', 'n_j_hk', 'n_th_grab', 'n_th_lift', 'n_th_slam', 'n_th_victim', 'n_th_tech', 'n_vt_dash', 'n_dash_f', 'n_dash_b', 'n_dz1', 'n_dz2',
   'n_dp1', 'n_dp2', 'n_dp3', 'n_dp4', 'n_ts1', 'n_ts2', 'n_ts3', 'n_ca0', 'n_ca_hi', 'n_ca_mid', 'n_ca_lo', 'n_ca_up', 'n_ca_ch', 'n_sk_charge', 'n_sk_thrust', 'n_sk_rec',
 ];
 
 export function createFit(E) {
   const NEUT = D.neutralOff, K = D.K;
-  // 8 張圖兩步走路：腳尖踩住的世界座標在一步內固定（p.x 的純函數）；前緣封頂 22 = 原本站姿前緣，走路時被打的距離不變
-  const WALK = { poses: ['n_w8_contact', 'n_w8_down', 'n_w8_pass', 'n_w8_up'], names: ['contact', 'down', 'passing', 'up'], toe: [195, 196, 72, 52], rearToe: 49, cap: 22 };
-  WALK.S = (WALK.toe[0] - WALK.rearToe) * K;
-  WALK.C = NEUT + WALK.toe.reduce((a, b) => a + b, 0) / 4 * K + WALK.S / 2;
+  // 走路 w10：每步 6 張（左右腳兩步共 12 格），站立腳釘在地上；Q = 每張圖身體累計前進（圖層 px），SL = 一步長。
+  // 是 p.x 的純函數；M = 一步內平均落後量，讓身體平均位置等於站姿。前緣封頂 22 = 原本站姿前緣，走路時被打的距離不變
+  const WALK = { poses: ['n_wk0', 'n_wk1', 'n_wk3', 'n_wk8', 'n_wk11', 'n_wk5'], names: ['contact', 'down', 'lift', 'passing', 'knee', 'reach'], Q: [0, 19.12, 43.77, 60.62, 80.72, 119.67], SL: 144, cap: 22 };
+  WALK.S = WALK.SL * K;
+  { let m = 0; for (let i = 0; i < 1000; i++) { const d = i / 1000 * WALK.SL; let j = 0; while (j + 1 < WALK.Q.length && WALK.Q[j + 1] <= d) j++; m += (WALK.Q[j] - d) / 1000; } WALK.M = m * K; }
+  const THROW_ID = E.MOVE_LIST.findIndex((m) => m.id === 'THROW');
   const SCHED = {};
   for (const mv of E.MOVE_LIST) {
     const a = MOVES[ALIAS[mv.id] ?? mv.id]; if (!a) continue;
@@ -45,7 +55,7 @@ export function createFit(E) {
       });
       if (used !== n) throw new Error(`ART ${mv.id} ${ph}: ${used} != ${n}`);
     }
-    SCHED[mv.id] = { arr, fireball: !!a.fireball };
+    SCHED[mv.id] = { arr, fireball: !!a.fireball, cap: a.cap ?? null };
   }
   const sc = (img) => D.scale[img] || [1, 0];
   function special(p, mv) {
@@ -86,12 +96,15 @@ export function createFit(E) {
       const q = S.arr[Math.min(p.mt, S.arr.length - 1)] || S.arr[1], [s, dx] = sc(q.img), fm = D.moves[mv.id];
       const off = q.ph === 'active' && fm ? fm.offA : NEUT + dx;
       // 起手：前緣封頂在原本站姿 22／蹲姿 24（起手圖前傾，不封頂會被輕拳搶先）；持續幀用擬合封頂；收招不封頂（引擎再補原本的伸出框）
-      return { img: q.img, tag: q.tag, off, s, ph: q.ph, fb: S.fireball, id: mv.id, box: q.img, cap: q.ph === 'active' && fm ? fm.cap : q.ph === 'startup' ? (mv.posture === 'crouch' ? 24 : 22) : null };
+      return { img: q.img, tag: q.tag, off, s, ph: q.ph, fb: S.fireball, id: mv.id, box: q.img, cap: q.ph === 'active' && fm ? fm.cap : S.cap != null ? S.cap : q.ph === 'startup' ? (mv.posture === 'crouch' ? 24 : 22) : null };
     }
     if (st === N.IDLE && p.vx !== 0) {
-      const S = WALK.S, w = p.x * p.f, k = Math.floor(w / S), d = w - k * S, q = Math.min(3, Math.floor(d / S * 4));
-      return { img: WALK.poses[q], off: WALK.C - WALK.toe[q] * K - d, s: 1, ph: p.vx * p.f > 0 ? 'walkF' : 'walkB', key: WALK.names[q], box: WALK.poses[q], cap: WALK.cap };
+      const S = WALK.S, w = p.x * p.f, k = Math.floor(w / S), d = w - k * S, nP = WALK.poses.length;
+      let q = 0; while (q + 1 < nP && WALK.Q[q + 1] * K <= d) q++;
+      const slot = q + nP * (((k % 2) + 2) % 2), img = WALK.poses[q];
+      return { img, off: NEUT + sc(img)[1] + WALK.Q[q] * K - d - WALK.M, s: 1, ph: p.vx * p.f > 0 ? 'walkF' : 'walkB', key: WALK.names[q] + (slot >= nP ? '2' : '1'), slot, box: img, cap: WALK.cap };
     }
+    if (st === N.LAND && p.mv === THROW_ID && THROW_ID >= 0) return mk('n_th_slam', 'throw_recover', { cap: 22 });   // 摔完的收招（引擎在 LAND 標 mv = THROW）
     if (st === N.LAND && p.t > 3) return mk('n_sland', 'land_special');
     if (st === N.IDLE) return mk('body_1', 'idle');
     if (st === N.CROUCH || st === N.PREJUMP || st === N.LAND) return mk('n_crouch', 'crouch');
@@ -99,9 +112,11 @@ export function createFit(E) {
     if (st === N.HIT) return p.cr ? mk('n_crouchhit', 'hit_crouch') : { ...mk('n_hitL', 'hit_stand'), box: 'hit_stand' };
     if (st === N.KD) return p.t <= 16 && p.y === 0 ? mk('n_getup', 'getup') : mk(p.y === 0 ? 'n_kd' : 'n_hitH', 'kd');
     if (st === N.KO) return mk('n_kd', 'ko');
-    if (st === N.AIRHIT || st === N.THROWN) return mk('n_hitH', 'airhit');
-    if (st === N.DIZZY) return mk('n_hitL', 'dizzy');
-    if (st === N.TECH) return mk('n_getup', 'tech');
+    if (st === N.AIRHIT) return mk('n_hitH', 'airhit');
+    if (st === N.THROWN) return mk('n_th_victim', 'thrown');   // 引擎被摔時受擊判定本來就是空的；翻轉角度由前端畫
+    if (st === N.THROWING) { const n = E.THROW_ANIM - p.t; return p.t > E.THROW_ANIM ? mk('n_th_grab', 'throw_hold') : n <= 12 ? mk('n_th_lift', 'throw_lift') : mk('n_th_slam', 'throw_slam'); }
+    if (st === N.DIZZY) return mk(Math.floor(p.t / 20) % 2 ? 'n_dz2' : 'n_dz1', 'dizzy', { cap: 22 });
+    if (st === N.TECH) return mk('n_th_tech', 'tech', { cap: 22 });
     if (st === N.JUMP) return p.vy < -4 ? mk('n_jrise', 'jump_rise') : p.vy > 4 ? mk('n_jfall', 'jump_fall') : mk('n_japex', 'jump_apex');
     return { img: null, off: NEUT, s: 1, ph: 'other', box: null, cap: null };
   }
