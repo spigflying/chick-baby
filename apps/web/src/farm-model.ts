@@ -107,10 +107,15 @@ export function expandOffer(p: FarmPayload, idx: number): { kind: 'open' } | { k
   return { kind: 'buy', cost: FARM.expand.costs[k] };
 }
 
-/** 蛋殼動作列上的「農場」格子：開關沒開就不出現，手機上變灰。 */
+/** 頁面右上角的「農場」按鈕：開關沒開就不出現，手機上變灰。 */
 export function farmCellState(cfgFarm: boolean, touch: boolean): 'hidden' | 'disabled' | 'enabled' {
   if (!cfgFarm) return 'hidden';
   return touch ? 'disabled' : 'enabled';
+}
+
+/** 右上角「農場」要打開誰的：正在看某個家就是那個家主人的，否則是自己的。 */
+export function farmOwnerFor(homeOwnerId: string | null | undefined, meId: string): string {
+  return homeOwnerId ?? meId;
 }
 
 /** 背景重讀失敗時怎麼辦：沒有權限了（被黑名單、家關起來、登出）就關掉農場；其他錯誤先暫停自動重讀，等下一次成功的操作。 */

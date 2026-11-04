@@ -7,6 +7,7 @@ import { Live } from './ws';
 import { racePage } from './race';
 import { FightView } from './fight-view';
 import { FarmView } from './farm-view';
+import { farmCellState, farmOwnerFor } from './farm-model';
 let pageOff: (() => void) | null = null;
 import { Device } from './device';
 import { drawShell } from './shell';
@@ -39,9 +40,16 @@ function renderBar() {
   if (!me) { bar.hidden = true; return; }
   bar.hidden = false;
   const p = location.pathname;
+  const farmBtn = farmCellState(!!cfg?.farm, globalThis.matchMedia?.('(pointer:coarse)').matches ?? false);
   const link = (href: string, t: string, on: boolean) => `<a data-nav href="${href}" class="${on ? 'on' : ''}">${t}</a>`;
   bar.innerHTML = `<span class="who">🐣 <b>${esc(me.user.display_name)}</b></span><span class="coin" id="barCoins">${coinHtml(wallet)}</span><span>分享碼 <span class="code">${esc(me.user.share_code)}</span></span>
-    <nav>${link('/', '我的家', p === '/')}${link('/visit', '去拜訪', p === '/visit' || p.startsWith('/home/'))}${link('/race', '賽車', p === '/race')}${link('/settings', '家的設定', p === '/settings')}${me.user.role === 'admin' ? link('/admin', '管理', p === '/admin') : ''}<a href="#" id="logout">登出</a></nav>`;
+    <nav>${link('/', '我的家', p === '/')}${link('/visit', '去拜訪', p === '/visit' || p.startsWith('/home/'))}${link('/race', '賽車', p === '/race')}${link('/settings', '家的設定', p === '/settings')}${me.user.role === 'admin' ? link('/admin', '管理', p === '/admin') : ''}<a href="#" id="logout">登出</a></nav>${farmBtn !== 'hidden' ? `<button type="button" id="barFarm" class="barfarm${farmBtn === 'disabled' ? ' dis' : ''}">🌱 農場</button>` : ''}`;
+  const fb = document.getElementById('barFarm');
+  if (fb) fb.onclick = () => {
+    if (farmBtn === 'disabled') return toast('農場只能用電腦玩');
+    const owner = farmOwnerFor(device?.home?.owner.id, me.user.id);
+    void farmView?.open(owner, owner === device?.home?.owner.id ? device?.pet?.species ?? null : null);
+  };
   $('#logout').onclick = async (e) => { e.preventDefault(); await api('POST', '/auth/logout'); live?.stop(); live = null; idleOff?.(); idleOff = null; me = null; nav('/', true); };
 }
 function setWallet(n: number) { wallet = n; const c = document.getElementById('barCoins'); if (c) c.innerHTML = coinHtml(n); device?.renderTop(); }
@@ -81,7 +89,7 @@ async function loginPage() {
 async function homePage(homeId: string) {
   device?.destroy();
   app.innerHTML = `<main class="page"><div class="presrow" id="presRow"></div><div id="devSlot"></div><div class="panel" id="side"></div></main>`;
-  device = new Device({ me: me.user, cfg, live: live!, wallet: () => wallet, setWallet, toast, goHome: () => nav('/'), goStairsRoom: () => nav('/stairs-room'), startFight: () => fightView?.chooseOpponent(), openFarm: (id, species) => void farmView?.open(id, species) });
+  device = new Device({ me: me.user, cfg, live: live!, wallet: () => wallet, setWallet, toast, goHome: () => nav('/'), goStairsRoom: () => nav('/stairs-room'), startFight: () => fightView?.chooseOpponent() });
   $('#devSlot').replaceWith(device.el);
   try {
     const view = await api('GET', `/homes/${homeId}`);

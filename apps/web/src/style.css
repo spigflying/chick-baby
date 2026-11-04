@@ -10,6 +10,9 @@ a{color:#ffd23f}
 .bar .coin{color:#ffd23f}
 .bar nav{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
 .bar nav a{color:#fff;text-decoration:none;padding:3px 7px;border:2px solid #4a3466}
+.barfarm{font:inherit;font-weight:700;color:#000;background:#7fd6b4;border:2px solid #000;padding:3px 10px;cursor:pointer;box-shadow:2px 2px 0 #000}
+.barfarm:hover{background:#a3e8cc}
+.barfarm.dis{background:#6b6280;color:#cfc8dc;cursor:not-allowed}
 .bar nav a.on{background:#ffd23f;color:#000;border-color:#000}
 .code{font-family:'Press Start 2P',monospace;font-size:11px;background:#000;color:#7ee07e;padding:2px 5px;letter-spacing:1px}
 main.page{max-width:980px;margin:0 auto;padding:10px;display:flex;flex-wrap:wrap;gap:14px;justify-content:center;align-items:flex-start}
@@ -331,6 +334,8 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .farm[hidden]{display:none}
 .farm button{font-family:inherit}
 .farm button:focus-visible,.farm .hit:focus-visible{outline:3px solid var(--f-pink-d);outline-offset:2px}
+/* 滑鼠點 SVG 物件時 Chrome 會套預設的藍色 outline（:focus），只留鍵盤操作時的粉紅框 */
+.farm .hit:focus:not(:focus-visible){outline:none}
 .farm-top{width:min(100%,1100px);display:flex;align-items:center;justify-content:space-between}
 .farm-title{font-size:22px;letter-spacing:.03em}
 .farm-x{all:unset;cursor:pointer;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:#fff;box-shadow:0 3px 0 rgba(200,140,110,.3);font-size:18px}

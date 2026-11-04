@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ALWAYS_OPEN, applyFarm, describeFarm, newFarm, applyHelp, FARM_ERROR_CODES, type FarmState } from '@chick/engine';
-import { remainText, fieldBadge, plantChoices, hudModel, helpTargets, FARM_ERR, farmCellState, loadErrorAction, feedChoices, stallDefaults, expandOffer, panelValid, type FarmPayload } from '../src/farm-model';
+import { remainText, fieldBadge, plantChoices, hudModel, helpTargets, FARM_ERR, farmCellState, farmOwnerFor, loadErrorAction, feedChoices, stallDefaults, expandOffer, panelValid, type FarmPayload } from '../src/farm-model';
 
 const T0 = Date.parse('2026-11-02T10:00:00+08:00');
 const M = 60_000;
@@ -78,6 +78,15 @@ describe('farmCellState', () => {
     expect(farmCellState(false, true)).toBe('hidden');
     expect(farmCellState(true, true)).toBe('disabled');
     expect(farmCellState(true, false)).toBe('enabled');
+  });
+});
+
+describe('farmOwnerFor', () => {
+  it('opens the farm of the home being viewed, otherwise my own', () => {
+    expect(farmOwnerFor('u-friend', 'u-me')).toBe('u-friend');
+    expect(farmOwnerFor('u-me', 'u-me')).toBe('u-me');
+    expect(farmOwnerFor(null, 'u-me')).toBe('u-me');
+    expect(farmOwnerFor(undefined, 'u-me')).toBe('u-me');
   });
 });
 

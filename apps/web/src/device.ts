@@ -9,7 +9,6 @@ import { accessoryLine } from './accLine';
 import { act, api, errText } from './api';
 import { savePetCache } from './sleep';
 import type { Live } from './ws';
-import { farmCellState } from './farm-model';
 import { StairsClient } from './stairs';
 import { boardHtml, stairsResultHtml, type Board } from './board';
 import { inviteHtml, inviterHtml, multiResultHtml, raceNotice, rankText, stairsNotice, type StairsInvite } from './mstairs';
@@ -30,7 +29,6 @@ export interface Ctx {
   /** 下樓梯房：回到房間頁 */
   goStairsRoom?: () => void;
   /** 打開這個家主人的農場（全頁）；species＝主人目前寵物的物種，決定農場小雞的顏色 */
-  openFarm?: (ownerId: string, species?: string | null) => void;
 }
 /** 便便位置：從右往左排在地上，一排 16 個，超過就往上疊（玫瑰茶最多 23 個）。 */
 export function poopXY(i: number) { const row = Math.floor(i / 16), col = i % 16; return { x: W - 9 - col * 7, y: GROUND - 5 - (col % 2) * 3 - row * 7 }; }
@@ -422,9 +420,6 @@ export class Device {
         { act: 'clean', icon: 'i_wash', label: '清潔' }, { act: 'doctor', icon: 'i_doc', label: '醫生' }, { act: 'shop', icon: 'i_shop', label: '服飾' }, { act: 'status', icon: 'i_stat', label: '狀態' }];
     } else if (!p || p.status !== 'alive') cells = [{ act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'play', icon: 'i_play', label: '樓梯' }, { act: 'home', icon: 'i_home', label: '回家' }];
     else cells = [{ act: 'feed', icon: 'i_feed', label: '餵食' }, { act: 'play', icon: 'i_play', label: '樓梯' }, { act: 'shop', icon: 'i_shop', label: '服飾' }, { act: 'status', icon: 'i_stat', label: '狀態' }, { act: 'home', icon: 'i_home', label: '回家' }];
-    // 小雞農場：開關沒開不出現；手機上變灰（只限電腦）。放在最後一格（狀態／回家）前面
-    const fs = farmCellState(!!this.ctx.cfg?.farm, this.ctx.live.touch);
-    if (fs !== 'hidden') cells.splice(Math.max(0, cells.length - 1), 0, { act: 'farm', icon: 'i_farm', label: '農場', dis: fs === 'disabled' });
     const key = cells.map((c) => c.act + (c.dis ? '-' : '')).join(',');
     const box = this.$('.labels');
     if (box.dataset.key === key) return;
@@ -648,7 +643,6 @@ export class Device {
     if (a === 'shop') { this.openMenu('shop'); void this.refreshOutfits(); return; }
     if (a === 'home') return this.ctx.goHome();
     if (a === 'hatch') return this.openMenu('hatch');
-    if (a === 'farm') { if (this.cells[i]?.dis) return this.say('農場只能用電腦玩'); if (this.home) this.ctx.openFarm?.(this.home.owner.id, this.pet?.species ?? null); return; }
     if (a === 'play' && !this.isOwner) return this.openBoard(); // 訪客：只能一起下樓梯（用自己的寵物）
     if (!p) return;
     if (p.status === 'egg') return this.say('蛋蛋還在孵化中…');
