@@ -313,9 +313,9 @@ export async function adminRevive(db: Db, ctx: ReqCtx, petId: string, requestId:
   }, { type: 'pet', id: petId });
 }
 
-export function publicConfig() {
+export function publicConfig(opts: { farm?: boolean } = {}) {
   const { FOODS, STAIRS_PARAMS, ENGINE_VERSION } = engine;
-  return { species: Object.values(SPECIES), foods: FOODS, game: { timeScale: GAME.timeScale, eggSeconds: GAME.eggSeconds, feed: GAME.feed, stairsMinEnergy: GAME.stairsMinEnergy }, stairs: STAIRS_PARAMS, engine_version: ENGINE_VERSION, dev_login: env.devLogin, google_client_id: env.googleClientId, open_hours: env.openHours || null };
+  return { species: Object.values(SPECIES), foods: FOODS, game: { timeScale: GAME.timeScale, eggSeconds: GAME.eggSeconds, feed: GAME.feed, stairsMinEnergy: GAME.stairsMinEnergy }, stairs: STAIRS_PARAMS, engine_version: ENGINE_VERSION, dev_login: env.devLogin, google_client_id: env.googleClientId, open_hours: env.openHours || null, farm: opts.farm ?? env.farmEnabled };
 }
 
 export async function dailyMaintenance(db: Db) {

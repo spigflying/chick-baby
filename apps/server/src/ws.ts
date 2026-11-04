@@ -160,6 +160,9 @@ export function setupWs(app: FastifyInstance, db: Db, bus: Bus, gate: DbGate) {
         const targets = [...conns].filter((c) => c.user.id === m.user); if (!targets.length) return;
         const w = await db.selectFrom('wallets').select('balance').where('user_id', '=', m.user).executeTakeFirst();
         for (const c of targets) send(c, { type: 'wallet.updated', balance: w?.balance });
+      } else if (m.t === 'farm') {
+        // 農場有變化：主人本人（任何分頁）和正在主人家裡的人重新讀取
+        for (const c of conns) if (c.user.id === m.user || (m.home && c.homeId === m.home)) send(c, { type: 'farm.updated', user: m.user });
       } else if (m.t === 'access') {
         const home = await getHome(db, m.home); if (!home) return;
         for (const c of inHome(m.home)) if (!(await canEnter(db, home, c.user.id))) { leaveHome(c); send(c, { type: 'home.kicked', home_id: m.home }); }

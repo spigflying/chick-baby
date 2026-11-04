@@ -11,3 +11,4 @@ export * from './racing';
 export * from './racing-mapfirst';
 export * from './sfv';
 export * from './sfv-room';
+export * from './farm';

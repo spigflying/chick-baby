@@ -11,5 +11,7 @@ export const env = {
   openHours: process.env.OPEN_HOURS ?? '', // 例：mon-fri 09:00-20:00 Asia/Taipei；空 = 永遠開放
   secureCookies: process.env.NODE_ENV === 'production',
   webDist: process.env.WEB_DIST ?? '',
+  /** 小雞農場開關：FARM_ENABLED=1 才有農場 API 與前端入口（農場在 farm 分支開發，跟格鬥分開上線） */
+  farmEnabled: process.env.FARM_ENABLED === '1',
   instanceId: process.env.K_REVISION ? `${process.env.K_REVISION}-${Math.random().toString(36).slice(2, 8)}` : `local-${process.pid}`,
 };

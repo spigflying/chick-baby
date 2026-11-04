@@ -1,9 +1,15 @@
-# 小雞寶寶 多人版 — 需求文件 v1.9
+# 小雞寶寶 多人版 — 需求文件 v2.0
 
-> 版本：v1.9（2026-10-21）　｜　v1.8：一起下樓梯（2026-10-21）　｜　v1.7：寶（進化）　｜　v1.6（2026-10-14）　｜　v1.5：2026-10-14　｜　v1.4：2026-10-14　｜　v1.3：2026-10-14　｜　v1.2：2026-10-14　｜　v1.1：2026-10-13　｜　v1：2026-10-13（`de26acf`）
+> 版本：v2.0（2026-11-03，小雞農場，`FARM_ENABLED` 開關，預設關閉）　｜　v1.9（2026-10-21）　｜　v1.8：一起下樓梯（2026-10-21）　｜　v1.7：寶（進化）　｜　v1.6（2026-10-14）　｜　v1.5：2026-10-14　｜　v1.4：2026-10-14　｜　v1.3：2026-10-14　｜　v1.2：2026-10-14　｜　v1.1：2026-10-13　｜　v1：2026-10-13（`de26acf`）
 > 原則：**先做出能上線的版本，同時保留擴充性**（對戰、合體、更多物種）。
 > 標記：**【預設】** = 尚未定案，先照此實作，之後可以在 `game_config` 或後續版本調整（見第 13 節）。
 > 現有單人原型（repo 根目錄的 `index.html` / `script.js` / `style.css`，https://spigflying.github.io/chick-baby/）**維持不動**，新版另建於 monorepo 資料夾。
+
+**v2.0 變更摘要**（小雞農場，詳見 §4.12；設計文件 `docs/superpowers/specs/2026-11-03-farm-design.md`）
+- **新玩法：小雞農場**（只限電腦）。種田、養動物（兔兔、母雞）、果樹、加工（烘焙屋、果醬工坊）、訂單看板、倉庫、等級解鎖、好友幫忙澆水／救枯樹。全頁彩色插畫畫面，跟蛋殼的像素風刻意不同。
+- **開關**：伺服器環境變數 `FARM_ENABLED=1` 才有農場 API、`/api/config` 的 `farm: true` 與蛋殼動作列的「農場」格子；沒設＝完全看不到。農場在 `farm` 分支開發，跟格鬥分開上線。
+- 金幣共用錢包 ◎（帳本 reason 新增 `farm_seed`、`farm_sell`、`farm_order`、`farm_upgrade`、`farm_level`、`farm_rescue`）；不能偷菜；跟寵物不連動；計時只算開放時間。
+- 新資料表 `farms`、`farm_help`（migration `0011_farm`）。
 
 **v1.9 變更摘要**（一起下樓梯改成各玩各的，詳見 §4.4、§5.1）
 - **寵物之間不再碰撞、推擠**：同一個畫面、同一組平台，但可以互相重疊、穿過，碰不到對方。取消推力／質量、`pushVx`、「被○○推」（`stair_match_players.eliminated_by_pet_id` 留著但一律是 `null`）。
@@ -324,6 +330,28 @@
 - **測試／開發**：`POST /api/admin/pets/:id/evolve`（管理員，任何寵物）；`DEV_LOGIN=1` 時 `POST /api/dev/pets/:id/evolve`（只能自己的寵物）立即進化。
 - 頂部列金幣改用 9×9 像素金幣圖示（取代 ◎ 字）。
 
+### 4.12 小雞農場（v2.0，`FARM_ENABLED=1` 才開放）
+
+- **入口**：蛋殼動作列最後一格之前的「農場」。主人看自己的農場；在別人家看的是那個家主人的農場（唯讀＋幫忙）。手機（觸控裝置）上格子是灰的，點了顯示「農場只能用電腦玩」。伺服器不檢查裝置。
+- **規則全部在引擎**（`packages/engine/src/farm.ts`，純函式）；伺服器把整座農場存成 `farms.state jsonb`，`FOR UPDATE` 鎖住後套用動作再寫回。主人的動作都走 `POST /api/farm/act`（冪等 `request_id`、稽核 `farm.act`、開放時間檢查、每人每分鐘 ≤ 60 次）。
+- **田地** 12 格（Lv1 開 6 格，Lv2/3/5/6/8/10 各多 1 格）；作物：小麥（2 分）、胡蘿蔔（30 分）、草莓（Lv3，2 小時）、愛心南瓜（Lv3，60 分，用友情點數 3 點）。外觀四段：剛播種、發芽（< 50%）、長葉子（< 100%）、可收成。
+- **動物**：兔兔窩（Lv2，吃胡蘿蔔 → 2 小時後毛線球）、雞舍（Lv4，吃小麥 ×2 → 90 分後蛋），各 2 隻。**加工**：烘焙屋（Lv4，小麥 ×2＋蛋 → 60 分麵包）、果醬工坊（Lv6，草莓 ×3 → 2 小時果醬），佇列 2 格、可用 ◎80／◎160 加到 4 格。**果樹**：2 小時結 3 個蘋果；可收成後 8 小時（開放時間）沒收就枯，好友救免費、自己救 ◎30。
+- **倉庫**：初始 50 格，升級每次 +25（◎100 × 2^等級，最多 6 次）；友情點數換 +5 格（第 n 次 10 × n 點）。滿了不能收；「全部收成」依成品 → 動物產物 → 果樹 → 田的順序收到滿為止，沒收的維持可收成。可以直接賣給系統（賣價 ≈ 成本）。
+- **訂單**：Lv1–2 3 張、Lv3–4 4、Lv5–7 5、Lv8+ 6；每張 1–3 種、各 1–3 個，金幣＝賣價總和 ×1.8，經驗＝內容物經驗 ×2；交貨或丟掉後那一格分別等 90 分／10 分（開放時間）補新的。只出已解鎖、做得出來的東西（決定性：seed + 序號）。
+- **等級**：升到下一級要 30 × 等級經驗，獎勵 ◎2 × 新等級，最高 Lv20。
+- **好友幫忙**（`POST /api/farm/:id/help`）：進得了主人的家（§4.2）就能幫；澆水＝還在長的田剩餘時間 −20%（每輪一次）、救枯樹；每人每天 10 次、同一座農場 5 次（Asia/Taipei 日期）；每次 +1 友情點數；主人下次打開農場時看到「X 幫你澆了水」。自己不能幫自己（`HELP_SELF`）。
+- **經濟**（`packages/engine/scripts/sim-farm.ts`，含第二階段內容）：一天上線 4 次的玩家第 3–5 天平均 ◎167–232／天；每 15 分鐘看一次第 2–5 天平均 ◎277–357、5 天內單日最高 ◎498。30 天、星期一到五、第 8 天起平均：4 次 ◎139–195，每 15 分鐘 ◎205–236（測試上限 ◎300／◎450）。賣價 ≥ ◎14 的東西（果醬、蜂蜜蛋糕、起司）在訂單裡每種最多 2 個。
+- **第二階段（v2.1，同一個開關；設計文件 `docs/superpowers/specs/2026-11-04-farm-phase2-design.md`）**：
+  - **東邊新地**：主畫面小路右端的路牌「東邊新地」（Lv5 開放）切到第二個畫面；左端「回農場」。
+  - **加買田**：田 13–18，照順序用金幣買（`expand`）：Lv7／9／11／13／15／17，◎120／200／300／450／650／900（`farm_expand`）。
+  - **蜂箱**（Lv8，草莓 → 3 小時蜂蜜）、**牛棚**（Lv10，小麥 ×3 → 2 小時牛奶），各 2 隻；烘焙屋加「蜂蜜蛋糕」（Lv9，小麥 ×2＋蛋＋蜂蜜，90 分）；**起司小屋**（Lv12，牛奶 ×2 → 2 小時起司）。賣價：蜂蜜 9、牛奶 5、蜂蜜蛋糕 18、起司 14。
+  - **熱氣球貨運**（Lv7）：4 個貨箱（每箱一種東西 ×3–6，決定性），停 6 小時、飛走 3 小時再來（開放時間）。裝滿一箱拿 賣價 × 數量 × 1.5（四捨五入）和經驗；4 箱全裝好「出發」再 ◎20＋30 經驗（`farm_balloon`）。主人打開農場（GET）時也會存檔，排班才不會每次重算。
+  - **裝飾**：8 種（◎40–200 或友情 15／30 點，`farm_deco`），買了放收納，擺到東邊新地 6 個裝飾格，可收回、可換；純外觀，訪客看得到。
+  - **小攤**（Lv5，4 格）：主人從倉庫上架（1–10 個，價格＝賣價 × 數量 的 1–3 倍），可下架。訪客在主人的東邊新地買：`POST /api/farm/:id/buy`，金幣直接從買的人轉給主人（`farm_stall_buy` −／`farm_stall_sale` ＋），東西進買的人倉庫；每人每天 10 次（`farm_stall_buys`）；自己不能買（`BUY_SELF`）；兩座農場與兩個錢包依 id 排序上鎖，同一格只會賣出一次。主人打開農場時看到「X 買了你的 …」。
+  - **餵寵物**：`POST /api/farm/feed-pet {item}` 拿倉庫的東西餵自己目前的寵物，不花金幣，檢查與效果跟蛋殼餵食一樣（`checkFeed`／`applyFood`）；寵物事件 `feed` 的 `food` 是 `farm:<品項>`。能吃：胡蘿蔔、草莓（點心）、愛心南瓜、蘋果、麵包、果醬（點心）、蜂蜜（點心）、牛奶、蜂蜜蛋糕（點心）、起司。
+  - **小雞澆水**（跟寵物連動）：寵物活著時，主人點還在長的田可以「小雞澆水」（剩餘 −20%，跟好友澆水分開算）；每天（台北日期）1 次，寵物體力 ≥ 30、≥ 60 各多 1 次（`NO_PET`、`CHICK_TIRED`）。
+- **即時**：農場有變化時 `NOTIFY {t:'farm'}`，主人本人和正在主人家裡的人收到 `farm.updated` 後重新讀取。
+
 ## 5. M2 網路同步規格（v1.8 上線）
 
 > 單人模式（M1）先實作其中的時鐘同步、輸入緩衝與自身預測；M2 再加上他人插值（v1.9 取消推擠，所以沒有推擠校正）。
@@ -465,6 +493,9 @@ Cloud SQL for PostgreSQL ─────────────────┘
 | `stair_match_players` | match_id, user_id, pet_id, rank, floors, eliminated_at_tick, eliminated_by_pet_id, coins_awarded | |
 | `game_config` | key, value (jsonb), updated_by, updated_at | |
 | `audit_log` | id, at, user_id, action, target_type, target_id, result, detail (jsonb), ip（30 天後清成 NULL）, user_agent, request_id | 只新增 |
+| `farms`（v2.0） | user_id (PK), state (jsonb：整座農場，見 §4.12), updated_at | 一人一座 |
+| `farm_help`（v2.0） | id, helper_id, owner_id, day (date, Asia/Taipei), kind (`water`/`rescue`), target, created_at | 每日幫忙上限 |
+| `farm_stall_buys`（v2.1） | id, buyer_id, seller_id, day (date, Asia/Taipei), item, qty, price, created_at | 小攤每日購買上限 |
 
 ## 10. API 與事件
 
@@ -489,6 +520,12 @@ Cloud SQL for PostgreSQL ─────────────────┘
 | GET | `/pets/:id/events`、`/users/me/pets` | 歷史（屋主）、自己所有寵物 |
 | GET | `/admin/users`、`/admin/users/:id/pets` | 管理員（不含 email） |
 | POST | `/admin/pets/:id/revive` | 管理員復活 |
+| GET | `/farm/:id` | 農場（`:id`＝主人 user id；主人第一次讀時建立；訪客看不到 `helpLog`）（v2.0，`FARM_ENABLED`） |
+| POST | `/farm/act` | 主人的所有農場動作 `{action: {type, …}, request_id}`（v2.0） |
+| POST | `/farm/:id/help` | 幫忙 `{kind: water/rescue, idx?, request_id}`（v2.0） |
+| POST | `/farm/:id/buy` | 買小攤 `{slot, request_id}` → `{ok, balance, item, qty, price}`（v2.1） |
+| POST | `/farm/feed-pet` | 拿倉庫的東西餵自己的寵物 `{item, request_id}` → `{ok, pet, state, derived}`（v2.1） |
+| GET | `/farm/friends` | 最近拜訪／邀請我的家裡有農場的人與 `needs_help`（v2.0） |
 
 **WebSocket**（`wss://…/ws`）
 
@@ -497,6 +534,7 @@ Cloud SQL for PostgreSQL ─────────────────┘
 | C→S | `home.join` / `home.leave` | home_id |
 | C→S | `pet.action` | `{pet_id, action: feed/clean/sleep/wake/doctor, food_id?, request_id}`（訪客只能 `feed` 付費食物） |
 | S→C | `home.presence`、`pet.updated`、`wallet.updated`、`home.kicked` | |
+| S→C | `farm.updated` | `{user}`：這座農場有變化（v2.0） |
 | C↔S | `time.ping` / `time.pong` | 時鐘同步 |
 | C→S | `match.create` / `match.leave` | 單人局；`match.leave` 在多人局中＝出局 |
 | C→S | `stairs.invite` / `stairs.reply {invite, accept}` / `stairs.cancel` | 多人局（v1.8）：在目前的家發起／回覆／發起人取消 |
@@ -522,6 +560,7 @@ Cloud SQL for PostgreSQL ─────────────────┘
 
 - 維持復古像素風：彩色像素蛋殼 + Game Boy 四色綠（`#9bbc0f` `#8bac0f` `#306230` `#0f380f`）。
 - 【預設】寵物、家、下樓梯在蛋殼螢幕內；登入、找家、管理頁等大廳介面在蛋殼外，使用同一套像素風格。
+- 小雞農場（v2.0）是全頁彩色可愛插畫風（向量 SVG、圓體「粉圓」），刻意跟蛋殼的像素風不同。
 
 ## 13. 待確認問題（先照【預設】實作）
 

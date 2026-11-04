@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
 import { createDb } from '../src/db';
-import { migrateToLatest } from '../src/migrations';
+import { migrateToLatest, migrations } from '../src/migrations';
 import { buildApp } from '../src/app';
 import { Bus } from '../src/bus';
 import { createSolo, finish, handleInput, startStairsLoop, matches } from '../src/stairs';
@@ -758,10 +758,10 @@ describe('home fight 1v1', () => {
       { user_id: a.id, item_id: 'kame', fights_left: 2 },
       { user_id: a.id, item_id: 'poop', fights_left: 3 },
     ]).execute();
-    const rerun = async () => {
-      await sql`DELETE FROM kysely_migration WHERE name = '0010_home_fight_1v1_refund'`.execute(db);
-      await migrateToLatest(db as any);
-    };
+    // 直接重跑這支 migration 的 up（刪 kysely_migration 那一列再 migrateToLatest，在它後面還有新 migration 時會被判定 corrupted）。
+    // 它的 up 會把 coin_ledger_reason_check 改回 0010 當時的清單，所以先存下目前的定義、結束後還原。
+    const check = (await sql<{ def: string }>`SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conname = 'coin_ledger_reason_check'`.execute(db)).rows[0].def;
+    const rerun = () => migrations['0010_home_fight_1v1_refund'].up(db as any);
     try {
       await rerun();
       expect((await db.selectFrom('wallets').select('balance').where('user_id', '=', a.id).executeTakeFirstOrThrow()).balance).toBe(260); // 20 + 7×15 + 2×60 + 3×5
@@ -772,7 +772,7 @@ describe('home fight 1v1', () => {
       expect((await db.selectFrom('wallets').select('balance').where('user_id', '=', a.id).executeTakeFirstOrThrow()).balance).toBe(260);
       expect(await db.selectFrom('coin_ledger').select('id').where('user_id', '=', a.id).where('reason', '=', 'item_refund').execute()).toHaveLength(1);
     } finally {
-      await migrateToLatest(db as any);
+      await sql.raw(`ALTER TABLE coin_ledger DROP CONSTRAINT coin_ledger_reason_check; ALTER TABLE coin_ledger ADD CONSTRAINT coin_ledger_reason_check ${check}`).execute(db);
     }
   });
 });
