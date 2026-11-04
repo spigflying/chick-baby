@@ -1,7 +1,7 @@
 // 小雞農場第二階段（docs/superpowers/specs/2026-11-04-farm-phase2-design.md）
 import { describe, expect, it } from 'vitest';
 import {
-  genBalloon, stallBuy,
+  genBalloon, stallBuy, FARM_FOODS, takeFarmFood, checkFeed, applyFood, newPet, createRng,
   ALWAYS_OPEN, makeClock, parseOpenHours,
   newFarm, loadFarm, applyFarm, applyHelp, describeFarm, fieldOpen, chickWaterLimit, FarmError, FARM, FARM_ITEMS, DECOS, ANIMALS, RECIPES,
   type FarmState, type FarmItemId,
@@ -224,6 +224,26 @@ describe('stall', () => {
     expect(code(() => stallBuy(seller, buyer, 1, { id: 'b', name: 'Bob' }, T0))).toBe('NO_LISTING');
     expect(code(() => stallBuy(seller, buyer, 9, { id: 'b', name: 'Bob' }, T0))).toBe('BAD_REQUEST');
     applyFarm(seller, { type: 'ackSales' }, T0, C); expect(seller.saleLog).toEqual([]);
+  });
+});
+
+describe('farm foods', () => {
+  it('edible list and stats per spec', () => {
+    expect(Object.keys(FARM_FOODS).sort()).toEqual(['apple', 'bread', 'carrot', 'cheese', 'honey', 'honeycake', 'jam', 'milk', 'pumpkin', 'strawberry']);
+    expect(FARM_FOODS.bread).toMatchObject({ id: 'farm:bread', name: '麵包', price: 0, snack: false, visitorAllowed: false, hunger: 30, stamina: 3 });
+    expect(FARM_FOODS.honeycake).toMatchObject({ snack: true, happiness: 35, health: -3, weight: 4 });
+  });
+  it('takeFarmFood takes one from the barn and works with the pet rules', () => {
+    const s = fresh(1); give(s, 'carrot', 1); give(s, 'wheat', 2);
+    expect(code(() => takeFarmFood(s, 'wheat'))).toBe('NOT_EDIBLE');
+    expect(code(() => takeFarmFood(s, 'nope'))).toBe('BAD_REQUEST');
+    expect(code(() => takeFarmFood(s, 'apple'))).toBe('NOT_ENOUGH_ITEMS');
+    const f = takeFarmFood(s, 'carrot');
+    expect(s.inv).toEqual({ wheat: 2 });
+    const p = newPet('chicken', T0); p.status = 'alive'; p.hunger = 40;
+    expect(checkFeed(p, f, { isOwner: true, visitorCountPet: 0, visitorCountMine: 0, balance: 0 })).toBeNull();
+    applyFood(p, f, T0, createRng(1));
+    expect(p.hunger).toBe(55); expect(p.speed).toBe(12);
   });
 });
 
