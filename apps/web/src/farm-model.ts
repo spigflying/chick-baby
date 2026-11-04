@@ -88,12 +88,15 @@ export function feedChoices(p: FarmPayload): { item: FarmItemId; name: string; n
   return (Object.keys(FARM_FOODS) as FarmItemId[]).filter((i) => (p.state.inv[i] ?? 0) > 0)
     .map((item) => ({ item, name: FARM_ITEMS[item].name, n: p.state.inv[item]!, snack: FARM_FOODS[item]!.snack }));
 }
-/** 小攤上架表單的預設：數量（最多 10、不超過庫存）、價格範圍與預設價（2 倍）。 */
-export function stallDefaults(item: FarmItemId, have: number, want: number) {
-  const qty = Math.max(0, Math.min(FARM.stall.maxQty, have, want));
-  if (!qty) return { qty: 0, min: 0, max: 0, price: 0 };
-  const [min, max] = stallPriceRange(item, qty);
-  return { qty, min, max, price: min * 2 };
+/** 小攤上架表單：數量上限（最多 10、不超過庫存）、每個的價格範圍（賣價 1–3 倍）與預設（2 倍）。用每個的價格，改數量才不會超出範圍。 */
+export function stallDefaults(item: FarmItemId, have: number) {
+  const [unitMin, unitMax] = stallPriceRange(item, 1);
+  return { maxQty: Math.max(0, Math.min(FARM.stall.maxQty, have)), unitMin, unitMax, unit: unitMin * 2 };
+}
+/** 打開中的子畫面還對不對得上現在的資料（例如「田在長」的面板，田已經收成了就關掉）。 */
+export function panelValid(pn: { k: string; idx?: number } | null, p: FarmPayload): boolean {
+  if (pn?.k === 'grow') { const f = p.state.fields[pn.idx!]; return !!f?.crop && p.derived.fields[pn.idx!].stage !== 3; }
+  return true;
 }
 /** 東邊新地的田（idx 12–17）：已開、現在能買、還不能買。 */
 export function expandOffer(p: FarmPayload, idx: number): { kind: 'open' } | { kind: 'buy'; cost: number } | { kind: 'later'; text: string } {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ALWAYS_OPEN, applyFarm, describeFarm, newFarm, applyHelp, FARM_ERROR_CODES, type FarmState } from '@chick/engine';
-import { remainText, fieldBadge, plantChoices, hudModel, helpTargets, FARM_ERR, farmCellState, loadErrorAction, feedChoices, stallDefaults, expandOffer, type FarmPayload } from '../src/farm-model';
+import { remainText, fieldBadge, plantChoices, hudModel, helpTargets, FARM_ERR, farmCellState, loadErrorAction, feedChoices, stallDefaults, expandOffer, panelValid, type FarmPayload } from '../src/farm-model';
 
 const T0 = Date.parse('2026-11-02T10:00:00+08:00');
 const M = 60_000;
@@ -93,10 +93,19 @@ describe('phase 2 models', () => {
     const s = newFarm(1, T0, ALWAYS_OPEN); s.inv = { wheat: 4, bread: 2, honeycake: 1, egg: 3 };
     expect(feedChoices(payload(s))).toEqual([{ item: 'bread', name: '麵包', n: 2, snack: false }, { item: 'honeycake', name: '蜂蜜蛋糕', n: 1, snack: true }]);
   });
-  it('stallDefaults: price range per qty, default at 2x, qty capped by stock and 10', () => {
-    expect(stallDefaults('strawberry', 3, 20)).toEqual({ qty: 3, min: 18, max: 54, price: 36 });
-    expect(stallDefaults('wheat', 15, 15)).toEqual({ qty: 10, min: 10, max: 30, price: 20 });
-    expect(stallDefaults('jam', 0, 0)).toEqual({ qty: 0, min: 0, max: 0, price: 0 });
+  it('stallDefaults: per-item price (1–3x sell, default 2x) so changing qty never breaks the range', () => {
+    expect(stallDefaults('strawberry', 3)).toEqual({ maxQty: 3, unitMin: 6, unitMax: 18, unit: 12 });
+    expect(stallDefaults('wheat', 15)).toEqual({ maxQty: 10, unitMin: 1, unitMax: 3, unit: 2 });
+    expect(stallDefaults('jam', 0)).toEqual({ maxQty: 0, unitMin: 20, unitMax: 60, unit: 40 });
+  });
+  it('panelValid: the grow panel closes once its field is no longer growing', () => {
+    const s = newFarm(1, T0, ALWAYS_OPEN);
+    applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, ALWAYS_OPEN);
+    expect(panelValid({ k: 'grow', idx: 0 }, payload(s))).toBe(true);
+    applyFarm(s, { type: 'harvest', idx: 0 }, T0 + 2 * M, ALWAYS_OPEN);
+    expect(panelValid({ k: 'grow', idx: 0 }, payload(s, true, T0 + 2 * M))).toBe(false);
+    expect(panelValid({ k: 'orders' }, payload(s))).toBe(true);
+    expect(panelValid(null, payload(s))).toBe(true);
   });
   it('expandOffer: which locked east field can be bought now', () => {
     const s = newFarm(1, T0, ALWAYS_OPEN); s.level = 9; s.expand = 1;

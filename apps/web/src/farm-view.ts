@@ -4,7 +4,7 @@ import { act, api, ApiError, errText } from './api';
 import type { Live } from './ws';
 import { EAST, LAYOUT, SCENE, type Box } from './farm-layout';
 import { background, balloon, barn, bakery, beehive, board, chick, coop, cowshed, dairy, deco, eastBackground, field, hutch, iconSymbols, jamhouse, pill, sceneDefs, sign, stall, tree } from './farm-art';
-import { expandOffer, FARM_ERR, feedChoices, fieldBadge, helpTargets, hudModel, loadErrorAction, plantChoices, remainText, stallDefaults, type FarmPayload } from './farm-model';
+import { expandOffer, FARM_ERR, feedChoices, fieldBadge, helpTargets, hudModel, loadErrorAction, panelValid, plantChoices, remainText, stallDefaults, type FarmPayload } from './farm-model';
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const ic = (id: string, cls = 'fic') => `<svg class="${cls}" aria-hidden="true"><use href="#fi-${id}"/></svg>`;
@@ -252,6 +252,7 @@ export class FarmView {
   // ---------- 子畫面 ----------
   private renderPanel() {
     const el = this.root.querySelector('.farm-panel') as HTMLElement | null; if (!el) return;
+    if (this.panel && this.data && !panelValid(this.panel, this.data)) this.panel = null;
     const pn = this.panel, p = this.data;
     if (!pn || !p) { el.hidden = true; el.innerHTML = ''; return; }
     const head = (title: string, icon: string, tone: string) => `<header class="fph ${tone}">${ic(icon, 'fic hic')}<b>${title}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header>`;
@@ -358,11 +359,11 @@ export class FarmView {
       const items = (Object.keys(FARM_ITEMS) as FarmItemId[]).filter((i) => (s.inv[i] ?? 0) > 0);
       if (!pn.item) return head('上架什麼？', 'stall', 'pink') + `<div class="fpb">${items.length ? `<div class="fgrid">${items.map((it) => `
         <button type="button" class="ftile" data-act="stallPick" data-item="${it}">${ic(it, 'fic mid')}<b>${s.inv[it]}</b><small>${esc(FARM_ITEMS[it].name)}</small></button>`).join('')}</div>` : '<p class="fnote">倉庫是空的。</p>'}</div>`;
-      const df = stallDefaults(pn.item, s.inv[pn.item] ?? 0, 1);
+      const df = stallDefaults(pn.item, s.inv[pn.item] ?? 0);
       return head(`上架 ${esc(FARM_ITEMS[pn.item].name)}`, pn.item, 'pink') + `<div class="fpb"><div class="fform">
-        <label>數量 <input class="finput" type="number" data-f="qty" min="1" max="${Math.min(FARM.stall.maxQty, s.inv[pn.item] ?? 0)}" value="${df.qty}"></label>
-        <label>價格 ◎ <input class="finput" type="number" data-f="price" min="${df.min}" value="${df.price}"></label>
-        <p class="fnote" data-range>每個系統收購價 ◎${FARM_ITEMS[pn.item].sell}，可以訂在 ◎${FARM_ITEMS[pn.item].sell}–${FARM_ITEMS[pn.item].sell * FARM.stall.maxMult} × 數量。</p></div>
+        <label>數量 <input class="finput" type="number" data-f="qty" min="1" max="${df.maxQty}" value="1"></label>
+        <label>每個 ◎ <input class="finput" type="number" data-f="unit" min="${df.unitMin}" max="${df.unitMax}" value="${df.unit}"></label>
+        <p class="fnote">系統收購價每個 ◎${FARM_ITEMS[pn.item].sell}，每個可以訂 ◎${df.unitMin}–${df.unitMax}；總價＝每個 × 數量。</p></div>
         <button type="button" class="fbtn go wide" data-act="stallList">上架</button></div>`;
     }
     if (pn.k === 'deco') {
@@ -426,8 +427,12 @@ export class FarmView {
     if (a === 'stallPick' && pn?.k === 'stallNew') return this.openPanel({ ...pn, item: b.dataset.item as FarmItemId });
     if (a === 'stallList' && pn?.k === 'stallNew' && pn.item) {
       const v = (f: string) => Math.floor(Number((this.root.querySelector(`.farm-panel [data-f="${f}"]`) as HTMLInputElement | null)?.value));
-      const slot = pn.slot, item = pn.item; this.panel = { k: 'stall' };
-      return void this.doAct({ type: 'stallList', slot, item, qty: v('qty'), price: v('price') }, '上架了！');
+      const slot = pn.slot, item = pn.item, qty = v('qty'), unit = v('unit');
+      const d = stallDefaults(item, this.data?.state.inv[item] ?? 0);
+      if (!(qty >= 1 && qty <= d.maxQty)) return this.toast(`數量要在 1–${d.maxQty} 之間`);
+      if (!(unit >= d.unitMin && unit <= d.unitMax)) return this.toast(`每個價格要在 ◎${d.unitMin}–${d.unitMax} 之間`);
+      this.panel = { k: 'stall' };
+      return void this.doAct({ type: 'stallList', slot, item, qty, price: unit * qty }, '上架了！');
     }
     if (a === 'buyDeco') return void this.doAct({ type: 'buyDeco', deco: b.dataset.deco as DecoId }, `買了${DECOS[b.dataset.deco as DecoId].name}，到東邊新地點空的裝飾格擺上去`);
     if (a === 'placeDeco' && pn?.k === 'deco') { this.panel = null; return void this.doAct({ type: 'placeDeco', deco: b.dataset.deco as DecoId, slot: pn.slot }); }
