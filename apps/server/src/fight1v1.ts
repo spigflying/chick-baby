@@ -53,6 +53,8 @@ function output(m: any) {
 }
 function notice(home: string, user: string, code: string) { output({ t: 'fight.notice', home, user, code }); }
 function validMode(mode: unknown): mode is FightMode { return mode === 'classic' || mode === 'beginner'; }
+/** 綁定照片臉的帳號一律用自己的臉（不管送來什麼）；其他人用自己選的 */
+const playerFace = (user: string, choice: unknown): FightFace => (env.fightFaceUsers.get(user) as FightFace | undefined) ?? fightFace(choice);
 function user(home: string, id: string): PresenceUser | undefined { return deps!.presence.users(home).find((u) => u.id === id); }
 function eligible(home: string, id: string) {
   const u = user(home, id);
@@ -101,7 +103,7 @@ export function invite(home: string, from: string, to: string, now = Date.now(),
   if (typeof to !== 'string' || to === from) return notice(home, from, 'NO_OPPONENT');
   if (fightBusy(home)) return notice(home, from, 'FIGHT_BUSY');
   const why = startBlock(home, from, to, now); if (why) return notice(home, from, why);
-  const inv = { id: randomUUID(), home, from, to, fromKey, fromMode: mode, fromFace: fightFace(face), deadline: now + INVITE_MS };
+  const inv = { id: randomUUID(), home, from, to, fromKey, fromMode: mode, fromFace: playerFace(from, face), deadline: now + INVITE_MS };
   invites.set(home, inv);
   output({ t: 'fight.event', home, kind: 'invite', invite: inv.id, from, from_name: user(home, from)?.display_name ?? '?', from_mode: mode, to, left_ms: INVITE_MS });
 }
@@ -112,7 +114,7 @@ export function reply(home: string, who: string, id: string, accept: boolean, ke
   invites.delete(home);
   if (!accept) return output({ t: 'fight.event', home, kind: 'invite_cancel', invite: id, from: inv.from, to: inv.to, code: 'DECLINED' });
   const why = startBlock(home, inv.from, inv.to); if (why) return output({ t: 'fight.event', home, kind: 'invite_cancel', invite: id, from: inv.from, to: inv.to, code: why });
-  inv.toKey = key; inv.toMode = mode; inv.toFace = fightFace(face); void start(inv);
+  inv.toKey = key; inv.toMode = mode; inv.toFace = playerFace(who, face); void start(inv);
 }
 
 async function start(inv: FightInvite) {

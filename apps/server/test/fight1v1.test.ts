@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ALWAYS_OPEN, makeClock, SFV, SFVRoom } from '@chick/engine';
 import { setClock } from '../src/hours';
+import { env, parseFaceUsers } from '../src/env';
 import { PresenceStore, type PresenceUser } from '../src/presence';
 import { _fightInvites, _fights, abortFights, fightPool, initFight1v1, input, invite, onFightBus, onFightPresence, reply, routeFightIntent, stepFights } from '../src/fight1v1';
 
@@ -30,6 +31,20 @@ beforeEach(() => { setClock(ALWAYS_OPEN); _fightInvites.clear(); _fights.clear()
 afterEach(() => { vi.restoreAllMocks(); _fightInvites.clear(); _fights.clear(); });
 
 describe('formal home 1v1', () => {
+  it('bound accounts always fight with their own face, whatever they send', async () => {
+    const { sent } = setup();
+    env.fightFaceUsers.set('a', 'b');
+    try {
+      invite(home, 'a', 'b', Date.now(), 'i1:a', 'classic', 'c');
+      const invitation = sent.find((m) => m.kind === 'invite');
+      reply(home, 'b', invitation.invite, true, 'i1:b', 'classic', 'c');
+      for (let i = 0; i < 20 && !_fights.has(home); i++) await new Promise((r) => setTimeout(r, 0));
+      expect(sent.find((m) => m.kind === 'start').players.map((p: any) => p.face)).toEqual(['b', 'c']);
+    } finally { env.fightFaceUsers.delete('a'); }
+  });
+  it('parses FIGHT_FACE_USERS and ignores bad entries', () => {
+    expect([...parseFaceUsers(' u1:b , u2:c,u3:chick,u4:zz,:a,u5 ').entries()]).toEqual([['u1', 'b'], ['u2', 'c']]);
+  });
   it('carries each player\'s face choice to the start event; unknown faces fall back to the chick face', async () => {
     const { sent } = setup();
     invite(home, 'a', 'b', Date.now(), 'i1:a', 'classic', 'a');

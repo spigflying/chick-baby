@@ -39,7 +39,7 @@ export async function getMe(db: Db, userId: string) {
   const home = await db.selectFrom('homes').select(['id', 'name', 'access_mode']).where('owner_id', '=', userId).executeTakeFirstOrThrow();
   const pet = await currentPet(db, userId);
   const outfits = await ownedOutfits(db, userId);
-  return { user: { ...publicUser(u), share_code: u.share_code, role: u.role }, wallet: { balance: w.balance }, home, pet, outfits };
+  return { user: { ...publicUser(u), share_code: u.share_code, role: u.role, fight_face: env.fightFaceUsers.get(userId) ?? null }, wallet: { balance: w.balance }, home, pet, outfits };
 }
 
 async function currentPetRow(db: Db | Tx, ownerId: string) {

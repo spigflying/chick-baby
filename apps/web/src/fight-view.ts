@@ -34,7 +34,7 @@ export class FightView {
   private ctx: CanvasRenderingContext2D;
   private held = new Set<string>();
   private pendingMode: 'classic' | 'beginner' = 'classic';
-  private face: string = loadFace(); // 格鬥時用哪張臉；記在這台電腦
+  private face: string = loadFace(); // 格鬥時用哪張臉；記在這台電腦（綁定照片臉的帳號固定用自己的）
   private current: any = null;
   private raf = 0;
   private closeTimer = 0;
@@ -43,7 +43,8 @@ export class FightView {
   private three: any = undefined; // undefined = 還沒建；null = 不支援 WebGL，用 2D
   private load3d: Promise<any> | null = null;
 
-  constructor(private live: Live, private me: { id: string; display_name: string }, private toast: (s: string) => void) {
+  constructor(private live: Live, private me: { id: string; display_name: string; fight_face?: string | null }, private toast: (s: string) => void) {
+    if (me.fight_face) this.face = fightFace(me.fight_face);
     preloadFightArt(); // 水墨圖約 0.7 MB，進家裡就先載，開打時已就緒
     // 3D（three.js 約 140 KB gzip）背景載入，不擋主畫面；載不到就用 2D
     this.load3d = import('./sfv-3d').then((m) => m.createFight3D, () => null);
@@ -85,6 +86,7 @@ export class FightView {
   }
   /** 選臉：雞臉或照片臉；點了只換選擇，不關對話框 */
   private facePicker() {
+    if (this.me.fight_face) return ''; // 有自己的臉：跳過選臉
     return `<div class="sfv-faces"><span>用哪張臉打？</span>${FIGHT_FACES.map((id) => `<button data-face="${id}" class="${id === this.face ? 'on' : ''}">${id === 'chick' ? '<i>🐔</i>' : `<img src="/fight/face_${id}.webp" alt="">`}<small>${FACE_NAME[id] ?? id}</small></button>`).join('')}</div>`;
   }
   private dialogClick(e: Event) {
