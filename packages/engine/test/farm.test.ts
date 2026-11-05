@@ -181,6 +181,19 @@ describe('orders', () => {
   });
 });
 
+describe('order wait counts real time (closed hours included)', () => {
+  it('delivering right before closing has a fresh order waiting at next opening', () => {
+    const t = tpe('2026-11-02T19:30:00'); // 星期一，20:00 關門
+    const s = newFarm(42, t, TPE);
+    for (const it of s.orders[0]!.items) give(s, it.item, it.qty);
+    applyFarm(s, { type: 'deliver', slot: 0 }, t, TPE);
+    expect(s.orderWait[0]).toBe(t + FARM.orders.deliverWaitMs);
+    expect(describeFarm(s, t, TPE).orders[0]).toEqual({ waitMs: FARM.orders.deliverWaitMs });
+    const nextOpen = tpe('2026-11-03T09:00:00');
+    expect(loadFarm(JSON.parse(JSON.stringify(s)), nextOpen, TPE).orders[0]).not.toBeNull();
+  });
+});
+
 describe('orders refill on read', () => {
   it('loadFarm fills a slot whose wait has passed; a level-up inside an action fills the new slot', () => {
     const s = fresh(); applyFarm(s, { type: 'discard', slot: 0 }, T0, C);

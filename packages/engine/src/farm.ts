@@ -1,6 +1,6 @@
 // 小雞農場（docs/superpowers/specs/2026-11-03-farm-design.md）：數值由 scripts/sim-farm.ts 的經濟模擬調過（test/farm-economy.test.ts）。
 // 整座農場是一個 FarmState，這裡全部是純函式。
-// 伺服器、經濟模擬與測試共用同一套規則；所有計時只算開放時間（clock.addOpen / clock.elapsed）。
+// 伺服器、經濟模擬與測試共用同一套規則；計時只算開放時間（clock.addOpen / clock.elapsed），唯一例外是訂單補單等待照真實時間算。
 // 第二階段（2026-11-04-farm-phase2-design.md）：東邊新地、加買田、蜂箱／牛棚／起司小屋、熱氣球、裝飾、小攤、農場食物、小雞澆水。
 import type { Clock } from './hours';
 import type { Food } from './foods';
@@ -388,13 +388,13 @@ export function applyFarm(s: FarmState, a: FarmAction, now: number, clock: Clock
       take(s, o!.items);
       out.ledger.push({ reason: 'farm_order', delta: o!.coins });
       gainXp(s, o!.xp, out);
-      s.orders[i] = null; s.orderWait[i] = clock.addOpen(now, FARM.orders.deliverWaitMs);
+      s.orders[i] = null; s.orderWait[i] = now + FARM.orders.deliverWaitMs; // 訂單等待照真實時間算：停機時段也算，隔天開門就有新單
       break;
     }
     case 'discard': {
       const i = slotAt(a.slot);
       if (!s.orders[i]) fail('NO_ORDER');
-      s.orders[i] = null; s.orderWait[i] = clock.addOpen(now, FARM.orders.discardWaitMs);
+      s.orders[i] = null; s.orderWait[i] = now + FARM.orders.discardWaitMs;
       break;
     }
     case 'sell': {
@@ -584,7 +584,7 @@ export function describeFarm(s: FarmState, now: number, clock: Clock, ctx: FarmC
   const orders: FarmDerived['orders'] = [];
   for (let i = 0; i < orderSlots(s.level); i++) {
     const o = s.orders[i];
-    orders.push(o ? { order: o, canDeliver: haveAll(s, o.items) } : { waitMs: remain(s.orderWait[i]) });
+    orders.push(o ? { order: o, canDeliver: haveAll(s, o.items) } : { waitMs: Math.max(0, s.orderWait[i] - now) });
   }
   return {
     fields: s.fields.map((f, i) => ({ stage: f.crop ? stageOf(f.start, f.ready, now, clock) : null, remainMs: f.crop ? remain(f.ready) : 0, locked: !fieldOpen(s, i),
