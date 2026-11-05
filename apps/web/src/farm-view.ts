@@ -148,13 +148,39 @@ export class FarmView {
   }
 
   // ---------- 畫面 ----------
+  private guide() {
+    const p = this.data!, d = p.derived;
+    const fields = fieldIdxs(this.area);
+    const ready = fields.filter((i) => d.fields[i].stage === 3).length;
+    let message = ready ? `${ready} 格田可以收成` : '點田地開始種作物';
+    let target = ready ? `field:${fields.find((i) => d.fields[i].stage === 3)}` : '';
+    let buttonText = ready ? '收成' : '查看';
+    if (p.is_owner && this.area === 'main') {
+      const water = fields.find((i) => p.state.fields[i].crop && !p.state.fields[i].chick && d.fields[i].stage !== 3);
+      if (water !== undefined && d.chickWater.left > 0) { message = `還能幫田 ${water + 1} 澆水・今日剩 ${d.chickWater.left} 次`; target = `field:${water}`; buttonText = '去澆水'; }
+    } else if (p.is_owner && this.area === 'east' && d.balloon.state !== 'locked') {
+      const balloon = d.balloon;
+      message = balloon.state === 'here' ? `熱氣球貨箱 ${balloon.crates.filter((c) => c.filled).length}/${balloon.crates.length}` : this.remain(balloon.remainMs) ? `熱氣球 ${remainText(this.remain(balloon.remainMs))} 後回來` : '熱氣球即將回來';
+      target = 'balloon';
+      buttonText = '查看';
+    } else if (!p.is_owner) {
+      const help = helpTargets(p).find((h) => h.kind === 'water' && fields.includes(h.idx));
+      message = help?.kind === 'water' ? `田 ${help.idx + 1} 需要幫忙澆水` : '看看有沒有能幫忙的田地';
+      target = help?.kind === 'water' ? `field:${help.idx}` : '';
+      buttonText = '幫忙澆水';
+    }
+    const look = LOOK[this.species ?? 'chicken'] ?? LOOK.chicken;
+    return `<div class="farm-guide"><svg class="farm-guide-pet" viewBox="0 0 100 100" aria-hidden="true">${this.art.chick(50, 50, look)}</svg>
+      <div class="farm-guide-copy"><small>${this.area === 'east' ? '東邊新地' : '農場小幫手'}</small><b>${esc(message)}</b></div>
+      ${target ? `<button type="button" data-act="guide" data-target="${target}" aria-label="${esc(message)}">${buttonText} ›</button>` : ''}</div>`;
+  }
   private render() {
     const p = this.data; if (!p) return;
     this.root.classList.toggle('classic', this.theme === 'classic');
     const owner = p.is_owner;
     const hud = hudModel(p, this.wallet());
     this.root.innerHTML = `
-      <div class="farm-top"><b class="farm-title">${owner ? '我的農場' : `${esc(p.owner.display_name)} 的農場`}</b>
+      <div class="farm-top"><b class="farm-title">${owner ? '我的農場' : `${esc(p.owner.display_name)} 的農場`}</b><span class="farm-place">${this.area === 'east' ? '東邊新地' : '陽光農場'}</span>
         <button type="button" class="farm-theme" data-act="theme" aria-label="切換農場畫風，目前為${this.theme === 'realistic' ? '寫實 3D' : '原版插畫'}">畫風：${this.theme === 'realistic' ? '寫實 3D' : '原版插畫'}</button>
         <button type="button" class="farm-x" data-act="close" aria-label="關閉農場（Esc）">✕</button></div>
       <div class="farm-stage">
@@ -167,7 +193,7 @@ export class FarmView {
         </div>
         <div class="farm-panel" hidden></div>
       </div>
-      <div class="farm-tools">${owner ? `
+      <div class="farm-footer">${this.guide()}<div class="farm-tools">${owner ? `
         <button type="button" class="ftool" data-act="shop">${ic('shop', 'fic big')}商店</button>
         <button type="button" class="ftool" data-act="store">${ic('box', 'fic big')}倉庫</button>
         <button type="button" class="ftool" data-act="orders">${ic('board', 'fic big')}訂單${this.deliverable() ? `<span class="fbadge">${this.deliverable()}</span>` : ''}</button>
@@ -175,7 +201,7 @@ export class FarmView {
         <button type="button" class="ftool" data-act="feedPanel">${ic('apple', 'fic big')}餵寵物</button>` : ''}
         <button type="button" class="ftool" data-act="friends">${ic('friend', 'fic big')}好友</button>
         <button type="button" class="ftool" data-act="close">${ic('home', 'fic big')}回家</button>
-      </div>`;
+      </div></div>`;
     this.renderPanel();
   }
   private deliverable() { return this.data?.derived.orders.filter((o) => 'order' in o && o.canDeliver).length ?? 0; }
@@ -194,7 +220,6 @@ export class FarmView {
     o += hit('board', this.art.board(LAYOUT.board, p.is_owner && this.deliverable() > 0), '訂單看板');
     o += hit('barn', this.art.barn(LAYOUT.barn), '倉庫');
     o += hit('goEast', this.art.sign(LAYOUT.eastSign, d.east.locked ? `Lv${FARM.eastLevel} 開放` : '東邊新地', d.east.locked), '去東邊新地');
-    o += this.art.chick(LAYOUT.chick.x, LAYOUT.chick.y, LOOK[this.species ?? 'chicken'] ?? LOOK.chicken);
     return o;
   }
   private eastScene(hit: (key: string, inner: string, label: string) => string) {
@@ -209,7 +234,6 @@ export class FarmView {
     o += hit('stall', this.art.stall(EAST.stall, s.stall, s.level < FARM.stall.level, FARM.stall.level), '小攤');
     EAST.decos.forEach((b, i) => { o += p.is_owner ? hit(`deco:${i}`, this.art.deco(b, s.decos[i], true), `裝飾格 ${i + 1}`) : this.art.deco(b, s.decos[i], false); });
     o += hit('goMain', this.art.sign(EAST.back, '回農場', false, true), '回主農場');
-    o += this.art.chick(EAST.chick.x, EAST.chick.y, LOOK[this.species ?? 'chicken'] ?? LOOK.chicken);
     return o;
   }
   /** 田、建築上方的標籤（每秒更新）。 */
@@ -415,6 +439,7 @@ export class FarmView {
       return this.root.querySelector<HTMLButtonElement>('.farm-theme')?.focus();
     }
     if (a === 'close') return this.close();
+    if (a === 'guide') return this.onHit(b.dataset.target!);
     if (a === 'panelClose') return this.openPanel(null);
     if (a === 'shop' || a === 'store' || a === 'orders') return this.openPanel({ k: a });
     if (a === 'friends') return this.openPanel({ k: 'friends' });

@@ -41,7 +41,6 @@ export function sceneDefs(): string {
     <pattern id="fg-tilesB" width="22" height="14" patternUnits="userSpaceOnUse"><rect width="22" height="14" fill="#ff9b85"/><path d="M0 14 Q11 2 22 14" fill="#f5826b"/></pattern>
     <pattern id="fg-tilesY" width="22" height="14" patternUnits="userSpaceOnUse"><rect width="22" height="14" fill="#ffd166"/><path d="M0 14 Q11 2 22 14" fill="#f5bd45"/></pattern>
     <pattern id="fg-tilesP" width="22" height="14" patternUnits="userSpaceOnUse"><rect width="22" height="14" fill="#c38cff"/><path d="M0 14 Q11 2 22 14" fill="#ad6ff5"/></pattern>
-    <pattern id="farm-path" width="128" height="128" patternUnits="userSpaceOnUse"><image href="${import.meta.env.BASE_URL}farm/path-texture.png" width="128" height="128"/></pattern>
   </defs>`;
 }
 
@@ -81,11 +80,7 @@ export function iconSymbols(): string {
 
 // ---------- 背景 ----------
 export function background(): string {
-  let o = farmImage('background-main-clean.jpg', 0, 0, SCENE.w, SCENE.h, 'none');
-  for (const p of LAYOUT.path) {
-    o += `<rect x="${p.x - 3}" y="${p.y - 3}" width="${p.w + 6}" height="${p.h + 6}" rx="${Math.min(p.w, p.h) / 2}" fill="#a99170"/>`;
-    o += `<rect x="${p.x + 2}" y="${p.y + 2}" width="${p.w - 4}" height="${p.h - 4}" rx="${Math.min(p.w, p.h) / 2 - 2}" fill="url(#farm-path)"/>`;
-  }
+  let o = farmImage('background-main-v2.jpg', 0, 0, SCENE.w, SCENE.h, 'none');
   o += farmImage('pond', LAYOUT.pond.x, LAYOUT.pond.y - 18, LAYOUT.pond.w, LAYOUT.pond.h + 36, 'none');
   return o;
 }
@@ -150,12 +145,7 @@ export function pill(cx: number, y: number, text: string, tone: 'ready' | 'timer
 // ======================================================================
 /** 東邊新地的背景：草坡、小路、花叢、遠方山丘上的風車。 */
 export function eastBackground(): string {
-  let o = farmImage('background-east-clean.jpg', 0, 0, SCENE.w, SCENE.h, 'none');
-  for (const p of EAST.path) {
-    o += `<rect x="${p.x - 3}" y="${p.y - 3}" width="${p.w + 6}" height="${p.h + 6}" rx="${Math.min(p.w, p.h) / 2}" fill="#a99170"/>`;
-    o += `<rect x="${p.x + 2}" y="${p.y + 2}" width="${p.w - 4}" height="${p.h - 4}" rx="${Math.min(p.w, p.h) / 2 - 2}" fill="url(#farm-path)"/>`;
-  }
-  return o;
+  return farmImage('background-east-v2.jpg', 0, 0, SCENE.w, SCENE.h, 'none');
 }
 export function sign(b: Box, text: string, locked: boolean, left = false): string {
   const arrow = left ? 'M4 18 L18 4 H74 V32 H18 Z' : 'M74 18 L60 4 H4 V32 H60 Z';
@@ -199,6 +189,6 @@ export function stall(b: Box, slots: (StallSlot | null)[], locked: boolean, unlo
 /** 裝飾格（標準尺寸 120×110）。id null：空格（主人看得到虛線＋「＋」，訪客只看到草地）。 */
 export function deco(b: Box, id: DecoId | null, owner: boolean): string {
   if (id) return farmProp(b, `deco-${id}`, 120, 110);
-  const o = owner ? `<rect x="10" y="20" width="100" height="80" rx="20" fill="#e9e0c7" opacity=".35" stroke="#f8f3e4" stroke-width="3" stroke-dasharray="9 7"/><text x="60" y="70" text-anchor="middle" font-size="30" font-weight="800" fill="#fff">＋</text>` : '';
+  const o = owner ? `<circle cx="60" cy="48" r="17" fill="#f7efd8" stroke="#a38253" stroke-width="3"/><text x="60" y="57" text-anchor="middle" font-size="27" font-weight="800" fill="#6a583d">＋</text>` : '';
   return fit(b, 120, 110, o);
 }
