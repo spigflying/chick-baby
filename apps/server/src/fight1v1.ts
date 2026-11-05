@@ -1,7 +1,7 @@
 // 正式 1v1 格鬥：以家為單位選定 authority，房間本身由 @chick/engine 的決定性模組執行。
 import { randomUUID } from 'node:crypto';
 import { sql } from 'kysely';
-import { canFightPet, phaseAt, poolShares, SFV, SFVRoom } from '@chick/engine';
+import { canFightPet, fightFace, phaseAt, poolShares, SFV, SFVRoom, type FightFace } from '@chick/engine';
 import type { Db } from './db';
 import type { Bus } from './bus';
 import type { PresenceStore, PresenceUser } from './presence';
@@ -18,8 +18,8 @@ const START_GUARD_MS = 315_000;
 const STAKE = 20;
 
 type FightMode = 'classic' | 'beginner';
-interface FightInvite { id: string; home: string; from: string; to: string; fromKey: string; fromMode: FightMode; toKey?: string; toMode?: FightMode; deadline: number }
-interface Player { user: string; pet: string; name: string; control: string; mode: FightMode }
+interface FightInvite { id: string; home: string; from: string; to: string; fromKey: string; fromMode: FightMode; fromFace: FightFace; toKey?: string; toMode?: FightMode; toFace?: FightFace; deadline: number }
+interface Player { user: string; pet: string; name: string; control: string; mode: FightMode; face: FightFace }
 interface ActiveFight {
   id: string; home: string; players: [Player, Player]; room: any;
   damage: [number, number]; lastHp: [number, number]; settling: boolean; retryAt: number;
@@ -91,28 +91,28 @@ export function onFightBus(m: any) {
   if (m.t === 'fight.invite' || m.t === 'fight.reply' || m.t === 'fight.in') handleIntent(m);
 }
 function handleIntent(m: any) {
-  if (m.t === 'fight.invite') invite(m.home, m.user, m.to, Date.now(), m.key, m.mode);
-  else if (m.t === 'fight.reply') reply(m.home, m.user, m.invite, !!m.accept, m.key, m.mode);
+  if (m.t === 'fight.invite') invite(m.home, m.user, m.to, Date.now(), m.key, m.mode, m.face);
+  else if (m.t === 'fight.reply') reply(m.home, m.user, m.invite, !!m.accept, m.key, m.mode, m.face);
   else if (m.t === 'fight.in') input(m.home, m.user, m);
 }
 
-export function invite(home: string, from: string, to: string, now = Date.now(), fromKey = deps?.presence.desktopKey(home, from) ?? '', mode: FightMode = 'classic') {
+export function invite(home: string, from: string, to: string, now = Date.now(), fromKey = deps?.presence.desktopKey(home, from) ?? '', mode: FightMode = 'classic', face?: unknown) {
   if (!validMode(mode)) return notice(home, from, 'BAD_MODE');
   if (typeof to !== 'string' || to === from) return notice(home, from, 'NO_OPPONENT');
   if (fightBusy(home)) return notice(home, from, 'FIGHT_BUSY');
   const why = startBlock(home, from, to, now); if (why) return notice(home, from, why);
-  const inv = { id: randomUUID(), home, from, to, fromKey, fromMode: mode, deadline: now + INVITE_MS };
+  const inv = { id: randomUUID(), home, from, to, fromKey, fromMode: mode, fromFace: fightFace(face), deadline: now + INVITE_MS };
   invites.set(home, inv);
   output({ t: 'fight.event', home, kind: 'invite', invite: inv.id, from, from_name: user(home, from)?.display_name ?? '?', from_mode: mode, to, left_ms: INVITE_MS });
 }
-export function reply(home: string, who: string, id: string, accept: boolean, key?: string, mode: FightMode = 'classic') {
+export function reply(home: string, who: string, id: string, accept: boolean, key?: string, mode: FightMode = 'classic', face?: unknown) {
   const inv = invites.get(home);
   if (!inv || inv.id !== id || inv.to !== who) return notice(home, who, 'INVITE_GONE');
   if (accept && !validMode(mode)) return notice(home, who, 'BAD_MODE');
   invites.delete(home);
   if (!accept) return output({ t: 'fight.event', home, kind: 'invite_cancel', invite: id, from: inv.from, to: inv.to, code: 'DECLINED' });
   const why = startBlock(home, inv.from, inv.to); if (why) return output({ t: 'fight.event', home, kind: 'invite_cancel', invite: id, from: inv.from, to: inv.to, code: why });
-  inv.toKey = key; inv.toMode = mode; void start(inv);
+  inv.toKey = key; inv.toMode = mode; inv.toFace = fightFace(face); void start(inv);
 }
 
 async function start(inv: FightInvite) {
@@ -125,8 +125,8 @@ async function start(inv: FightInvite) {
     const a = user(inv.home, inv.from)!, b = user(inv.home, inv.to)!;
     const id = randomUUID();
     const players: [Player, Player] = [
-      { user: a.id, pet: a.pet!.id, name: a.display_name, control: deps.presence.hasKey(inv.home, inv.fromKey) ? inv.fromKey : deps.presence.desktopKey(inv.home, a.id)!, mode: inv.fromMode },
-      { user: b.id, pet: b.pet!.id, name: b.display_name, control: inv.toKey && deps.presence.hasKey(inv.home, inv.toKey) ? inv.toKey : deps.presence.desktopKey(inv.home, b.id)!, mode: inv.toMode ?? 'classic' },
+      { user: a.id, pet: a.pet!.id, name: a.display_name, control: deps.presence.hasKey(inv.home, inv.fromKey) ? inv.fromKey : deps.presence.desktopKey(inv.home, a.id)!, mode: inv.fromMode, face: inv.fromFace ?? 'chick' },
+      { user: b.id, pet: b.pet!.id, name: b.display_name, control: inv.toKey && deps.presence.hasKey(inv.home, inv.toKey) ? inv.toKey : deps.presence.desktopKey(inv.home, b.id)!, mode: inv.toMode ?? 'classic', face: inv.toFace ?? 'chick' },
     ];
     // DB 寫入是開打的前置條件；不能出現有比賽畫面卻無法冪等結算的場次。
     await deps.db.insertInto('fights').values({ id, home_id: inv.home, a_user_id: players[0].user, b_user_id: players[1].user,
@@ -145,7 +145,7 @@ async function start(inv: FightInvite) {
     insertedId = null;
     deps.bench?.(inv.home, players.map((p) => p.user));
     output({ t: 'fight.event', home: inv.home, kind: 'start', fight_id: id, server_time: Date.now(), tick: 0,
-      players: players.map((p, i) => ({ user_id: p.user, pet_id: p.pet, name: p.name, pid: i + 1, mode: p.mode })), controllers: players.map((p) => p.control) });
+      players: players.map((p, i) => ({ user_id: p.user, pet_id: p.pet, name: p.name, pid: i + 1, mode: p.mode, face: p.face })), controllers: players.map((p) => p.control) });
     active.room.snapshot();
   } catch (err) {
     console.error('fight start failed', err);
@@ -271,7 +271,7 @@ export function onFightPresence(home: string) {
   if (ok[0] && ok[1]) {
     // 後進家門的連線沒看過最初的 start；重送可冪等套用的 sync，接著立即補一張快照。
     output({ t: 'fight.event', home, kind: 'sync', fight_id: f.id, server_time: Date.now(), tick: f.room.tick,
-      players: f.players.map((p, i) => ({ user_id: p.user, pet_id: p.pet, name: p.name, pid: i + 1, mode: p.mode })), controllers: f.players.map((p) => p.control) });
+      players: f.players.map((p, i) => ({ user_id: p.user, pet_id: p.pet, name: p.name, pid: i + 1, mode: p.mode, face: p.face })), controllers: f.players.map((p) => p.control) });
     f.room.snapshot();
     return;
   }

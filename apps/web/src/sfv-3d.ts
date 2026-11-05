@@ -7,6 +7,24 @@ import { OutlineEffect } from 'three/examples/jsm/effects/OutlineEffect.js';
 import { SFV } from '@chick/engine';
 
 const W = 960, H = 540, GROUND = 470, FOV = 30;
+
+// ---------- 照片臉：貼在雞頭原本的臉上（朝 +x），傷的效果對準照片上的五官 ----------
+// 圖：512×512 去背 webp（/fight/face_*.webp）；座標是圖上的 (u, v)，0～1、左上為原點
+export const FACES = {
+  chick: null,
+  a: { name: '臉 A', src: '/fight/face_a.webp', eyes: [[0.371, 0.463], [0.654, 0.463]], nose: [0.514, 0.625], cheek: [0.31, 0.62] },
+  b: { name: '臉 B', src: '/fight/face_b.webp', eyes: [[0.371, 0.457], [0.625, 0.457]], nose: [0.514, 0.598], cheek: [0.31, 0.6] },
+};
+export const FACE_IDS = Object.keys(FACES);
+// 照片貼在頭上的範圍：經度 PW、緯度 T0～T0+TH（弧長寬高都約 50 px，圖不會變形）
+const PW = 2.4, T0 = 0.2, TH = 2.5, PHI0 = Math.PI - PW / 2;
+const FACE_TURN = 0.9, FACE_HEAD = 1.25; // 照片臉往鏡頭轉約 50°（不然側面只看到一條）；頭放大 1.25 倍比較認得出是誰
+const faceDir = (u, v, out) => { const ph = PHI0 + u * PW, th = T0 + v * TH; return out.set(-Math.cos(ph) * Math.sin(th), Math.cos(th), Math.sin(ph) * Math.sin(th)); };
+const texCache = new Map();
+function faceTexture(src) {
+  if (!texCache.has(src)) { const t = new THREE.TextureLoader().load(src); t.colorSpace = THREE.SRGBColorSpace; texCache.set(src, t); }
+  return texCache.get(src);
+}
 const CAM_D = (H / 2) / Math.tan((FOV / 2) * Math.PI / 180);
 const YAW = 0.32; // 身體往鏡頭轉一點，看得出立體
 const PI = Math.PI, HALF = PI / 2;
@@ -178,7 +196,7 @@ class Chick {
     this.skull = mesh(SPH, M.body, [0, 0, 0], [21, 20, 20]); this.head.add(this.skull);
     // 雞冠：越被打掉越多根（傷害 30% 起每 15% 掉一根）
     this.comb = [[-10, 15, 0.5], [-3, 21, 0.2], [5, 17, -0.15], [11, 12, -0.5]].map(([x, h, a]) => { const m = mesh(CONE, M.red, [x, 22, 0], [4, h, 3], [0, 0, a]); this.head.add(m); return m; });
-    this.head.add(mesh(new THREE.TorusGeometry(20.5, 2.6, 8, 32), M.red, [0, 7, 0], [1, 1, 0.98], [HALF, 0.12, 0]));
+    this.headband = mesh(new THREE.TorusGeometry(20.5, 2.6, 8, 32), M.red, [0, 7, 0], [1, 1, 0.98], [HALF, 0.12, 0]); this.head.add(this.headband);
     this.tails = [];
     for (const [y, a] of [[8, 0.4], [5, -0.15]]) { const t = mesh(new THREE.BoxGeometry(22, 4, 1), M.red, [-30, y, 0], [1, 1, 1], [0, 0, a]); this.head.add(t); this.tails.push(t); }
     // 臉（之後換大頭照只換這一組）：歪眼一大一小、往兩邊看，大嘴喙下垂
@@ -208,6 +226,17 @@ class Chick {
     for (const b of [...this.bumps, this.plaster]) { b.visible = false; this.head.add(b); }
     this.drips = [0, 1].map((k) => { const d = mesh(CYL, M.blood, [26 + k * 3, -14, k ? -1 : 3], [2.2, 1, 2.2]); d.visible = false; this.head.add(d); return d; });
     this.stain = mesh(SPH, M.blood, [20, 34, 4], [5, 9, 9]); this.stain.visible = false; this.body.add(this.stain);
+    // 照片臉一組：照片本身 + 對準五官的黑眼圈、腫眼皮、KO 叉叉、鼻血、OK 繃
+    this.faceId = 'chick'; this.faceDef = null;
+    this.pf = new THREE.Group(); this.pf.visible = false; this.pf.rotation.y = -FACE_TURN; this.head.add(this.pf);
+    const pm = new THREE.MeshLambertMaterial({ transparent: true, alphaTest: 0.05 }); pm.userData.outlineParameters = { visible: false }; this.mats.push(pm);
+    this.pfMesh = new THREE.Mesh(new THREE.SphereGeometry(1.035, 32, 24, PHI0, PW, T0, TH), pm); this.pf.add(this.pfMesh);
+    const holder = (...ms) => { const g = new THREE.Group(); g.add(...ms); this.pf.add(g); return g; };
+    this.pRings = [0, 1].map(() => holder(new THREE.Mesh(new THREE.TorusGeometry(4.3, 1.4, 8, 24), purple)));
+    this.pLids = [0, 1].map(() => holder(mesh(SPH, mat(0xe8a0a0, { transparent: true, opacity: 0 }), [0, 0, 0], [5, 4.4, 1.8])));
+    this.pXs = [0, 1].map(() => holder(mesh(new THREE.BoxGeometry(1.5, 8, 1), M.black, [0, 0, 0.6], [1, 1, 1], [0, 0, 0.75]), mesh(new THREE.BoxGeometry(1.5, 8, 1), M.black, [0, 0, 0.6], [1, 1, 1], [0, 0, -0.75])));
+    this.pDrips = [0, 1].map(() => { const d = mesh(CYL, M.blood, [0, 0, 0], [1.5, 1, 1.5]); this.pf.add(d); return d; });
+    this.pPlaster = holder(mesh(new THREE.BoxGeometry(12, 3.5, 1), tape, [0, 0, 0.5], [1, 1, 1], [0, 0, 0.7]), mesh(new THREE.BoxGeometry(12, 3.5, 1), tape, [0, 0, 0.5], [1, 1, 1], [0, 0, -0.7]));
     // 手：肩 → 上臂（可伸長）→ 肘 → 前臂 → 大拳套
     const arm = (z, near) => {
       const sh = grp([8, 38, z], this.body);
@@ -233,6 +262,20 @@ class Chick {
     this.legF = leg(9); this.legB = leg(-9);
     this.particles = [];
     this.pGeo = SPH;
+  }
+  /** 換臉：chick = 原本的雞臉；其他 = FACES 裡的照片 */
+  setFace(id) {
+    if (id === this.faceId) return;
+    const def = FACES[id] ?? null; this.faceId = def ? id : 'chick'; this.faceDef = def;
+    this.face.visible = !def; this.pf.visible = !!def;
+    this.headband.position.y = def ? 14 : 7; // 照片臉：頭巾綁在額頭上，不擋眼睛
+    this.head.scale.setScalar(def ? FACE_HEAD : 1);
+    if (def) { this.pfMesh.material.map = faceTexture(def.src); this.pfMesh.material.needsUpdate = true; }
+  }
+  /** 照片上 (u, v) 對應到頭上的位置（跟著頭腫起來）＋法線；lift = 往外浮幾 px */
+  facePoint(uv, lift, pos, nrm) {
+    faceDir(uv[0], uv[1], nrm); const sc = this.skull.scale;
+    return pos.set(nrm.x * (sc.x * 1.035 + lift), nrm.y * (sc.y * 1.035 + lift), nrm.z * (sc.z * 1.035 + lift));
   }
   /** 兩節肢體：方向 a、相對彎曲 e、整體伸長倍數 k；回傳末端位置 */
   limb(L, a, e, k = 1) {
@@ -348,6 +391,27 @@ export function createFight3D(canvas) {
       else e.pupil.position.set(e.r * 0.62, e.look[1], e.look[0]);
     });
     c.beak.rotation.z = st === 'HIT' || ko ? -0.5 : st === 'MOVE' ? 0.15 : 0;
+    if (c.faceDef) { c.drips.forEach((d) => d.visible = false); c.plaster.visible = false; photoFace(c, dmg, ko, s); } // 雞臉用的鼻血、OK 繃換成對準照片的那一組
+  }
+  // 照片臉的傷：位置都從照片上的五官座標算，頭腫起來也跟著走
+  const vP = new THREE.Vector3(), vN = new THREE.Vector3(), Z = new THREE.Vector3(0, 0, 1);
+  function stick(g, c, uv, lift) { c.facePoint(uv, lift, vP, vN); g.position.copy(vP); g.quaternion.setFromUnitVectors(Z, vN); }
+  function photoFace(c, dmg, ko, s) {
+    const F = c.faceDef;
+    c.pfMesh.scale.copy(c.skull.scale);
+    F.eyes.forEach((uv, k) => {
+      const ring = c.pRings[k]; ring.visible = dmg > 0.35 + k * 0.15; if (ring.visible) stick(ring, c, uv, 0.6);
+      const puffy = Math.max(0, Math.min(1, (dmg - 0.75 + k * 0.08) * 5)), lid = c.pLids[k];
+      lid.visible = puffy > 0 && !ko; if (lid.visible) { stick(lid, c, uv, 1); lid.children[0].material.opacity = puffy * 0.95; lid.scale.setScalar(0.6 + puffy * 0.5); }
+      c.pXs[k].visible = ko; if (ko) stick(c.pXs[k], c, uv, 0.8);
+    });
+    c.facePoint(F.nose, 0.8, vP, vN);
+    c.pDrips.forEach((d, k) => {
+      const on = dmg > 0.2 + k * 0.2; d.visible = on; if (!on) return;
+      const len = 5 + Math.min(14, (dmg - 0.2) * 36) + 2 * Math.sin(s.tick * 0.1 + k);
+      d.scale.y = len; d.position.set(vP.x + 0.5, vP.y - 1 - len / 2, vP.z + (k ? -2.2 : 2.2));
+    });
+    c.pPlaster.visible = dmg > 0.7; if (c.pPlaster.visible) stick(c.pPlaster, c, F.cheek, 0.8);
   }
 
   // 噴鼻血：被打中的那一刻噴幾顆血珠，跟 tick 走（回滾倒帶時清掉）
@@ -357,7 +421,7 @@ export function createFight3D(canvas) {
     hsPrev[i] = p.hs;
     if (started && hpPrev[i] > p.hp) {
       c.head.updateMatrixWorld(true);
-      const nose = c.beak.localToWorld(new THREE.Vector3(8, -6, 0));
+      const nose = c.faceDef ? c.pf.localToWorld(c.facePoint(c.faceDef.nose, 1, new THREE.Vector3(), new THREE.Vector3())) : c.beak.localToWorld(new THREE.Vector3(8, -6, 0));
       const n = 4 + Math.round(8 * (1 - p.hp / SFV.HP_MAX));
       for (let k = 0; k < n; k++) {
         let q = c.particles.find((x) => x.life <= 0);
@@ -376,7 +440,8 @@ export function createFight3D(canvas) {
   }
 
   return {
-    render(s, opt: { shake?: [number, number]; freezeOwner?: number } = {}) {
+    render(s, opt: { shake?: [number, number]; freezeOwner?: number; faces?: string[] } = {}) {
+      for (let i = 0; i < 2; i++) chicks[i].setFace(opt.faces?.[i] ?? 'chick');
       const [shx, shy] = opt.shake ?? [0, 0], fo = opt.freezeOwner ?? -1;
       cam.position.set(-shx, CY + shy, CAM_D); cam.lookAt(-shx, CY + shy, 0);
       const dark = fo >= 0;

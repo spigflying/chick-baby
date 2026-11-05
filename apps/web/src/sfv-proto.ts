@@ -66,6 +66,9 @@ preloadFightArt();
   const set3d = (on) => { ui.three = on && three ? three : null; $('cv3').style.visibility = ui.three ? 'visible' : 'hidden'; cv.style.background = ui.three ? 'transparent' : '#000'; };
   $('three').addEventListener('change', (e) => { set3d(e.target.checked); e.target.blur(); });
   set3d(new URLSearchParams(location.search).get('three') !== '0');
+  ui.faces = ['chick', 'chick'];
+  $('face').addEventListener('change', (e) => { ui.faces[0] = e.target.value; e.target.blur(); });
+  $('face2').addEventListener('change', (e) => { ui.faces[1] = e.target.value; e.target.blur(); });
   $('close').addEventListener('click', (e) => { e.target.blur(); if (ui.world) ui.world.room.closesAt = performance.now(); });
   $('resettle').addEventListener('click', (e) => {
     e.target.blur();
@@ -91,7 +94,7 @@ preloadFightArt();
       if (ui.sel.lockedAt >= 0 && ui.frame - ui.sel.lockedAt > 72) startMatch();
     } else if (ui.world) {
       const c = ui.world.clients[0];
-      SFVClient.drawFight(ctx, c.predicted, { three: ui.three, showBoxes: ui.showBoxes, me: 0, names: ['MY_CHICK_BABY（你）', `MY_CHICK_BABY（${ui.opp === 'ai' ? 'CPU' : '木樁'}）`], ended: c.ended, settleText: settleText(ui.world.room) });
+      SFVClient.drawFight(ctx, c.predicted, { three: ui.three, faces: ui.faces, showBoxes: ui.showBoxes, me: 0, names: ['MY_CHICK_BABY（你）', `MY_CHICK_BABY（${ui.opp === 'ai' ? 'CPU' : '木樁'}）`], ended: c.ended, settleText: settleText(ui.world.room) });
       SFVClient.drawFrameMeter(fmCtx, meter, ['你', ui.opp === 'ai' ? 'CPU' : '木樁']);
     }
     requestAnimationFrame(render);

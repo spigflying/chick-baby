@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { SFV } from '@chick/engine';
-import { __test } from '../src/sfv-3d';
+import { FIGHT_FACES } from '@chick/engine';
+import { __test, FACES } from '../src/sfv-3d';
 
 const finitePose = (o: any) => Object.entries(o).every(([, v]) => typeof v !== 'number' || Number.isFinite(v));
 
 describe('3D 格鬥姿勢', () => {
+  it('前端的臉清單跟伺服器（引擎）一致，照片臉都有五官座標', () => {
+    expect(Object.keys(FACES)).toEqual([...FIGHT_FACES]);
+    for (const id of FIGHT_FACES) if (id !== 'chick') expect(FACES[id]).toMatchObject({ src: `/fight/face_${id}.webp`, eyes: expect.any(Array), nose: expect.any(Array), cheek: expect.any(Array) });
+  });
   it('每種狀態都算得出有限的姿勢', () => {
     const s = SFV.createState([0, 0]);
     for (const st of SFV.ST_NAME) {

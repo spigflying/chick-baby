@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { SFV } from '@chick/engine';
+import { SFV, FIGHT_FACES, fightFace } from '@chick/engine';
 import { NetClient, SpectatorClient } from './sfv-net';
 import { drawFight } from './sfv-draw';
 import { preloadFightArt } from './sfv-art';
@@ -9,6 +9,9 @@ import { api } from './api';
 const KEY_BITS = { KeyW: SFV.UP, KeyS: SFV.DOWN, KeyA: SFV.LEFT, KeyD: SFV.RIGHT, KeyU: SFV.LP, KeyI: SFV.HP, KeyJ: SFV.LK, KeyK: SFV.HK, KeyH: SFV.LP | SFV.LK, KeyL: SFV.HP | SFV.HK };
 const EASY_BITS = { KeyO: SFV.EASY_HADO, KeyP: SFV.EASY_DP, KeyN: SFV.EASY_TATSU, KeyM: SFV.EASY_CA };
 const MODE_NAME = { classic: '經典模式', beginner: '初心模式' };
+const FACE_NAME: Record<string, string> = { chick: '雞臉', a: '臉 A', b: '臉 B' };
+const FACE_KEY = 'sfv-face';
+const loadFace = () => { try { return fightFace(localStorage.getItem(FACE_KEY)); } catch { return 'chick'; } };
 const NOTICE: Record<string, string> = {
   TOUCH_DEVICE: '手機只能觀戰，請用電腦挑戰', NO_OPPONENT: '目前沒有可以挑戰的對手', NOT_ELIGIBLE: '寵物必須活著、醒著且沒有生病',
   FIGHT_BUSY: '這個家已經有格鬥邀請或比賽', RACE_BUSY: '有人正在賽車', STAIRS_BUSY: '有人正在下樓梯', 
@@ -31,6 +34,7 @@ export class FightView {
   private ctx: CanvasRenderingContext2D;
   private held = new Set<string>();
   private pendingMode: 'classic' | 'beginner' = 'classic';
+  private face: string = loadFace(); // 格鬥時用哪張臉；記在這台電腦
   private current: any = null;
   private raf = 0;
   private closeTimer = 0;
@@ -77,10 +81,19 @@ export class FightView {
     const candidates = fightCandidates(this.presence, this.me.id);
     if (!candidates.length) return this.toast(NOTICE.NO_OPPONENT);
     this.dialog.hidden = false;
-    this.dialog.innerHTML = `<div class="sfv-card"><h3>選擇戰鬥模式</h3><button data-mode="classic">經典模式・搓招出必殺</button><button data-mode="beginner">初心模式・一鍵出必殺</button><button data-cancel class="alt">取消</button></div>`;
+    this.dialog.innerHTML = `<div class="sfv-card"><h3>選擇戰鬥模式</h3>${this.facePicker()}<button data-mode="classic">經典模式・搓招出必殺</button><button data-mode="beginner">初心模式・一鍵出必殺</button><button data-cancel class="alt">取消</button></div>`;
+  }
+  /** 選臉：雞臉或照片臉；點了只換選擇，不關對話框 */
+  private facePicker() {
+    return `<div class="sfv-faces"><span>用哪張臉打？</span>${FIGHT_FACES.map((id) => `<button data-face="${id}" class="${id === this.face ? 'on' : ''}">${id === 'chick' ? '<i>🐔</i>' : `<img src="/fight/face_${id}.webp" alt="">`}<small>${FACE_NAME[id] ?? id}</small></button>`).join('')}</div>`;
   }
   private dialogClick(e: Event) {
     const b = (e.target as HTMLElement).closest('button') as HTMLButtonElement | null; if (!b) return;
+    if (b.dataset.face) {
+      this.face = fightFace(b.dataset.face); try { localStorage.setItem(FACE_KEY, this.face); } catch {}
+      this.dialog.querySelectorAll('[data-face]').forEach((x) => x.classList.toggle('on', (x as HTMLElement).dataset.face === this.face));
+      return;
+    }
     if (b.dataset.mode && !b.dataset.accept) {
       this.pendingMode = b.dataset.mode;
       const candidates = fightCandidates(this.presence, this.me.id);
@@ -88,8 +101,8 @@ export class FightView {
       void this.fillPickerRecords(candidates.map((u) => u.id));
       return;
     }
-    if (b.dataset.to) { if (!this.live.send({ type: 'fight.invite', to: b.dataset.to, mode: this.pendingMode })) this.toast('連線中斷，稍後再試'); }
-    else if (b.dataset.accept) this.live.send({ type: 'fight.reply', invite: b.dataset.invite, accept: b.dataset.accept === '1', mode: b.dataset.mode ?? 'classic' });
+    if (b.dataset.to) { if (!this.live.send({ type: 'fight.invite', to: b.dataset.to, mode: this.pendingMode, face: this.face })) this.toast('連線中斷，稍後再試'); }
+    else if (b.dataset.accept) this.live.send({ type: 'fight.reply', invite: b.dataset.invite, accept: b.dataset.accept === '1', mode: b.dataset.mode ?? 'classic', face: this.face });
     this.dialog.hidden = true;
   }
   private onLive(m: any) {
@@ -109,7 +122,7 @@ export class FightView {
       if (m.to === this.me.id && !this.live.touch) {
         this.live.inFight = true;
         this.dialog.hidden = false;
-        this.dialog.innerHTML = `<div class="sfv-card"><h3>${esc(m.from_name)} 向你挑戰！</h3><p>對方選了${MODE_NAME[m.from_mode] ?? '經典模式'}。你要用哪種模式？</p><button data-accept="1" data-mode="classic" data-invite="${m.invite}">經典模式接受</button><button data-accept="1" data-mode="beginner" data-invite="${m.invite}">初心模式接受</button><button data-accept="0" data-invite="${m.invite}" class="alt">拒絕</button><p>10 秒後自動拒絕</p></div>`;
+        this.dialog.innerHTML = `<div class="sfv-card"><h3>${esc(m.from_name)} 向你挑戰！</h3><p>對方選了${MODE_NAME[m.from_mode] ?? '經典模式'}。你要用哪種模式？</p>${this.facePicker()}<button data-accept="1" data-mode="classic" data-invite="${m.invite}">經典模式接受</button><button data-accept="1" data-mode="beginner" data-invite="${m.invite}">初心模式接受</button><button data-accept="0" data-invite="${m.invite}" class="alt">拒絕</button><p>10 秒後自動拒絕</p></div>`;
       }
       return;
     }
@@ -208,7 +221,7 @@ export class FightView {
     const opp = c.players.find((p: any) => p.pid !== c.pid);
     if (!opp) return;
     this.pendingMode = c.players[c.pid - 1]?.mode ?? 'classic';
-    if (!this.live.send({ type: 'fight.invite', to: opp.user_id, mode: this.pendingMode })) this.toast('連線中斷，稍後再試');
+    if (!this.live.send({ type: 'fight.invite', to: opp.user_id, mode: this.pendingMode, face: this.face })) this.toast('連線中斷，稍後再試');
   }
   private finishView() { clearTimeout(this.closeTimer); this.closeView(); this.banner.hidden = true; this.current = null; this.visual = null; this.held.clear(); }
   private openView() { if (!this.current) return; if (this.root.hidden) { this.visual = null; this.lastDrawAt = 0; } this.root.hidden = false; }
@@ -249,7 +262,7 @@ export class FightView {
         cv3.hidden = true;
         loading.then((create) => { this.three = create ? create(cv3) : null; cv3.hidden = !this.three; });
       }
-      drawFight(this.ctx, shown, { three: this.three || null, showBoxes: false, me: this.current.pid ? this.current.pid - 1 : -1, names: this.current.players.map((p: any) => p.name), ended });
+      drawFight(this.ctx, shown, { three: this.three || null, faces: this.current.players.map((p: any) => p.face ?? 'chick'), showBoxes: false, me: this.current.pid ? this.current.pid - 1 : -1, names: this.current.players.map((p: any) => p.name), ended });
       const debug = this.root.querySelector('.sfv-debug') as HTMLElement;
       debug.hidden = new URLSearchParams(location.search).get('debug') !== '1';
       if (!debug.hidden) debug.textContent = this.current.player ? `確認 ${this.current.player.C}・預測 ${this.current.player.L}・rollback ${this.current.player.stats.rollbacks}` : `觀戰確認 ${this.current.spectator.tick}`;

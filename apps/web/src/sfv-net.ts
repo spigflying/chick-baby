@@ -453,7 +453,7 @@ export const SFVClient = ((SFV, SFVServer) => {
   function drawFight(ctx, s, opt) {
     const [shx, shy] = fightShake(s);
     const freezeOwner = s.frz > 0 ? s.fo - 1 : -1;
-    if (opt.three) { ctx.clearRect(0, 0, W, H); opt.three.render(s, { shake: [shx, shy], freezeOwner }); }
+    if (opt.three) { ctx.clearRect(0, 0, W, H); opt.three.render(s, { shake: [shx, shy], freezeOwner, faces: opt.faces }); }
     ctx.save(); ctx.translate(shx, shy);
     if (!opt.three) drawStage(ctx);
     drawProjectiles(ctx, s, opt);

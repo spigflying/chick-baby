@@ -30,6 +30,14 @@ beforeEach(() => { setClock(ALWAYS_OPEN); _fightInvites.clear(); _fights.clear()
 afterEach(() => { vi.restoreAllMocks(); _fightInvites.clear(); _fights.clear(); });
 
 describe('formal home 1v1', () => {
+  it('carries each player\'s face choice to the start event; unknown faces fall back to the chick face', async () => {
+    const { sent } = setup();
+    invite(home, 'a', 'b', Date.now(), 'i1:a', 'classic', 'a');
+    const invitation = sent.find((m) => m.kind === 'invite');
+    reply(home, 'b', invitation.invite, true, 'i1:b', 'classic', '../../etc/passwd');
+    for (let i = 0; i < 20 && !_fights.has(home); i++) await new Promise((r) => setTimeout(r, 0));
+    expect(sent.find((m) => m.kind === 'start').players.map((p: any) => p.face)).toEqual(['a', 'chick']);
+  });
   it('lets each player choose a mode and rejects beginner macros from a classic controller', async () => {
     const { sent } = setup();
     invite(home, 'a', 'b', Date.now(), 'i1:a', 'beginner');
