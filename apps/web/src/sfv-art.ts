@@ -127,6 +127,12 @@ export function drawArtChick(ctx, s, i) {
   if (q.id === 'SHINKU' && q.ph === 'active') drawBeam(ctx, s, p);
   return true;
 }
+/** 3D 模式：雞交給 3D 畫，這裡只補 2D 疊加的暈眩星星與真空蛋波光束 */
+export function drawArtExtras(ctx, s, i) {
+  const p = s.p[i];
+  if (SFV.ST_NAME[p.st] === 'DIZZY') dizzyStars(ctx, s, p);
+  if (p.st === SFV.ST.MOVE && SFV.MOVE_LIST[p.mv].id === 'SHINKU' && p.mt >= SFV.MOVE_LIST[p.mv].S && p.mt < SFV.MOVE_LIST[p.mv].S + SFV.MOVE_LIST[p.mv].A) drawBeam(ctx, s, p);
+}
 /** 暈眩：頭上繞圈的小星星（只畫面） */
 function dizzyStars(ctx, s, p) {
   ctx.save(); ctx.strokeStyle = '#2a1a10'; ctx.fillStyle = '#f3d27a'; ctx.lineWidth = 1;

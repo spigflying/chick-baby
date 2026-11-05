@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { SFV, SFVServer } from '@chick/engine';
-import { drawArtChick, drawInkOrb, drawFightFx, fightShake } from './sfv-art';
+import { drawArtChick, drawArtExtras, drawInkOrb, drawFightFx, fightShake } from './sfv-art';
 
 // 預測、回滾與原型共用的繪圖函式；繪圖另由 sfv-draw.ts 對外重匯出。
 // 客戶端：自己與對手都不插值。每 tick 本地預測（對手沿用最後確認的輸入），收到伺服器確認的輸入跟預測不同 → 回到確認狀態用 while 迴圈重算到目前 tick。
@@ -328,8 +328,10 @@ export const SFVClient = ((SFV, SFVServer) => {
       }
     }
     // 有水墨圖就畫圖（招式、走路、受擊都有）；還沒畫的招式（跳攻、摔、炸毛、衝刺、暈眩…）退回火柴雞
-    const art = drawArtChick(ctx, s, i);
-    if (!art) { if (P.lying) drawLying(ctx, ox, oy, p.f, sk); else drawFigure(ctx, ox, oy, p.f, P, sk); }
+    // 3D 模式（opt.three）：雞由 3D 畫，2D 只補集氣、昇龍光弧、星星、光束、文字
+    const art = opt.three ? false : drawArtChick(ctx, s, i);
+    if (opt.three) drawArtExtras(ctx, s, i);
+    else if (!art) { if (P.lying) drawLying(ctx, ox, oy, p.f, sk); else drawFigure(ctx, ox, oy, p.f, P, sk); }
     const mv = p.st === SFV.ST.MOVE ? SFV.MOVE_LIST[p.mv] : null;
     if (!art && mv?.id.startsWith('DP_') && p.mt >= mv.S - 2 && p.mt < mv.S + mv.A + 6) drawUppercut(ctx, ox, oy, p.f, p.mt - mv.S, mv.id === 'DP_EX');
     if (!art && mv && mv.projectile !== undefined && p.mt <= mv.S + 4) drawCharge(ctx, s, i, P, ox, oy, mv);
@@ -450,13 +452,14 @@ export const SFVClient = ((SFV, SFVServer) => {
   }
   function drawFight(ctx, s, opt) {
     const [shx, shy] = fightShake(s);
-    ctx.save(); ctx.translate(shx, shy);
-    drawStage(ctx);
     const freezeOwner = s.frz > 0 ? s.fo - 1 : -1;
+    if (opt.three) { ctx.clearRect(0, 0, W, H); opt.three.render(s, { shake: [shx, shy], freezeOwner }); }
+    ctx.save(); ctx.translate(shx, shy);
+    if (!opt.three) drawStage(ctx);
     drawProjectiles(ctx, s, opt);
     for (let i = 0; i < 2; i++) if (i !== freezeOwner) drawChick(ctx, s, i, opt);
     if (freezeOwner >= 0) { // 超必殺暗場特寫
-      ctx.fillStyle = '#000000d8'; ctx.fillRect(0, 0, W, H);
+      if (!opt.three) { ctx.fillStyle = '#000000d8'; ctx.fillRect(0, 0, W, H); } // 3D 自己把燈調暗
       const p = s.p[freezeOwner];
       ctx.strokeStyle = (s.tick >> 1) & 1 ? '#ffe066' : '#ff3b3b'; ctx.lineWidth = 4;
       ctx.beginPath(); ctx.arc(p.x, sy(-50), 40 + (30 - s.frz) * 6, 0, Math.PI * 2); ctx.stroke();

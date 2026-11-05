@@ -2,6 +2,7 @@
 import { SFV, SFVServer } from '@chick/engine';
 import { SFVClient } from './sfv-net';
 import { preloadFightArt } from './sfv-art';
+import { createFight3D } from './sfv-3d';
 preloadFightArt();
 
 
@@ -60,6 +61,11 @@ preloadFightArt();
   $('jit').addEventListener('input', (e) => { net.jitter = +e.target.value; $('jitOut').textContent = `${net.jitter}ms`; });
   $('opp').addEventListener('change', (e) => { ui.opp = e.target.value; e.target.blur(); });
   $('boxes').addEventListener('change', (e) => { ui.showBoxes = e.target.checked; e.target.blur(); });
+  // 3D 開關：關掉時藏起 3D 畫布、2D 畫布改回不透明（跟原本一樣）
+  const three = createFight3D($('cv3'));
+  const set3d = (on) => { ui.three = on && three ? three : null; $('cv3').style.visibility = ui.three ? 'visible' : 'hidden'; cv.style.background = ui.three ? 'transparent' : '#000'; };
+  $('three').addEventListener('change', (e) => { set3d(e.target.checked); e.target.blur(); });
+  set3d(new URLSearchParams(location.search).get('three') !== '0');
   $('close').addEventListener('click', (e) => { e.target.blur(); if (ui.world) ui.world.room.closesAt = performance.now(); });
   $('resettle').addEventListener('click', (e) => {
     e.target.blur();
@@ -81,11 +87,11 @@ preloadFightArt();
   function render() {
     ui.frame++;
     if (ui.screen === 'select') {
-      SFVClient.drawSelect(ctx, ui.sel, ui.frame);
+      ctx.save(); SFVClient.drawSelect(ctx, ui.sel, ui.frame); ctx.restore();
       if (ui.sel.lockedAt >= 0 && ui.frame - ui.sel.lockedAt > 72) startMatch();
     } else if (ui.world) {
       const c = ui.world.clients[0];
-      SFVClient.drawFight(ctx, c.predicted, { showBoxes: ui.showBoxes, me: 0, names: ['MY_CHICK_BABY（你）', `MY_CHICK_BABY（${ui.opp === 'ai' ? 'CPU' : '木樁'}）`], ended: c.ended, settleText: settleText(ui.world.room) });
+      SFVClient.drawFight(ctx, c.predicted, { three: ui.three, showBoxes: ui.showBoxes, me: 0, names: ['MY_CHICK_BABY（你）', `MY_CHICK_BABY（${ui.opp === 'ai' ? 'CPU' : '木樁'}）`], ended: c.ended, settleText: settleText(ui.world.room) });
       SFVClient.drawFrameMeter(fmCtx, meter, ['你', ui.opp === 'ai' ? 'CPU' : '木樁']);
     }
     requestAnimationFrame(render);
