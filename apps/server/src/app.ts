@@ -1,5 +1,6 @@
 import { buyCar, buyPart, getProfile as getRaceProfile, raceCatalog, raceLeaderboard } from './racing';
 import { buyOutfit, outfitCatalog, ownedOutfits, wearOutfit } from './outfits';
+import { fightRecord } from './fight1v1';
 import { farmAct, farmBuy, farmFeedPet, farmFriends, farmHelp, getFarm } from './farm';
 import Fastify, { type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
@@ -129,6 +130,7 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
       a.get('/race/profile', async (req) => ({ catalog: raceCatalog(), profile: await getRaceProfile(db, req.user!.id) }));
       a.post('/race/buy', async (req) => { const b = (req.body ?? {}) as any; return b.car !== undefined || b.paint !== undefined ? buyCar(db, ctx(req), b.car, b.paint) : buyPart(db, ctx(req), b.kind, b.tier); });
       a.get('/race/leaderboard/:track', async (req) => raceLeaderboard(db, (req.params as any).track));
+      a.get('/fights/record', async (req) => { const v = (req.query as any)?.vs; return fightRecord(db, req.user!.id, typeof v === 'string' && v ? v.split(',') : []); });
       a.get('/leaderboard/stairs', async (req) => g.stairsLeaderboard(db, req.user!.id));
       // ---- v1.7 服飾（皇冠、墨鏡）----
       a.get('/outfits', async (req) => ({ catalog: outfitCatalog(), owned: await ownedOutfits(db, req.user!.id) }));

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SFV } from '@chick/engine';
-import { FightView, fightCandidates, smoothFightState } from '../src/fight-view';
+import { FightView, fightCandidates, smoothFightState, tally } from '../src/fight-view';
 
 const pet = (extra: Record<string, unknown> = {}) => ({ status: 'alive', sleeping: false, sick: false, ...extra });
 
@@ -15,6 +15,13 @@ describe('formal fight opponent picker', () => {
       { id: 'egg', touch: false, pet: pet({ status: 'egg' }) },
     ];
     expect(fightCandidates(users, 'me').map((u) => u.id)).toEqual(['desktop']);
+  });
+});
+
+describe('fight record text', () => {
+  it('shows draws only when there are any', () => {
+    expect(tally({ win: 3, loss: 2, draw: 0 })).toBe('3 勝 2 敗');
+    expect(tally({ win: 0, loss: 0, draw: 1 })).toBe('0 勝 0 敗 1 平');
   });
 });
 

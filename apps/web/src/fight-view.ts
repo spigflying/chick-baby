@@ -4,6 +4,7 @@ import { NetClient, SpectatorClient } from './sfv-net';
 import { drawFight } from './sfv-draw';
 import { preloadFightArt } from './sfv-art';
 import type { Live } from './ws';
+import { api } from './api';
 
 const KEY_BITS = { KeyW: SFV.UP, KeyS: SFV.DOWN, KeyA: SFV.LEFT, KeyD: SFV.RIGHT, KeyU: SFV.LP, KeyI: SFV.HP, KeyJ: SFV.LK, KeyK: SFV.HK, KeyH: SFV.LP | SFV.LK, KeyL: SFV.HP | SFV.HK };
 const EASY_BITS = { KeyO: SFV.EASY_HADO, KeyP: SFV.EASY_DP, KeyN: SFV.EASY_TATSU, KeyM: SFV.EASY_CA };
@@ -79,7 +80,8 @@ export class FightView {
     if (b.dataset.mode && !b.dataset.accept) {
       this.pendingMode = b.dataset.mode;
       const candidates = fightCandidates(this.presence, this.me.id);
-      this.dialog.innerHTML = `<div class="sfv-card"><h3>${MODE_NAME[this.pendingMode]}：挑戰誰？</h3>${candidates.map((u) => `<button data-to="${u.id}">${esc(u.display_name)}・${esc(u.pet.name)}</button>`).join('')}<button data-cancel class="alt">取消</button></div>`;
+      this.dialog.innerHTML = `<div class="sfv-card"><h3>${MODE_NAME[this.pendingMode]}：挑戰誰？</h3><p class="sfv-rec" data-rec-total></p>${candidates.map((u) => `<button data-to="${u.id}">${esc(u.display_name)}・${esc(u.pet.name)}<small class="sfv-rec" data-rec="${u.id}"></small></button>`).join('')}<button data-cancel class="alt">取消</button></div>`;
+      void this.fillPickerRecords(candidates.map((u) => u.id));
       return;
     }
     if (b.dataset.to) { if (!this.live.send({ type: 'fight.invite', to: b.dataset.to, mode: this.pendingMode })) this.toast('連線中斷，稍後再試'); }
@@ -162,6 +164,27 @@ export class FightView {
     const title = m.draw ? '平手' : m.winner === this.me.id ? '你贏了！' : mine ? '你輸了' : `${winner} 獲勝`;
     const detail = mine ? `轉帳 ${coin(mine.transfer)}　獎池 +◎${mine.pool}　合計 ${coin(mine.delta)}` : '比賽結束';
     this.live.send({ type: 'arena.join' }); this.showResult(title, detail, !!mine);
+    if (mine) void this.fillResultRecord(m.fight_id);
+  }
+  /** 選對手清單：自己的總戰績＋跟每個候選人的對戰紀錄（拿不到就不顯示）。 */
+  private async fillPickerRecords(ids: string[]) {
+    try {
+      const r = await api('GET', `/fights/record?vs=${ids.slice(0, 20).join(',')}`);
+      const total = this.dialog.querySelector('[data-rec-total]'); if (total) total.textContent = `你的戰績 ${tally(r.total)}`;
+      for (const id of ids) { const el = this.dialog.querySelector(`[data-rec="${id}"]`); if (el && r.vs[id]) el.textContent = `對戰 ${tally(r.vs[id])}`; }
+    } catch { /* 戰績只是參考，失敗就不顯示 */ }
+  }
+  /** 結果畫面：結算已寫進資料庫，這時查到的戰績已含這一場。 */
+  private async fillResultRecord(fightId: string) {
+    const c = this.current; const opp = c?.players.find((p: any) => p.user_id !== this.me.id); if (!opp) return;
+    try {
+      const r = await api('GET', `/fights/record?vs=${opp.user_id}`);
+      if (this.current?.id !== fightId || !this.current.result) return;
+      const el = this.root.querySelector('.sfv-result') as HTMLElement;
+      const line = document.createElement('em'); line.className = 'sfv-rec';
+      line.textContent = `你的戰績 ${tally(r.total)}　對 ${opp.name} ${tally(r.vs[opp.user_id])}`;
+      el.querySelector('.sfv-again')?.before(line);
+    } catch { /* 戰績只是參考，失敗就不顯示 */ }
   }
   private aborted(reason: string) { if (!this.current) return; this.current.aborted = reason; this.feed({ type: 'sfv.ended', aborted: true }); this.openView(); this.live.inFight = false; this.live.send({ type: 'arena.join' }); this.showResult('比賽中止', '不轉帳、不發獎池', !!this.current.pid); }
   /** 對戰雙方：結果畫面可以直接「再打一場」（同模式再邀請對手），不自動關閉；觀眾照舊 6 秒後返回。 */
@@ -240,4 +263,5 @@ export function smoothFightState(state: any, previous: any, elapsed: number, pid
 }
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>\"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+export const tally = (t: { win: number; loss: number; draw: number }) => `${t.win} 勝 ${t.loss} 敗${t.draw ? ` ${t.draw} 平` : ''}`;
 const coin = (n: number) => `${n >= 0 ? '+' : '−'}◎${Math.abs(n ?? 0)}`;

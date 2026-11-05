@@ -1,5 +1,6 @@
 // 正式 1v1 格鬥：以家為單位選定 authority，房間本身由 @chick/engine 的決定性模組執行。
 import { randomUUID } from 'node:crypto';
+import { sql } from 'kysely';
 import { canFightPet, phaseAt, poolShares, SFV, SFVRoom } from '@chick/engine';
 import type { Db } from './db';
 import type { Bus } from './bus';
@@ -9,6 +10,8 @@ import { clock } from './hours';
 import { env } from './env';
 import { raceBusy } from './racing';
 import { mmatches, stairsInviting } from './mstairs';
+import { fail } from './errors';
+import { isUuid } from './util';
 
 const INVITE_MS = 10_000;
 const START_GUARD_MS = 315_000;
@@ -286,6 +289,28 @@ async function reconcile(home: string) {
 export async function abortFights(reason = 'SERVER_CLOSED') {
   invites.clear();
   await Promise.all([...fights.values()].map((f) => { f.retryAt = 0; return abort(f, reason); }));
+}
+
+export interface FightTally { win: number; loss: number; draw: number }
+/**
+ * 1v1 戰績：只算打完的正式 1v1（status = done；中止不算、棄權算輸）。
+ * 混戰的列 participants 沒有 mode，用它區分。vs 最多 20 個對手，回傳跟每個人的對戰紀錄（沒打過就是 0/0/0）。
+ */
+export async function fightRecord(db: Db, me: string, vs: string[] = []): Promise<{ total: FightTally; vs: Record<string, FightTally> }> {
+  if (vs.length > 20 || vs.some((id) => !isUuid(id))) fail('BAD_REQUEST');
+  const rows = await sql<{ opp: string; win: number; loss: number; draw: number }>`
+    SELECT CASE WHEN a_user_id = ${me} THEN b_user_id ELSE a_user_id END AS opp,
+      count(*) FILTER (WHERE winner_user_id = ${me})::int AS win,
+      count(*) FILTER (WHERE winner_user_id IS NOT NULL AND winner_user_id <> ${me})::int AS loss,
+      count(*) FILTER (WHERE winner_user_id IS NULL)::int AS draw
+    FROM fights
+    WHERE status = 'done' AND (a_user_id = ${me} OR b_user_id = ${me}) AND (participants->0->>'mode') IS NOT NULL
+    GROUP BY 1`.execute(db).then((r) => r.rows);
+  const total: FightTally = { win: 0, loss: 0, draw: 0 };
+  for (const r of rows) { total.win += r.win; total.loss += r.loss; total.draw += r.draw; }
+  const out: Record<string, FightTally> = {};
+  for (const id of vs) { const r = rows.find((x) => x.opp === id); out[id] = { win: r?.win ?? 0, loss: r?.loss ?? 0, draw: r?.draw ?? 0 }; }
+  return { total, vs: out };
 }
 
 export const _fightInvites = invites;

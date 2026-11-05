@@ -741,6 +741,17 @@ describe('home fight 1v1', () => {
     expect(await db.selectFrom('fights').select(['status', 'winner_user_id']).where('id', '=', start.fight_id).executeTakeFirstOrThrow())
       .toEqual({ status: 'done', winner_user_id: a.id });
     expect(await db.selectFrom('audit_log').select('id').where('action', '=', 'fight.settle').where('target_id', '=', start.fight_id).execute()).toHaveLength(1);
+
+    // 戰績：棄權算輸；再塞一場平手、一場中止（不算）、一場混戰（participants 沒 mode，不算）
+    const row = await db.selectFrom('fights').selectAll().where('id', '=', start.fight_id).executeTakeFirstOrThrow();
+    const copy = (patch: any) => db.insertInto('fights').values({ ...row, id: randomUUID(), participants: JSON.stringify(row.participants), ...patch }).execute();
+    await copy({ winner_user_id: null });
+    await copy({ status: 'aborted', winner_user_id: null });
+    await copy({ winner_user_id: b.id, participants: JSON.stringify([{ user_id: a.id }, { user_id: b.id }]) });
+    const ra = await a.call('GET', `/api/fights/record?vs=${b.id},${spectator.id}`);
+    expect(ra.json).toEqual({ total: { win: 1, loss: 0, draw: 1 }, vs: { [b.id]: { win: 1, loss: 0, draw: 1 }, [spectator.id]: { win: 0, loss: 0, draw: 0 } } });
+    expect((await b.call('GET', '/api/fights/record')).json).toEqual({ total: { win: 0, loss: 1, draw: 1 }, vs: {} });
+    expect((await a.call('GET', '/api/fights/record?vs=not-a-uuid')).status).toBe(400);
     wa.ws.terminate(); wc.ws.terminate(); await new Promise((r) => setTimeout(r, 300));
   });
 
