@@ -5,6 +5,7 @@ import type { Live } from './ws';
 import { EAST, LAYOUT, SCENE, type Box } from './farm-layout';
 import * as realisticArt from './farm-art';
 import * as classicArt from './farm-art-classic';
+import * as storybookArt from './farm-art-storybook';
 import { expandOffer, FARM_ERR, feedChoices, fieldBadge, helpTargets, hudModel, loadErrorAction, panelValid, plantChoices, remainText, stallDefaults, type FarmPayload } from './farm-model';
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -20,11 +21,13 @@ type Panel = null | { k: 'plant'; idx: number } | { k: 'animal'; st: AnimalStati
 /** 主畫面的田是 0–11，東邊新地的田是 12–17。 */
 const fieldBox = (area: 'main' | 'east', i: number): Box | undefined => (area === 'main' ? LAYOUT.fields[i] : EAST.fields[i - FARM.baseFields]);
 const fieldIdxs = (area: 'main' | 'east') => (area === 'main' ? [...LAYOUT.fields.keys()] : EAST.fields.map((_, i) => FARM.baseFields + i));
-type FarmTheme = 'realistic' | 'classic';
+type FarmTheme = 'storybook' | 'realistic' | 'classic';
+const THEMES: FarmTheme[] = ['storybook', 'realistic', 'classic'];
+const THEME_LABEL: Record<FarmTheme, string> = { storybook: '仙境手繪', realistic: '寫實 3D', classic: '原版插畫' };
 const themeKey = (userId: string) => `chick-farm-theme-${userId}`;
 function savedTheme(userId: string): FarmTheme {
-  try { return localStorage.getItem(themeKey(userId)) === 'classic' ? 'classic' : 'realistic'; }
-  catch { return 'realistic'; }
+  try { const saved = localStorage.getItem(themeKey(userId)); return THEMES.find((t) => t === saved) ?? 'storybook'; }
+  catch { return 'storybook'; }
 }
 
 let symbolsInjected = false;
@@ -42,8 +45,8 @@ export class FarmView {
   private paused = false;
   /** 主畫面或東邊新地 */
   private area: 'main' | 'east' = 'main';
-  private theme: FarmTheme = 'realistic';
-  private get art() { return this.theme === 'classic' ? classicArt : realisticArt; }
+  private theme: FarmTheme = 'storybook';
+  private get art() { return this.theme === 'classic' ? classicArt : this.theme === 'storybook' ? storybookArt : realisticArt; }
 
   constructor(private live: Live, private me: { id: string; display_name: string }, private toast: (s: string) => void, private setWallet: (n: number) => void, private wallet: () => number) {
     this.theme = savedTheme(this.me.id);
@@ -177,11 +180,12 @@ export class FarmView {
   private render() {
     const p = this.data; if (!p) return;
     this.root.classList.toggle('classic', this.theme === 'classic');
+    this.root.classList.toggle('storybook', this.theme === 'storybook');
     const owner = p.is_owner;
     const hud = hudModel(p, this.wallet());
     this.root.innerHTML = `
       <div class="farm-top"><b class="farm-title">${owner ? '我的農場' : `${esc(p.owner.display_name)} 的農場`}</b><span class="farm-place">${this.area === 'east' ? '東邊新地' : '陽光農場'}</span>
-        <button type="button" class="farm-theme" data-act="theme" aria-label="切換農場畫風，目前為${this.theme === 'realistic' ? '寫實 3D' : '原版插畫'}">畫風：${this.theme === 'realistic' ? '寫實 3D' : '原版插畫'}</button>
+        <button type="button" class="farm-theme" data-act="theme" aria-label="切換農場畫風，目前為${THEME_LABEL[this.theme]}">畫風：${THEME_LABEL[this.theme]}</button>
         <button type="button" class="farm-x" data-act="close" aria-label="關閉農場（Esc）">✕</button></div>
       <div class="farm-stage">
         <svg class="scene" viewBox="0 0 ${SCENE.w} ${SCENE.h}" role="img" aria-label="農場畫面">${this.art.sceneDefs()}${this.scene()}<g class="pills">${this.pills()}</g></svg>
@@ -242,7 +246,7 @@ export class FarmView {
     const helps = new Set(helpTargets(p).map((h) => (h.kind === 'water' ? `w${h.idx}` : 'tree')));
     for (const i of fieldIdxs(this.area)) {
       const b = fieldBox(this.area, i)!, fd = d.fields[i];
-      if (fd.locked) { if (p.is_owner && this.area === 'east' && expandOffer(p, i).kind === 'buy') o += this.art.pill(b.x + b.w / 2, b.y - (this.theme === 'realistic' ? 42 : 18), '可以買', 'ready'); continue; }
+      if (fd.locked) { if (p.is_owner && this.area === 'east' && expandOffer(p, i).kind === 'buy') o += this.art.pill(b.x + b.w / 2, b.y - (this.theme === 'classic' ? 18 : 42), '可以買', 'ready'); continue; }
       const cx = b.x + b.w / 2, y = b.y - 18;
       if (helps.has(`w${i}`)) { o += this.art.pill(cx, y, '澆水', 'alert'); continue; }
       const badge = fieldBadge({ ...fd, remainMs: this.remain(fd.remainMs) }, p.is_owner);
@@ -433,7 +437,7 @@ export class FarmView {
   private onAct(b: HTMLElement) {
     const a = b.dataset.act!, pn = this.panel;
     if (a === 'theme') {
-      this.theme = this.theme === 'realistic' ? 'classic' : 'realistic';
+      this.theme = THEMES[(THEMES.indexOf(this.theme) + 1) % THEMES.length];
       try { localStorage.setItem(themeKey(this.me.id), this.theme); } catch { /* 私密模式仍可在當次切換 */ }
       this.render();
       return this.root.querySelector<HTMLButtonElement>('.farm-theme')?.focus();
