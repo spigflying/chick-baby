@@ -14,6 +14,7 @@ export const FACES = {
   chick: null,
   a: { name: '臉 A', src: '/fight/face_a.webp', eyes: [[0.371, 0.463], [0.654, 0.463]], nose: [0.514, 0.625], cheek: [0.31, 0.62] },
   b: { name: '臉 B', src: '/fight/face_b.webp', eyes: [[0.371, 0.457], [0.625, 0.457]], nose: [0.514, 0.598], cheek: [0.31, 0.6] },
+  c: { name: '臉 C', src: '/fight/face_c.webp', eyes: [[0.35, 0.479], [0.646, 0.47]], nose: [0.504, 0.661], cheek: [0.3, 0.64] },
 };
 export const FACE_IDS = Object.keys(FACES);
 // 照片貼在頭上的範圍：經度 PW、緯度 T0～T0+TH（弧長寬高都約 50 px，圖不會變形）

@@ -9,7 +9,7 @@ import { api } from './api';
 const KEY_BITS = { KeyW: SFV.UP, KeyS: SFV.DOWN, KeyA: SFV.LEFT, KeyD: SFV.RIGHT, KeyU: SFV.LP, KeyI: SFV.HP, KeyJ: SFV.LK, KeyK: SFV.HK, KeyH: SFV.LP | SFV.LK, KeyL: SFV.HP | SFV.HK };
 const EASY_BITS = { KeyO: SFV.EASY_HADO, KeyP: SFV.EASY_DP, KeyN: SFV.EASY_TATSU, KeyM: SFV.EASY_CA };
 const MODE_NAME = { classic: '經典模式', beginner: '初心模式' };
-const FACE_NAME: Record<string, string> = { chick: '雞臉', a: '臉 A', b: '臉 B' };
+const FACE_NAME: Record<string, string> = { chick: '雞臉', a: '臉 A', b: '臉 B', c: '臉 C' };
 const FACE_KEY = 'sfv-face';
 const loadFace = () => { try { return fightFace(localStorage.getItem(FACE_KEY)); } catch { return 'chick'; } };
 const NOTICE: Record<string, string> = {
