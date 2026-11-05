@@ -706,7 +706,7 @@ describe('home fight 1v1', () => {
 
   afterEach(async () => {
     const m = await import('../src/fight1v1');
-    m._fightInvites.clear(); m._fights.clear(); m._fightCooldowns.clear(); setClock(ALWAYS_OPEN);
+    m._fightInvites.clear(); m._fights.clear(); setClock(ALWAYS_OPEN);
   });
 
   it('uses targeted desktop consent, pins two players, and a disconnect forfeits with idempotent DB settlement', async () => {

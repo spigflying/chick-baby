@@ -1,6 +1,6 @@
 // 正式 1v1 格鬥：以家為單位選定 authority，房間本身由 @chick/engine 的決定性模組執行。
 import { randomUUID } from 'node:crypto';
-import { ARENA_PARAMS, canFightPet, phaseAt, poolShares, SFV, SFVRoom } from '@chick/engine';
+import { canFightPet, phaseAt, poolShares, SFV, SFVRoom } from '@chick/engine';
 import type { Db } from './db';
 import type { Bus } from './bus';
 import type { PresenceStore, PresenceUser } from './presence';
@@ -12,7 +12,6 @@ import { mmatches, stairsInviting } from './mstairs';
 
 const INVITE_MS = 10_000;
 const START_GUARD_MS = 315_000;
-const HOME_COOLDOWN_MS = ARENA_PARAMS.homeCooldownMs;
 const STAKE = 20;
 
 type FightMode = 'classic' | 'beginner';
@@ -30,7 +29,6 @@ interface Deps {
 
 const invites = new Map<string, FightInvite>();
 const fights = new Map<string, ActiveFight>();
-const cooldowns = new Map<string, number>();
 const starting = new Set<string>();
 const reconciled = new Set<string>();
 const reconciling = new Set<string>();
@@ -71,7 +69,6 @@ function startBlock(home: string, a: string, b: string, now = Date.now()): strin
   if (phase !== 'open') return phase === 'closing' ? 'GAME_CLOSING' : 'GAME_CLOSED';
   const closes = clock().status(now).closes_at;
   if (closes !== null && now + START_GUARD_MS > closes) return 'GAME_CLOSING';
-  if ((cooldowns.get(home) ?? 0) > now) return 'HOME_COOLDOWN';
   if (raceBusy(home)) return 'RACE_BUSY';
   if (stairsInviting(home) || mmatches.has(home)) return 'STAIRS_BUSY';
   if (fightBusy(home) && !invites.has(home)) return 'FIGHT_BUSY';
@@ -214,7 +211,7 @@ async function finish(f: ActiveFight, win = f.room.state.win, reason = 'over') {
   } catch (err) { console.error('fight settle failed', err); f.retryAt = Date.now() + 1000; }
   finally {
     f.settling = false;
-    if (completed) { cooldowns.set(f.home, Date.now() + HOME_COOLDOWN_MS); if (fights.get(f.home) === f) fights.delete(f.home); }
+    if (completed && fights.get(f.home) === f) fights.delete(f.home); // 1v1 不設冷卻：結束就能馬上再打一場
   }
 }
 async function abort(f: ActiveFight, reason: string) {
@@ -228,7 +225,7 @@ async function abort(f: ActiveFight, reason: string) {
   } catch (err) { console.error('fight abort failed', err); f.retryAt = Date.now() + 1000; }
   finally {
     f.settling = false;
-    if (completed) { cooldowns.set(f.home, Date.now() + HOME_COOLDOWN_MS); if (fights.get(f.home) === f) fights.delete(f.home); }
+    if (completed && fights.get(f.home) === f) fights.delete(f.home); // 1v1 不設冷卻：結束就能馬上再打一場
   }
 }
 
@@ -281,11 +278,8 @@ export function onFightPresence(home: string) {
 async function reconcile(home: string) {
   if (!deps || !isFightAuthority(home) || fights.has(home)) return;
   try {
-    const last = await deps.db.selectFrom('fights').select('ended_at').where('home_id', '=', home).where('ended_at', 'is not', null).orderBy('ended_at', 'desc').executeTakeFirst();
-    if (last?.ended_at) cooldowns.set(home, Math.max(cooldowns.get(home) ?? 0, new Date(last.ended_at).getTime() + HOME_COOLDOWN_MS));
     const stale = await deps.db.updateTable('fights').set({ status: 'aborted', reason: 'AUTHORITY_CHANGED', ended_at: new Date() })
       .where('home_id', '=', home).where('status', '=', 'playing').returning('id').execute();
-    if (stale.length) cooldowns.set(home, Math.max(cooldowns.get(home) ?? 0, Date.now() + HOME_COOLDOWN_MS));
     for (const row of stale) output({ t: 'fight.event', home, kind: 'ended', fight_id: row.id, aborted: true, reason: 'AUTHORITY_CHANGED' });
   } catch (err) { console.error('fight reconcile failed', err); reconciled.delete(home); }
 }
@@ -296,4 +290,3 @@ export async function abortFights(reason = 'SERVER_CLOSED') {
 
 export const _fightInvites = invites;
 export const _fights = fights;
-export const _fightCooldowns = cooldowns;

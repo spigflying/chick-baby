@@ -10,7 +10,7 @@ const EASY_BITS = { KeyO: SFV.EASY_HADO, KeyP: SFV.EASY_DP, KeyN: SFV.EASY_TATSU
 const MODE_NAME = { classic: '經典模式', beginner: '初心模式' };
 const NOTICE: Record<string, string> = {
   TOUCH_DEVICE: '手機只能觀戰，請用電腦挑戰', NO_OPPONENT: '目前沒有可以挑戰的對手', NOT_ELIGIBLE: '寵物必須活著、醒著且沒有生病',
-  FIGHT_BUSY: '這個家已經有格鬥邀請或比賽', RACE_BUSY: '有人正在賽車', STAIRS_BUSY: '有人正在下樓梯', HOME_COOLDOWN: '剛打完，請等 30 秒',
+  FIGHT_BUSY: '這個家已經有格鬥邀請或比賽', RACE_BUSY: '有人正在賽車', STAIRS_BUSY: '有人正在下樓梯', 
   OWNER_OFFLINE: '主人不在家', OWNER_AWAY: '主人外出了', OWNER_SLEEPING: '主人的寵物在睡覺', OWNER_SICK: '主人的寵物生病了',
   GAME_CLOSING: '快關門了，時間不夠打一場', DECLINED: '對方拒絕了挑戰', TIMEOUT: '對方沒有回覆', INVITE_GONE: '這個邀請已經失效', BAD_MODE: '請重新選擇戰鬥模式', INTERNAL: '格鬥開場失敗，請稍後再試',
 };
@@ -48,6 +48,10 @@ export class FightView {
     this.root.querySelector('.sfv-close')!.addEventListener('click', () => this.closeView());
     this.banner.addEventListener('click', () => this.openView());
     this.dialog.addEventListener('click', (e) => this.dialogClick(e));
+    this.root.querySelector('.sfv-result')!.addEventListener('click', (e) => {
+      const b = (e.target as HTMLElement).closest('button'); if (!b) return;
+      if (b.dataset.rematch) this.rematch(); else this.finishView();
+    });
     addEventListener('keydown', this.keyDown); addEventListener('keyup', this.keyUp); addEventListener('blur', this.blur);
     this.off = live.on((m) => this.onLive(m));
     this.raf = requestAnimationFrame(this.draw);
@@ -157,12 +161,27 @@ export class FightView {
     const winner = m.players?.find((p: any) => p.user_id === m.winner)?.name ?? this.current.players.find((p: any) => p.user_id === m.winner)?.name;
     const title = m.draw ? '平手' : m.winner === this.me.id ? '你贏了！' : mine ? '你輸了' : `${winner} 獲勝`;
     const detail = mine ? `轉帳 ${coin(mine.transfer)}　獎池 +◎${mine.pool}　合計 ${coin(mine.delta)}` : '比賽結束';
-    this.live.send({ type: 'arena.join' }); this.showResult(title, detail);
+    this.live.send({ type: 'arena.join' }); this.showResult(title, detail, !!mine);
   }
-  private aborted(reason: string) { if (!this.current) return; this.current.aborted = reason; this.feed({ type: 'sfv.ended', aborted: true }); this.openView(); this.live.inFight = false; this.live.send({ type: 'arena.join' }); this.showResult('比賽中止', '不轉帳、不發獎池'); }
-  private showResult(title: string, detail: string) {
-    const el = this.root.querySelector('.sfv-result') as HTMLElement; el.hidden = false; el.innerHTML = `<b>${esc(title)}</b><span>${esc(detail)}</span><small>按 Enter 關閉，或 6 秒後自動返回</small>`;
-    clearTimeout(this.closeTimer); this.closeTimer = window.setTimeout(() => this.finishView(), 6000);
+  private aborted(reason: string) { if (!this.current) return; this.current.aborted = reason; this.feed({ type: 'sfv.ended', aborted: true }); this.openView(); this.live.inFight = false; this.live.send({ type: 'arena.join' }); this.showResult('比賽中止', '不轉帳、不發獎池', !!this.current.pid); }
+  /** 對戰雙方：結果畫面可以直接「再打一場」（同模式再邀請對手），不自動關閉；觀眾照舊 6 秒後返回。 */
+  private showResult(title: string, detail: string, player = false) {
+    const el = this.root.querySelector('.sfv-result') as HTMLElement; el.hidden = false;
+    clearTimeout(this.closeTimer);
+    if (player) {
+      el.innerHTML = `<b>${esc(title)}</b><span>${esc(detail)}</span><div class="sfv-again"><button data-rematch="1">再打一場（Enter）</button><button class="alt">離開（Esc）</button></div>`;
+      return;
+    }
+    el.innerHTML = `<b>${esc(title)}</b><span>${esc(detail)}</span><small>按 Enter 關閉，或 6 秒後自動返回</small>`;
+    this.closeTimer = setTimeout(() => this.finishView(), 6000) as any;
+  }
+  /** 用上一場自己的模式再邀請同一個對手；對方照一般邀請流程選模式接受。 */
+  rematch() {
+    const c = this.current; if (!c?.pid) return;
+    const opp = c.players.find((p: any) => p.pid !== c.pid);
+    if (!opp) return;
+    this.pendingMode = c.players[c.pid - 1]?.mode ?? 'classic';
+    if (!this.live.send({ type: 'fight.invite', to: opp.user_id, mode: this.pendingMode })) this.toast('連線中斷，稍後再試');
   }
   private finishView() { clearTimeout(this.closeTimer); this.closeView(); this.banner.hidden = true; this.current = null; this.visual = null; this.held.clear(); }
   private openView() { if (!this.current) return; if (this.root.hidden) { this.visual = null; this.lastDrawAt = 0; } this.root.hidden = false; }
@@ -178,7 +197,12 @@ export class FightView {
   private mask() { let m = 0; for (const code of this.held) m |= KEY_BITS[code] ?? (this.current?.players[this.current.pid - 1]?.mode === 'beginner' ? EASY_BITS[code] : 0) ?? 0; return m; }
   private keyDown = (e: KeyboardEvent) => {
     if (this.root.hidden) return;
-    if (this.current?.result || this.current?.aborted) { if (e.code === 'Enter') { e.preventDefault(); this.finishView(); } return; }
+    if (this.current?.result || this.current?.aborted) {
+      if (!this.dialog.hidden) return; // 對方的再戰邀請視窗開著時，交給視窗按鈕
+      if (e.code === 'Enter') { e.preventDefault(); if (this.current.pid) this.rematch(); else this.finishView(); }
+      else if (e.code === 'Escape') { e.preventDefault(); this.finishView(); }
+      return;
+    }
     if (!this.current?.pid) { if (e.code === 'Escape') { e.preventDefault(); this.closeView(); } return; }
     if (KEY_BITS[e.code] !== undefined || (this.current.players[this.current.pid - 1]?.mode === 'beginner' && EASY_BITS[e.code] !== undefined)) { e.preventDefault(); this.held.add(e.code); }
   };

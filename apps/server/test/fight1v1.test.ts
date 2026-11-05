@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ALWAYS_OPEN, makeClock, SFV, SFVRoom } from '@chick/engine';
 import { setClock } from '../src/hours';
 import { PresenceStore, type PresenceUser } from '../src/presence';
-import { _fightCooldowns, _fightInvites, _fights, abortFights, fightPool, initFight1v1, input, invite, onFightBus, onFightPresence, reply, routeFightIntent, stepFights } from '../src/fight1v1';
+import { _fightInvites, _fights, abortFights, fightPool, initFight1v1, input, invite, onFightBus, onFightPresence, reply, routeFightIntent, stepFights } from '../src/fight1v1';
 
 const home = 'home-1';
 const pet = (id: string) => ({ id: `pet-${id}`, name: id, species: 'chicken', status: 'alive' as const, sleeping: false, sick: false, mood: 'happy' as const });
@@ -26,8 +26,8 @@ function setup() {
   return { db, presence, sent, rows };
 }
 
-beforeEach(() => { setClock(ALWAYS_OPEN); _fightInvites.clear(); _fights.clear(); _fightCooldowns.clear(); });
-afterEach(() => { vi.restoreAllMocks(); _fightInvites.clear(); _fights.clear(); _fightCooldowns.clear(); });
+beforeEach(() => { setClock(ALWAYS_OPEN); _fightInvites.clear(); _fights.clear(); });
+afterEach(() => { vi.restoreAllMocks(); _fightInvites.clear(); _fights.clear(); });
 
 describe('formal home 1v1', () => {
   it('lets each player choose a mode and rejects beginner macros from a classic controller', async () => {
@@ -136,6 +136,17 @@ describe('formal home 1v1', () => {
     await abortFights('SIGTERM');
     expect(_fights.has(home)).toBe(false);
     expect(sent).toContainEqual(expect.objectContaining({ t: 'fight.event', kind: 'ended', fight_id: fightId, aborted: true, reason: 'SIGTERM' }));
+  });
+
+  it('an ended fight can be rematched right away (no home cooldown)', async () => {
+    const { sent } = setup();
+    invite(home, 'a', 'b', Date.now(), 'i1:a');
+    reply(home, 'b', _fightInvites.get(home)!.id, true, 'i1:b');
+    for (let i = 0; i < 20 && !_fights.has(home); i++) await new Promise((r) => setTimeout(r, 0));
+    await abortFights('BOTH_LEFT'); // 結束（中止與結算走同一段冷卻邏輯）
+    expect(_fights.has(home)).toBe(false);
+    invite(home, 'b', 'a', Date.now(), 'i1:b');
+    expect(sent.at(-1)).toMatchObject({ t: 'fight.event', kind: 'invite', from: 'b', to: 'a' });
   });
 });
 

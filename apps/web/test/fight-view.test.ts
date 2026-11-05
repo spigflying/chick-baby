@@ -31,6 +31,31 @@ describe('fight rendering', () => {
     expect(send).toHaveBeenLastCalledWith({ type: 'fight.reply', invite: 'round-1', accept: true, mode: 'classic' });
   });
 
+  it('players get a rematch button that re-invites the same opponent with their own mode; spectators auto-close', () => {
+    vi.useFakeTimers();
+    try {
+      const el = { hidden: true, innerHTML: '' };
+      const send = vi.fn(() => true);
+      const view = Object.create(FightView.prototype) as any;
+      view.root = { querySelector: () => el };
+      view.live = { send };
+      view.current = { id: 'f1', pid: 2, players: [{ user_id: 'a', pid: 1, mode: 'classic' }, { user_id: 'me', pid: 2, mode: 'beginner' }] };
+      view.finishView = vi.fn();
+      view.showResult('你贏了！', '合計 +◎20', true);
+      expect(el.innerHTML).toContain('再打一場');
+      vi.advanceTimersByTime(10_000);
+      expect(view.finishView).not.toHaveBeenCalled();
+      view.rematch();
+      expect(send).toHaveBeenLastCalledWith({ type: 'fight.invite', to: 'a', mode: 'beginner' });
+      view.showResult('a 獲勝', '比賽結束');
+      expect(el.innerHTML).not.toContain('再打一場');
+      vi.advanceTimersByTime(6000);
+      expect(view.finishView).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows the chosen mode’s own move list', () => {
     const help = { innerHTML: '', textContent: '' };
     const view = Object.create(FightView.prototype) as any;
