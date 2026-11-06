@@ -83,7 +83,7 @@ export function simulateFarm(opts: { days: number; sessions: 'A' | 'B' | 'none';
     for (let i = 0; i < FARM.fieldCount; i++) {
       if (!fieldOpen(s, i) || s.fields[i].crop) continue;
       const want = unlockedCrops.find((c) => (need[c] ?? 0) > 0);
-      if (!want && invCount(s) >= barnCap(s) * 0.5) continue; // 沒人要的作物只在倉庫還空時種（賺經驗）
+      if (!want && invCount(s) >= Math.min(barnCap(s) * 0.5, 25)) continue; // 放大倉庫後仍照原本庫存量決定是否補種
       const crop = want ?? best;
       if (tryAct({ type: 'plant', idx: i, crop }, now) && want) need[want]! -= CROPS[want].out.qty;
     }
@@ -93,12 +93,12 @@ export function simulateFarm(opts: { days: number; sessions: 'A' | 'B' | 'none';
       const o = s.orders[i]; if (!o) continue;
       if (o.items.some((it) => (s.inv[it.item] ?? 0) + (pipe[it.item] ?? 0) < it.qty)) tryAct({ type: 'discard', slot: i }, now);
     }
-    // 倉庫超過一半：從最便宜的賣到 40%（訂單要的先留著）
-    if (invCount(s) > barnCap(s) * 0.5) {
+    // 庫存超過原本的 25 格：從最便宜的賣到 20 格（訂單要的先留著）
+    if (invCount(s) > Math.min(barnCap(s) * 0.5, 25)) {
       const keep = allNeeds(s);
       const items = (Object.keys(s.inv) as FarmItemId[]).sort((a, b) => FARM_ITEMS[a].sell - FARM_ITEMS[b].sell);
       for (const it of items) {
-        while (invCount(s) > barnCap(s) * 0.4 && (s.inv[it] ?? 0) > (keep[it] ?? 0)) if (!tryAct({ type: 'sell', item: it, qty: 1 }, now)) break;
+        while (invCount(s) > Math.min(barnCap(s) * 0.4, 20) && (s.inv[it] ?? 0) > (keep[it] ?? 0)) if (!tryAct({ type: 'sell', item: it, qty: 1 }, now)) break;
       }
     }
   }

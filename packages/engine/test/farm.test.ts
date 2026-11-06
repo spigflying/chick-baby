@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ALWAYS_OPEN, makeClock, parseOpenHours,
-  newFarm, loadFarm, applyFarm, applyHelp, describeFarm, stageOf, treeWithered, genOrder, refreshOrders, barnCap, invCount,
+  newFarm, loadFarm, applyFarm, applyHelp, visitCollect, describeFarm, stageOf, treeWithered, genOrder, refreshOrders, barnCap, invCount,
   fieldsUnlocked, orderSlots, FarmError, FARM, FARM_ITEMS, CROPS, ANIMALS, RECIPES, type FarmState, type FarmItemId,
 } from '../src';
 
@@ -25,14 +25,14 @@ function itemLevel(item: FarmItemId): number {
 }
 
 describe('newFarm', () => {
-  it('starts at Lv1 with 6 usable fields, 3 orders and an empty 50-slot barn', () => {
+  it('starts at Lv1 with 6 usable fields, 3 orders and an empty 200-slot barn', () => {
     const s = fresh();
     const d = describeFarm(s, T0, C);
     expect(s.level).toBe(1); expect(s.seed).toBe(42);
     expect(s.fields).toHaveLength(18); // 第二階段：12–17 是東邊新地要買的田
     expect(d.fields.filter((f) => !f.locked)).toHaveLength(6);
     expect(d.orders.filter((o) => 'order' in o)).toHaveLength(3);
-    expect(d.barn).toEqual({ used: 0, cap: 50 });
+    expect(d.barn).toEqual({ used: 0, cap: 200 });
   });
   it('unlock tables', () => {
     expect([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 20].map(fieldsUnlocked)).toEqual([6, 7, 8, 8, 9, 10, 10, 11, 11, 12, 12]);
@@ -73,9 +73,9 @@ describe('fields', () => {
   it('collectAll stops at barn cap without losing anything', () => {
     const s = fresh();
     for (const i of [0, 1, 2]) applyFarm(s, { type: 'plant', idx: i, crop: 'wheat' }, T0, C);
-    give(s, 'carrot', 47); // 47 + 2 = 49 → 第二格 49 + 2 = 51 > 50
+    give(s, 'carrot', 197); // 197 + 2 = 199 → 第二格 201 > 200
     applyFarm(s, { type: 'collectAll' }, T0 + 2 * M, C);
-    expect(invCount(s)).toBe(49);
+    expect(invCount(s)).toBe(199);
     expect(invCount(s)).toBeLessThanOrEqual(barnCap(s));
     expect(s.fields[0].crop).toBeNull();
     const d = describeFarm(s, T0 + 2 * M, C);
@@ -85,14 +85,48 @@ describe('fields', () => {
     const s = fresh(4); give(s, 'wheat', 2); give(s, 'egg', 1);
     applyFarm(s, { type: 'craft', recipe: 'bread' }, T0, C);
     applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C);
-    give(s, 'carrot', 48); // 剩 2 格：先收小麥（2）就收不了麵包
+    give(s, 'carrot', 198); // 剩 2 格：先收小麥（2）就收不了麵包
     applyFarm(s, { type: 'collectAll' }, T0 + 60 * M, C);
     expect(s.inv.bread).toBe(1); expect(s.fields[0].crop).toBe('wheat');
   });
   it('harvest into a full barn throws BARN_FULL and keeps the crop', () => {
-    const s = fresh(); applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C); give(s, 'carrot', 49);
+    const s = fresh(); applyFarm(s, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C); give(s, 'carrot', 199);
     expect(code(() => applyFarm(s, { type: 'harvest', idx: 0 }, T0 + 2 * M, C))).toBe('BARN_FULL');
     expect(s.fields[0].crop).toBe('wheat');
+  });
+});
+
+describe('visitor collection', () => {
+  it('moves ripe crops, tree fruit, animal products and finished goods into the visitor barn', () => {
+    const owner = fresh(4), visitor = fresh();
+    applyFarm(owner, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C);
+    give(owner, 'carrot', 1);
+    applyFarm(owner, { type: 'feed', station: 'hutch', i: 0 }, T0, C);
+    give(owner, 'wheat', 2); give(owner, 'egg', 1);
+    applyFarm(owner, { type: 'craft', recipe: 'bread' }, T0, C);
+    expect(visitCollect(owner, visitor, { kind: 'field', idx: 0 }, T0 + 2 * M, C)).toMatchObject({ item: 'wheat', qty: 2 });
+    expect(visitCollect(owner, visitor, { kind: 'tree' }, T0 + 2 * H, C)).toMatchObject({ item: 'apple', qty: 3 });
+    expect(visitCollect(owner, visitor, { kind: 'animal', station: 'hutch', i: 0 }, T0 + 2 * H, C)).toMatchObject({ item: 'wool', qty: 1 });
+    expect(visitCollect(owner, visitor, { kind: 'job', station: 'bakery' }, T0 + 2 * H, C)).toMatchObject({ item: 'bread', qty: 1 });
+    expect(visitor.inv).toMatchObject({ wheat: 2, apple: 3, wool: 1, bread: 1 });
+    expect(owner.inv.wheat).toBeUndefined();
+    expect(owner.fields[0].crop).toBeNull();
+    expect(owner.animals.hutch[0].ready).toBeNull();
+    expect(owner.jobs.bakery).toHaveLength(0);
+    expect(owner.xp).toBe(0);
+    expect(visitor.xp).toBeGreaterThan(0);
+    expect(code(() => visitCollect(owner, visitor, { kind: 'field', idx: 0 }, T0 + 2 * H, C))).toBe('NOT_READY');
+  });
+  it('rejects unripe resources and a full visitor barn without consuming the source', () => {
+    const owner = fresh(), visitor = fresh();
+    applyFarm(owner, { type: 'plant', idx: 0, crop: 'wheat' }, T0, C);
+    expect(code(() => visitCollect(owner, visitor, { kind: 'field', idx: 0 }, T0 + M, C))).toBe('NOT_READY');
+    give(visitor, 'carrot', barnCap(visitor) - 1);
+    expect(code(() => visitCollect(owner, visitor, { kind: 'field', idx: 0 }, T0 + 2 * M, C))).toBe('BARN_FULL');
+    expect(owner.fields[0].crop).toBe('wheat');
+    expect(visitor.inv.wheat).toBeUndefined();
+    expect(code(() => visitCollect(owner, visitor, { kind: 'job', station: 'bakery' }, T0, C))).toBe('NOT_UNLOCKED');
+    expect(code(() => visitCollect(owner, visitor, { kind: 'field', idx: -1 }, T0, C))).toBe('BAD_REQUEST');
   });
 });
 
@@ -233,10 +267,10 @@ describe('sell & upgrades', () => {
     expect(code(() => applyFarm(s, { type: 'sell', item: 'carrot', qty: 0 }, T0, C))).toBe('BAD_REQUEST');
     expect(code(() => applyFarm(s, { type: 'sell', item: 'carrot', qty: 1.5 }, T0, C))).toBe('BAD_REQUEST');
   });
-  it('barn upgrade ◎100 → cap 75, max 6 levels; queue +1 for ◎80 then ◎160; friend-point barn bonus', () => {
+  it('barn upgrade ◎100 → cap 250, max 6 levels; queue +1 for ◎80 then ◎160; friend-point barn bonus', () => {
     const s = fresh();
     expect(applyFarm(s, { type: 'upgradeBarn' }, T0, C).ledger).toEqual([{ reason: 'farm_upgrade', delta: -100 }]);
-    expect(barnCap(s)).toBe(75);
+    expect(barnCap(s)).toBe(250);
     for (let i = 0; i < 5; i++) applyFarm(s, { type: 'upgradeBarn' }, T0, C);
     expect(code(() => applyFarm(s, { type: 'upgradeBarn' }, T0, C))).toBe('MAX_LEVEL');
     expect(applyFarm(s, { type: 'upgradeQueue', station: 'bakery' }, T0, C).ledger).toEqual([{ reason: 'farm_upgrade', delta: -80 }]);
@@ -246,7 +280,7 @@ describe('sell & upgrades', () => {
     expect(code(() => applyFarm(b, { type: 'barnBonus' }, T0, C))).toBe('NOT_ENOUGH_FRIEND_POINTS');
     b.friendPts = 30;
     expect(applyFarm(b, { type: 'barnBonus' }, T0, C).ledger).toEqual([]);
-    expect(barnCap(b)).toBe(cap + 5); expect(b.friendPts).toBe(20);
+    expect(barnCap(b)).toBe(cap + 10); expect(b.friendPts).toBe(20);
     applyFarm(b, { type: 'barnBonus' }, T0, C); expect(b.friendPts).toBe(0);
   });
   it('pumpkin costs 3 friend points and no coins', () => {

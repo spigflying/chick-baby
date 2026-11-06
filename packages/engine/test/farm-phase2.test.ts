@@ -215,7 +215,7 @@ describe('stall', () => {
   it('stallBuy moves the item, logs the sale and returns the price', () => {
     const seller = fresh(5); give(seller, 'jam', 2);
     applyFarm(seller, { type: 'stallList', slot: 1, item: 'jam', qty: 2, price: 50 }, T0, C);
-    const buyer = fresh(1); buyer.inv = { wheat: 49 };
+    const buyer = fresh(1); buyer.inv = { wheat: 199 };
     expect(code(() => stallBuy(seller, buyer, 1, { id: 'b', name: 'Bob' }, T0))).toBe('BARN_FULL');
     buyer.inv = {};
     expect(stallBuy(seller, buyer, 1, { id: 'b', name: 'Bob' }, T0)).toEqual({ item: 'jam', qty: 2, price: 50 });

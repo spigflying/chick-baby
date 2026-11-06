@@ -41,6 +41,7 @@ async function login(name: string, a = app): Promise<Client> {
 const rid = () => randomUUID();
 const act = (c: Client, action: any, request_id = rid()) => c.call('POST', '/api/farm/act', { action, request_id });
 const help = (c: Client, owner: string, body: any, request_id = rid()) => c.call('POST', `/api/farm/${owner}/help`, { ...body, request_id });
+const collect = (c: Client, owner: string, action: any, request_id = rid()) => c.call('POST', `/api/farm/${owner}/collect`, { action, request_id });
 const balance = async (id: string) => (await db.selectFrom('wallets').select('balance').where('user_id', '=', id).executeTakeFirstOrThrow()).balance as number;
 const setBalance = (id: string, n: number) => db.updateTable('wallets').set({ balance: n }).where('user_id', '=', id).execute();
 async function patchState(id: string, f: (s: any) => void) {
@@ -76,7 +77,7 @@ describe('farm owner', () => {
     expect(r.status).toBe(200);
     expect(r.json.is_owner).toBe(true);
     expect(r.json.state.level).toBe(1);
-    expect(r.json.derived.barn.cap).toBe(50);
+    expect(r.json.derived.barn.cap).toBe(200);
     expect(r.json.owner).toEqual({ id: a.id, display_name: 'alice' });
     expect(typeof r.json.server_time).toBe('number');
     expect(await db.selectFrom('farms').select('user_id').where('user_id', '=', a.id).execute()).toHaveLength(1);
@@ -209,6 +210,43 @@ describe('farm help', () => {
       expect((await help(b, a.id, { kind: 'water', idx: 0 })).status).toBe(200);
       await wait((m) => m.type === 'farm.updated' && m.user === a.id);
     } finally { ws.terminate(); }
+  });
+});
+
+describe('farm visitor collection', () => {
+  it('moves a ripe crop once, records the visitor, and rejects concurrent collection', async () => {
+    const owner = await login('owner'), a = await login('a'), b = await login('b');
+    await act(owner, { type: 'plant', idx: 0, crop: 'wheat' });
+    await patchState(owner.id, (s) => { s.fields[0].ready = Date.now() - 1000; });
+    const results = await Promise.all([collect(a, owner.id, { kind: 'field', idx: 0 }), collect(b, owner.id, { kind: 'field', idx: 0 })]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 400]);
+    const winner = results[0].status === 200 ? a : b;
+    expect((await state(winner.id)).inv.wheat).toBe(2);
+    expect((await state(owner.id)).inv.wheat).toBeUndefined();
+    expect((await state(owner.id)).fields[0].crop).toBeNull();
+    expect((await state(owner.id)).helpLog).toEqual([expect.objectContaining({ by: winner.id, kind: 'collect', item: 'wheat', qty: 2 })]);
+    expect((await owner.call('GET', `/api/farm/${owner.id}`)).json.state.helpLog).toHaveLength(1);
+    expect((await winner.call('GET', `/api/farm/${owner.id}`)).json.state.helpLog).toEqual([]);
+  });
+  it('checks entry permission, ripeness, capacity, and request replay', async () => {
+    const owner = await login('owner'), visitor = await login('visitor');
+    await act(owner, { type: 'plant', idx: 0, crop: 'wheat' });
+    expect((await collect(visitor, owner.id, { kind: 'field', idx: 0 })).json.error).toBe('NOT_READY');
+    await patchState(owner.id, (s) => { s.fields[0].ready = Date.now() - 1000; });
+    await visitor.call('GET', `/api/farm/${visitor.id}`);
+    await patchState(visitor.id, (s) => { s.inv.carrot = 199; });
+    expect((await collect(visitor, owner.id, { kind: 'field', idx: 0 })).json.error).toBe('BARN_FULL');
+    expect((await state(owner.id)).fields[0].crop).toBe('wheat');
+    await patchState(visitor.id, (s) => { s.inv = {}; });
+    const id = rid();
+    expect((await collect(visitor, owner.id, { kind: 'field', idx: 0 }, id)).status).toBe(200);
+    expect((await collect(visitor, owner.id, { kind: 'field', idx: 0 }, id)).json.replayed).toBe(true);
+    expect((await state(visitor.id)).inv.wheat).toBe(2);
+    await act(owner, { type: 'plant', idx: 0, crop: 'wheat' });
+    await patchState(owner.id, (s) => { s.fields[0].ready = Date.now() - 1000; });
+    expect((await owner.call('PATCH', `/api/homes/${owner.home}`, { access_mode: 'closed', request_id: rid() })).status).toBe(200);
+    expect((await collect(visitor, owner.id, { kind: 'field', idx: 0 })).json.error).toBe('FORBIDDEN');
+    expect((await state(owner.id)).fields[0].crop).toBe('wheat');
   });
 });
 

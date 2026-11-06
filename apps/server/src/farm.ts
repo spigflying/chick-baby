@@ -1,8 +1,8 @@
 // 小雞農場（docs/superpowers/specs/2026-11-03-farm-design.md）：一人一座農場，整座存成 farms.state jsonb。
 // 規則全部在 @chick/engine 的 farm.ts；這裡只負責權限、上鎖、金幣帳本、幫忙上限與通知。
 import {
-  applyFarm, applyFood, applyHelp, checkFeed, createRng, describeFarm, FarmError, FARM, GAME, loadFarm, newFarm, stallBuy, takeFarmFood,
-  type FarmAction, type FarmCtx, type FarmState, type HelpAction,
+  applyFarm, applyFood, applyHelp, checkFeed, createRng, describeFarm, FarmError, FARM, GAME, loadFarm, newFarm, stallBuy, takeFarmFood, visitCollect,
+  type FarmAction, type FarmCtx, type FarmState, type HelpAction, type VisitCollectAction,
 } from '@chick/engine';
 import { sql, type Db, type Tx } from './db';
 import { changeBalance, lockWallets, notify, rateLimit, runAction, type ReqCtx } from './core';
@@ -128,6 +128,36 @@ export async function farmHelp(db: Db, ctx: ReqCtx, ownerId: string, body: any, 
     await tx.insertInto('farm_help').values({ helper_id: ctx.userId, owner_id: ownerId, day: TPE_DAY, kind: a.kind, target: a.kind === 'water' ? a.idx : 0 }).execute();
     await notify(tx, { t: 'farm', user: ownerId, home: home!.id });
     return { ok: true, friend_pts: locked[ctx.userId].friendPts, today: { mine: counts.mine + 1, this_farm: counts.this_farm + 1 } };
+  }, { type: 'farm', id: ownerId });
+}
+
+/** POST /api/farm/:id/collect：進得了主人家的訪客，可把成熟資源收進自己的倉庫。 */
+export async function farmVisitCollect(db: Db, ctx: ReqCtx, ownerId: string, action: unknown, requestId: unknown) {
+  if (!rateLimit(`farm.collect:${ctx.userId}`, 60, 60_000)) fail('RATE_LIMITED');
+  return runAction(db, ctx, 'farm.collect', requestId, { owner: ownerId, action }, async (tx) => {
+    if (ownerId === ctx.userId) fail('BAD_REQUEST');
+    const home = await homeOf(tx, ownerId);
+    if (!home) fail('NOT_FOUND');
+    if (!(await canEnter(tx, home, ctx.userId))) fail('FORBIDDEN');
+    const exists = await tx.selectFrom('farms').select('user_id').where('user_id', '=', ownerId).executeTakeFirst();
+    if (!exists) fail('NOT_FOUND');
+    const now = Date.now();
+    await lockWallets(tx, [ctx.userId]);
+    // 固定順序鎖兩座農場；並發採同一格只會有一人成功，倉庫滿則兩邊都不變。
+    const locked: Record<string, FarmState> = {};
+    for (const id of [ownerId, ctx.userId].sort()) locked[id] = await lockFarm(tx, id, now);
+    const got = rules(() => visitCollect(locked[ownerId], locked[ctx.userId], action as VisitCollectAction, now, clock()));
+    const me = await ownerInfo(tx, ctx.userId);
+    const log = locked[ownerId].helpLog;
+    log.push({ by: me.id, name: me.display_name, kind: 'collect', item: got.item, qty: got.qty, at: now });
+    if (log.length > FARM.help.logMax) log.splice(0, log.length - FARM.help.logMax);
+    let balance: number | undefined;
+    for (const l of got.ledger) balance = await changeBalance(tx, ctx.userId, l.delta, l.reason, { type: 'farm', id: ownerId });
+    await saveFarm(tx, ownerId, locked[ownerId]);
+    await saveFarm(tx, ctx.userId, locked[ctx.userId]);
+    await notify(tx, { t: 'farm', user: ownerId, home: home!.id });
+    await notify(tx, { t: 'farm', user: ctx.userId, home: (await homeOf(tx, ctx.userId))?.id ?? null });
+    return { ok: true, item: got.item, qty: got.qty, leveled: got.leveled, balance };
   }, { type: 'farm', id: ownerId });
 }
 

@@ -49,7 +49,7 @@ describe('plantChoices', () => {
 describe('hudModel', () => {
   it('level, xp percent, coins, barn, friend points', () => {
     const s = newFarm(1, T0, ALWAYS_OPEN); s.xp = 10; s.inv = { wheat: 32 }; s.friendPts = 4;
-    expect(hudModel(payload(s), 1280)).toEqual({ level: 1, xpPct: 33, coins: 1280, barn: '32 / 50', friendPts: 4 });
+    expect(hudModel(payload(s), 1280)).toEqual({ level: 1, xpPct: 33, coins: 1280, barn: '32 / 200', friendPts: 4 });
   });
 });
 

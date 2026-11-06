@@ -392,7 +392,7 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .farm.storybook .farm-top{border:2px solid #d9bd7e;background:linear-gradient(#654524,#3d2a1c);box-shadow:inset 0 0 0 2px #2b2017,0 5px 0 #1d1a14,0 10px 22px #18180e99;color:#fff2c9}
 .farm.storybook .farm-theme{border-color:#d7b77a;background:linear-gradient(#f9edcb,#dfc994);color:#493520;box-shadow:inset 0 1px #fff8df}
 .farm.storybook .farm-stage{border-color:#ab8452;box-shadow:0 0 0 3px #48351f,0 9px 0 #201b13,0 17px 28px #151c14aa}
-.farm.storybook .scene .hit image,.farm.storybook .scene .storybook-pond,.farm.storybook .farm-guide-pet image{filter:saturate(.78) contrast(.94) sepia(.12)}
+.farm.storybook.east-area .scene .hit image,.farm.storybook .farm-guide-pet image{filter:saturate(.78) contrast(.94) sepia(.12)}
 .farm.storybook .fpill{background:#f6e8c5f2;border:2px solid #987343;box-shadow:0 3px 0 #38281999}
 .farm.storybook .flv{background:linear-gradient(#c69b52,#80582b)}
 .farm.storybook .fxp{background:#d0b98a}.farm.storybook .fxp i{background:linear-gradient(90deg,#b4c172,#6d974b)}

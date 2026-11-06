@@ -20,7 +20,7 @@ export interface Field { crop: CropId | null; start: number; ready: number; wate
 export interface Animal { start: number; ready: number | null }
 export interface Job { recipe: RecipeId; ready: number }
 export interface Order { items: Stack[]; coins: number; xp: number }
-export interface HelpNote { by: string; name: string; kind: 'water' | 'rescue'; at: number }
+export interface HelpNote { by: string; name: string; kind: 'water' | 'rescue' | 'collect'; at: number; item?: FarmItemId; qty?: number }
 export interface Crate { item: FarmItemId; qty: number; filled: boolean }
 /** 熱氣球：crates 有東西＝停在農場（到 leave 為止）；空的＝飛走了，arrive 時再來（arrive 0＝還沒排過班）。 */
 export interface Balloon { seq: number; arrive: number; leave: number; crates: Crate[] }
@@ -54,6 +54,8 @@ export type FarmAction =
 /** 伺服器給的外部狀態：今天的台北日期、主人目前的寵物（小雞澆水用）。 */
 export interface FarmCtx { day?: string; pet?: { alive: boolean; stamina: number } }
 export type HelpAction = { kind: 'water'; idx: number } | { kind: 'rescue' };
+export type VisitCollectAction = { kind: 'field'; idx: number } | { kind: 'tree' }
+  | { kind: 'animal'; station: AnimalStation; i: number } | { kind: 'job'; station: CraftStation };
 export interface FarmOutcome { ledger: { reason: FarmReason; delta: number }[]; leveled: number[] }
 export type FarmErrorCode = 'BAD_REQUEST' | 'NOT_UNLOCKED' | 'SLOT_BUSY' | 'NOT_READY' | 'BARN_FULL' | 'NOT_ENOUGH_ITEMS'
   | 'QUEUE_FULL' | 'WITHERED' | 'NOT_WITHERED' | 'ALREADY_WATERED' | 'NOT_GROWING' | 'MAX_LEVEL' | 'NOT_ENOUGH_FRIEND_POINTS' | 'NO_ORDER'
@@ -83,7 +85,7 @@ export const FARM = {
   animalsPerStation: 2,
   tree: { ms: 120 * MIN, out: { item: 'apple', qty: 3 } as Stack, witherMs: 8 * HOUR, rescueCoins: 30 },
   orders: { maxSlots: 6, slotsByLevel: [[8, 6], [5, 5], [3, 4], [1, 3]] as [number, number][], maxKinds: 3, maxQty: 3, priceyAt: 14, priceyMaxQty: 2, coinMult: 1.8, xpMult: 2, discardWaitMs: 10 * MIN, deliverWaitMs: 90 * MIN },
-  barn: { base: 50, step: 25, maxLevel: 6, costBase: 100, bonusSlots: 5, bonusCostStep: 10 },
+  barn: { base: 200, step: 50, maxLevel: 6, costBase: 100, bonusSlots: 10, bonusCostStep: 10 },
   queue: { base: 2, max: 4, costs: [80, 160] },
   help: { waterCut: 0.2, perDay: 10, perFarm: 5, friendPoints: 1, logMax: 20 },
 };
@@ -531,6 +533,43 @@ export function stallBuy(seller: FarmState, buyer: FarmState, slot: number, by: 
   seller.saleLog.push({ by: by.id, name: by.name, item: l!.item, qty: l!.qty, price: l!.price, at: now });
   if (seller.saleLog.length > FARM.stall.logMax) seller.saleLog.splice(0, seller.saleLog.length - FARM.stall.logMax);
   return { item: l!.item, qty: l!.qty, price: l!.price };
+}
+/** 訪客採收：成熟資源從主人的生產格直接進訪客倉庫；經驗與升級獎勵歸採收者。 */
+export function visitCollect(owner: FarmState, visitor: FarmState, a: VisitCollectAction, now: number, clock: Clock) {
+  let stack: Stack;
+  if (a?.kind === 'field') {
+    const f = fieldAt(owner, a.idx);
+    const crop = f.crop;
+    if (!crop || now < f.ready) fail('NOT_READY');
+    stack = CROPS[crop!].out;
+    if (!fits(visitor, stack.qty)) fail('BARN_FULL');
+    Object.assign(f, emptyField());
+  } else if (a?.kind === 'tree') {
+    if (treeWithered(owner, now, clock)) fail('WITHERED');
+    if (now < owner.tree.ready) fail('NOT_READY');
+    stack = FARM.tree.out;
+    if (!fits(visitor, stack.qty)) fail('BARN_FULL');
+    owner.tree = { start: now, ready: clock.addOpen(now, FARM.tree.ms) };
+  } else if (a?.kind === 'animal') {
+    const animal = animalAt(owner, a.station, a.i);
+    if (animal.ready === null || now < animal.ready) fail('NOT_READY');
+    stack = ANIMALS[a.station].out;
+    if (!fits(visitor, stack.qty)) fail('BARN_FULL');
+    animal.ready = null; animal.start = 0;
+  } else if (a?.kind === 'job') {
+    if (!has(CRAFT_STATIONS, a.station)) fail('BAD_REQUEST');
+    if (owner.level < CRAFT_STATIONS[a.station].level) fail('NOT_UNLOCKED');
+    const q = owner.jobs[a.station];
+    if (!q.length || now < q[0].ready) fail('NOT_READY');
+    stack = RECIPES[q[0].recipe].out;
+    if (!fits(visitor, stack.qty)) fail('BARN_FULL');
+    q.shift();
+  } else return fail('BAD_REQUEST');
+  put(visitor, stack);
+  const out: FarmOutcome = { ledger: [], leveled: [] };
+  gainXp(visitor, FARM_ITEMS[stack.item].xp * (a.kind === 'field' || a.kind === 'tree' ? 1 : stack.qty), out);
+  refreshOrders(visitor, now);
+  return { ...stack, ...out };
 }
 /** 拿倉庫的東西給寵物吃：回傳要套用的食物（伺服器先檢查寵物能不能吃，再呼叫這個扣東西）。 */
 export function takeFarmFood(s: FarmState, item: unknown): Food {

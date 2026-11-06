@@ -1,8 +1,8 @@
 // 小雞農場全頁畫面（蓋在蛋殼頁上，掛法同 fight-view.ts）。只限電腦；規則與數值都在伺服器（@chick/engine farm.ts）。
-import { ANIMALS, CRAFT_STATIONS, CROPS, DECOS, FARM, FARM_ITEMS, RECIPES, type AnimalStation, type CraftStation, type CropId, type DecoId, type FarmAction, type FarmItemId, type RecipeId } from '@chick/engine';
+import { ANIMALS, CRAFT_STATIONS, CROPS, DECOS, FARM, FARM_ITEMS, RECIPES, type AnimalStation, type CraftStation, type CropId, type DecoId, type FarmAction, type FarmItemId, type RecipeId, type VisitCollectAction } from '@chick/engine';
 import { act, api, ApiError, errText } from './api';
 import type { Live } from './ws';
-import { EAST, LAYOUT, SCENE, type Box } from './farm-layout';
+import { EAST, LAYOUT, SCENE, STORYBOOK_LAYOUT, type Box } from './farm-layout';
 import * as realisticArt from './farm-art';
 import * as classicArt from './farm-art-classic';
 import * as storybookArt from './farm-art-storybook';
@@ -19,7 +19,6 @@ type Panel = null | { k: 'plant'; idx: number } | { k: 'animal'; st: AnimalStati
   // 第二階段
   | { k: 'grow'; idx: number } | { k: 'expand'; idx: number } | { k: 'balloon' } | { k: 'stall' } | { k: 'stallNew'; slot: number; item?: FarmItemId } | { k: 'deco'; slot: number } | { k: 'feed' };
 /** 主畫面的田是 0–11，東邊新地的田是 12–17。 */
-const fieldBox = (area: 'main' | 'east', i: number): Box | undefined => (area === 'main' ? LAYOUT.fields[i] : EAST.fields[i - FARM.baseFields]);
 const fieldIdxs = (area: 'main' | 'east') => (area === 'main' ? [...LAYOUT.fields.keys()] : EAST.fields.map((_, i) => FARM.baseFields + i));
 type FarmTheme = 'storybook' | 'realistic' | 'classic';
 const THEMES: FarmTheme[] = ['storybook', 'realistic', 'classic'];
@@ -47,6 +46,7 @@ export class FarmView {
   private area: 'main' | 'east' = 'main';
   private theme: FarmTheme = 'storybook';
   private get art() { return this.theme === 'classic' ? classicArt : this.theme === 'storybook' ? storybookArt : realisticArt; }
+  private get mainLayout() { return this.theme === 'storybook' ? STORYBOOK_LAYOUT : LAYOUT; }
 
   constructor(private live: Live, private me: { id: string; display_name: string }, private toast: (s: string) => void, private setWallet: (n: number) => void, private wallet: () => number) {
     this.theme = savedTheme(this.me.id);
@@ -107,11 +107,21 @@ export class FarmView {
       await this.load();
     } catch (e) { this.toast(this.err(e)); } finally { this.busy = false; }
   }
+  private async doVisitCollect(action: VisitCollectAction) {
+    if (this.busy || !this.ownerId) return; this.busy = true;
+    try {
+      const r = await act<{ item: FarmItemId; qty: number; leveled: number[]; balance?: number }>('POST', `/farm/${this.ownerId}/collect`, { action });
+      this.toast(`採到 ${FARM_ITEMS[r.item].name} ×${r.qty}，放進你的倉庫了`);
+      if (typeof r.balance === 'number') this.setWallet(r.balance);
+      for (const lv of r.leveled) this.toast(`升到 Lv ${lv} 了！`);
+      this.paused = false; await this.load();
+    } catch (e) { this.toast(this.err(e)); } finally { this.busy = false; }
+  }
   private showHelpLog() {
     const p = this.data; if (!p?.is_owner || !p.state.helpLog.length) return;
     const log = p.state.helpLog, shown = log.slice(-3);
-    for (const h of shown) this.toast(`${h.name} ${h.kind === 'water' ? '幫你澆了水' : '救了你的果樹'}`);
-    if (log.length > 3) this.toast(`還有 ${log.length - 3} 次好友幫忙`);
+    for (const h of shown) this.toast(`${h.name} ${h.kind === 'water' ? '幫你澆了水' : h.kind === 'rescue' ? '救了你的果樹' : `採走${h.item ? FARM_ITEMS[h.item].name : '資源'} ×${h.qty}`}`);
+    if (log.length > 3) this.toast(`還有 ${log.length - 3} 次農場訪客動作`);
     void act('POST', '/farm/act', { action: { type: 'ackHelp' } }).catch(() => {});
   }
   private showSaleLog() {
@@ -166,11 +176,11 @@ export class FarmView {
       message = balloon.state === 'here' ? `熱氣球貨箱 ${balloon.crates.filter((c) => c.filled).length}/${balloon.crates.length}` : this.remain(balloon.remainMs) ? `熱氣球 ${remainText(this.remain(balloon.remainMs))} 後回來` : '熱氣球即將回來';
       target = 'balloon';
       buttonText = '查看';
-    } else if (!p.is_owner) {
+    } else if (!p.is_owner && !ready) {
       const help = helpTargets(p).find((h) => h.kind === 'water' && fields.includes(h.idx));
-      message = help?.kind === 'water' ? `田 ${help.idx + 1} 需要幫忙澆水` : '看看有沒有能幫忙的田地';
+      message = help?.kind === 'water' ? `田 ${help.idx + 1} 需要幫忙澆水` : '看看有沒有成熟資源可以採收';
       target = help?.kind === 'water' ? `field:${help.idx}` : '';
-      buttonText = '幫忙澆水';
+      buttonText = help ? '幫忙澆水' : '查看';
     }
     const look = LOOK[this.species ?? 'chicken'] ?? LOOK.chicken;
     return `<div class="farm-guide"><svg class="farm-guide-pet" viewBox="0 0 100 100" aria-hidden="true">${this.art.chick(50, 50, look)}</svg>
@@ -181,6 +191,7 @@ export class FarmView {
     const p = this.data; if (!p) return;
     this.root.classList.toggle('classic', this.theme === 'classic');
     this.root.classList.toggle('storybook', this.theme === 'storybook');
+    this.root.classList.toggle('east-area', this.area === 'east');
     const owner = p.is_owner;
     const hud = hudModel(p, this.wallet());
     this.root.innerHTML = `
@@ -193,7 +204,7 @@ export class FarmView {
           <div class="fpill"><span class="flv">${hud.level}</span><span class="fxp"><i style="width:${hud.xpPct}%"></i></span><span>Lv${hud.level}</span></div>
           ${owner ? `<div class="fpill">${ic('coin')}${hud.coins.toLocaleString()}</div>` : ''}
           <span class="fgrow"></span>
-          ${owner ? `<div class="fpill" title="倉庫">${ic('box')}${hud.barn}</div><div class="fpill" title="友情點數">${ic('heart')}${hud.friendPts}</div>` : `<div class="fpill visit">來幫忙：點「澆水」「救樹」・東邊新地有小攤</div>`}
+          ${owner ? `<div class="fpill" title="倉庫">${ic('box')}${hud.barn}</div><div class="fpill" title="友情點數">${ic('heart')}${hud.friendPts}</div>` : `<div class="fpill visit">成熟資源可以採收・成長中的田可澆水・枯樹可救</div>`}
         </div>
         <div class="farm-panel" hidden></div>
       </div>
@@ -213,17 +224,18 @@ export class FarmView {
     const p = this.data!, s = p.state, d = p.derived;
     const hit = (key: string, inner: string, label: string) => `<g class="hit" data-hit="${key}" tabindex="0" role="button" aria-label="${esc(label)}">${inner}</g>`;
     if (this.area === 'east') return this.eastScene(hit);
+    const layout = this.mainLayout;
     let o = this.art.background();
-    LAYOUT.fields.forEach((b, i) => { const f = s.fields[i], fd = d.fields[i]; o += hit(`field:${i}`, this.art.field(b, f.crop, fd.stage, fd.locked, fd.unlockLevel), `田 ${i + 1}`); });
+    layout.fields.forEach((b, i) => { const f = s.fields[i], fd = d.fields[i]; o += hit(`field:${i}`, this.art.field(b, f.crop, fd.stage, fd.locked, fd.unlockLevel), `田 ${i + 1}`); });
     const an = (st: AnimalStation) => d.animals[st].items.map((x) => x.state === 'ready');
-    o += hit('animal:hutch', this.art.hutch(LAYOUT.hutch, an('hutch'), d.animals.hutch.locked, ANIMALS.hutch.level), '兔兔窩');
-    o += hit('animal:coop', this.art.coop(LAYOUT.coop, an('coop'), d.animals.coop.locked, ANIMALS.coop.level), '雞舍');
-    o += hit('craft:bakery', this.art.bakery(LAYOUT.bakery, d.jobs.bakery.items.length > 0, d.jobs.bakery.locked, CRAFT_STATIONS.bakery.level), '烘焙屋');
-    o += hit('craft:jamhouse', this.art.jamhouse(LAYOUT.jamhouse, d.jobs.jamhouse.items.length > 0, d.jobs.jamhouse.locked, CRAFT_STATIONS.jamhouse.level), '果醬工坊');
-    o += hit('tree', this.art.tree(LAYOUT.tree, d.tree.state), '蘋果樹');
-    o += hit('board', this.art.board(LAYOUT.board, p.is_owner && this.deliverable() > 0), '訂單看板');
-    o += hit('barn', this.art.barn(LAYOUT.barn), '倉庫');
-    o += hit('goEast', this.art.sign(LAYOUT.eastSign, d.east.locked ? `Lv${FARM.eastLevel} 開放` : '東邊新地', d.east.locked), '去東邊新地');
+    o += hit('animal:hutch', this.art.hutch(layout.hutch, an('hutch'), d.animals.hutch.locked, ANIMALS.hutch.level), '兔兔窩');
+    o += hit('animal:coop', this.art.coop(layout.coop, an('coop'), d.animals.coop.locked, ANIMALS.coop.level), '雞舍');
+    o += hit('craft:bakery', this.art.bakery(layout.bakery, d.jobs.bakery.items.length > 0, d.jobs.bakery.locked, CRAFT_STATIONS.bakery.level), '烘焙屋');
+    o += hit('craft:jamhouse', this.art.jamhouse(layout.jamhouse, d.jobs.jamhouse.items.length > 0, d.jobs.jamhouse.locked, CRAFT_STATIONS.jamhouse.level), '果醬工坊');
+    o += hit('tree', this.art.tree(layout.tree, d.tree.state), '蘋果樹');
+    o += hit('board', this.art.board(layout.board, p.is_owner && this.deliverable() > 0), '訂單看板');
+    o += hit('barn', this.art.barn(layout.barn), '倉庫');
+    o += hit('goEast', this.art.sign(layout.eastSign, d.east.locked ? `Lv${FARM.eastLevel} 開放` : '東邊新地', d.east.locked), '去東邊新地');
     return o;
   }
   private eastScene(hit: (key: string, inner: string, label: string) => string) {
@@ -245,7 +257,7 @@ export class FarmView {
     const p = this.data!, d = p.derived; let o = '';
     const helps = new Set(helpTargets(p).map((h) => (h.kind === 'water' ? `w${h.idx}` : 'tree')));
     for (const i of fieldIdxs(this.area)) {
-      const b = fieldBox(this.area, i)!, fd = d.fields[i];
+      const b = this.area === 'main' ? this.mainLayout.fields[i] : EAST.fields[i - FARM.baseFields], fd = d.fields[i];
       if (fd.locked) { if (p.is_owner && this.area === 'east' && expandOffer(p, i).kind === 'buy') o += this.art.pill(b.x + b.w / 2, b.y - (this.theme === 'classic' ? 18 : 42), '可以買', 'ready'); continue; }
       const cx = b.x + b.w / 2, y = b.y - 18;
       if (helps.has(`w${i}`)) { o += this.art.pill(cx, y, '澆水', 'alert'); continue; }
@@ -259,30 +271,30 @@ export class FarmView {
       const a = d.animals[st]; if (a.locked) continue;
       const ready = a.items.filter((x) => x.state === 'ready').length, hungry = a.items.filter((x) => x.state === 'hungry').length;
       const grow = a.items.filter((x) => x.state === 'growing').map((x) => this.remain(x.remainMs));
-      station(LAYOUT[st], ready ? `${FARM_ITEMS[ANIMALS[st].out.item].name}好了` : hungry ? '肚子餓了' : grow.length ? remainText(Math.min(...grow)) : null, ready ? 'ready' : 'timer');
+      station(this.mainLayout[st], ready ? `${FARM_ITEMS[ANIMALS[st].out.item].name}好了` : hungry ? '肚子餓了' : grow.length ? remainText(Math.min(...grow)) : null, ready ? 'ready' : 'timer');
     }
     for (const st of ['bakery', 'jamhouse'] as const) {
       const j = d.jobs[st]; if (j.locked || !j.items.length) continue;
       const done = j.items.filter((x) => this.remain(x.remainMs) === 0).length;
-      station(LAYOUT[st], done ? `${done} 個做好了` : remainText(this.remain(j.items[0].remainMs)), done ? 'ready' : 'timer');
+      station(this.mainLayout[st], done ? `${done} 個做好了` : remainText(this.remain(j.items[0].remainMs)), done ? 'ready' : 'timer');
     }
-    if (helps.has('tree')) station(LAYOUT.tree, '救樹', 'alert');
-    else if (d.tree.state === 'ready') station(LAYOUT.tree, '可收成', 'ready');
-    else if (d.tree.state === 'withered') station(LAYOUT.tree, '枯掉了', 'timer');
-    else station(LAYOUT.tree, remainText(this.remain(d.tree.remainMs)), 'timer');
+    if (helps.has('tree')) station(this.mainLayout.tree, '救樹', 'alert');
+    else if (d.tree.state === 'ready') station(this.mainLayout.tree, '可收成', 'ready');
+    else if (d.tree.state === 'withered') station(this.mainLayout.tree, '枯掉了', 'timer');
+    else station(this.mainLayout.tree, remainText(this.remain(d.tree.remainMs)), 'timer');
     return o;
   }
   private eastPills(station: (b: { x: number; y: number; w: number }, txt: string | null, tone: 'ready' | 'timer' | 'alert') => void): void {
     const p = this.data!, d = p.derived, s = p.state;
+    for (const st of ['beehive', 'cowshed'] as const) {
+      const a = d.animals[st]; if (a.locked) continue;
+      const ready = a.items.filter((x) => x.state === 'ready').length, hungry = a.items.filter((x) => x.state === 'hungry').length;
+      const grow = a.items.filter((x) => x.state === 'growing').map((x) => this.remain(x.remainMs));
+      station(EAST[st], ready ? `${FARM_ITEMS[ANIMALS[st].out.item].name}好了` : p.is_owner && hungry ? '肚子餓了' : grow.length ? remainText(Math.min(...grow)) : null, ready ? 'ready' : 'timer');
+    }
+    const j = d.jobs.dairy;
+    if (!j.locked && j.items.length) { const done = j.items.filter((x) => this.remain(x.remainMs) === 0).length; station(EAST.dairy, done ? `${done} 個做好了` : remainText(this.remain(j.items[0].remainMs)), done ? 'ready' : 'timer'); }
     if (p.is_owner) {
-      for (const st of ['beehive', 'cowshed'] as const) {
-        const a = d.animals[st]; if (a.locked) continue;
-        const ready = a.items.filter((x) => x.state === 'ready').length, hungry = a.items.filter((x) => x.state === 'hungry').length;
-        const grow = a.items.filter((x) => x.state === 'growing').map((x) => this.remain(x.remainMs));
-        station(EAST[st], ready ? `${FARM_ITEMS[ANIMALS[st].out.item].name}好了` : hungry ? '肚子餓了' : grow.length ? remainText(Math.min(...grow)) : null, ready ? 'ready' : 'timer');
-      }
-      const j = d.jobs.dairy;
-      if (!j.locked && j.items.length) { const done = j.items.filter((x) => this.remain(x.remainMs) === 0).length; station(EAST.dairy, done ? `${done} 個做好了` : remainText(this.remain(j.items[0].remainMs)), done ? 'ready' : 'timer'); }
       const bl = d.balloon;
       if (bl.state === 'here') { const n = bl.crates.filter((c) => c.filled).length; station(EAST.balloon, n === bl.crates.length ? '可以出發' : `貨箱 ${n}/${bl.crates.length}・${remainText(this.remain(bl.remainMs))}`, n === bl.crates.length || bl.crates.some((c) => c.canFill) ? 'ready' : 'timer'); }
       else if (bl.state === 'away') station(EAST.balloon, `${remainText(this.remain(bl.remainMs))}後回來`, 'timer');
@@ -298,7 +310,13 @@ export class FarmView {
     const head = (title: string, icon: string, tone: string) => `<header class="fph ${tone}">${ic(icon, 'fic hic')}<b>${title}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header>`;
     let html = '';
     const s = p.state, d = p.derived;
-    if (pn.k === 'plant') {
+    if (!p.is_owner && pn.k === 'animal') {
+      const def = ANIMALS[pn.st], a = d.animals[pn.st];
+      html = head(def.name, def.out.item, 'pink') + `<div class="fpb"><div class="flist">${a.items.map((x, i) => `<div class="frow static">${ic(def.out.item, 'fic mid')}<span class="fname">${def.animal} ${i + 1}<small>${x.state === 'ready' ? `${FARM_ITEMS[def.out.item].name}好了！` : x.state === 'growing' ? `還要 ${remainText(this.remain(x.remainMs))}` : '還沒有產物'}</small></span>${x.state === 'ready' ? `<button type="button" class="fbtn go" data-act="visitAnimal" data-i="${i}">採收</button>` : ''}</div>`).join('')}</div></div>`;
+    } else if (!p.is_owner && pn.k === 'craft') {
+      const j = d.jobs[pn.st];
+      html = head(CRAFT_STATIONS[pn.st].name, 'oven', 'pink') + `<div class="fpb"><p class="fnote">${j.items.length ? j.items.map((x) => `${RECIPES[x.recipe].name}：${this.remain(x.remainMs) ? remainText(this.remain(x.remainMs)) : '做好了'}`).join('、') : '沒有成品'}</p>${j.items.length && this.remain(j.items[0].remainMs) === 0 ? '<button type="button" class="fbtn go wide" data-act="visitJob">收一份成品</button>' : ''}</div>`;
+    } else if (pn.k === 'plant') {
       html = head(`種什麼？（田 ${pn.idx + 1}）`, 'wheat', 'mint') + `<div class="fpb"><div class="flist">${plantChoices(p, this.wallet()).map((c) => `
         <button type="button" class="frow" data-act="plant" data-crop="${c.crop}" ${c.enabled ? '' : 'disabled'}>${ic(CROPS[c.crop].out.item, 'fic mid')}
           <span class="fname">${esc(c.name)}<small>${remainText(CROPS[c.crop].growMs)}・收 ${CROPS[c.crop].out.qty} 個</small></span>
@@ -448,6 +466,8 @@ export class FarmView {
     if (a === 'shop' || a === 'store' || a === 'orders') return this.openPanel({ k: a });
     if (a === 'friends') return this.openPanel({ k: 'friends' });
     if (a === 'visit') { this.close(); return void this.open(b.dataset.user!); }
+    if (a === 'visitAnimal' && pn?.k === 'animal') return void this.doVisitCollect({ kind: 'animal', station: pn.st, i: +b.dataset.i! });
+    if (a === 'visitJob' && pn?.k === 'craft') return void this.doVisitCollect({ kind: 'job', station: pn.st });
     if (a === 'collectAll') return void this.doAct({ type: 'collectAll' });
     if (a === 'plant' && pn?.k === 'plant') { const crop = b.dataset.crop as CropId; this.panel = null; return void this.doAct({ type: 'plant', idx: pn.idx, crop }); }
     if (a === 'feed' && pn?.k === 'animal') return void this.doAct({ type: 'feed', station: pn.st, i: +b.dataset.i! });
@@ -494,9 +514,12 @@ export class FarmView {
     if (kind === 'stall') { if (p.state.level < FARM.stall.level) return this.toast(`Lv ${FARM.stall.level} 開放小攤`); return this.openPanel({ k: 'stall' }); }
     if (!p.is_owner) {
       const helps = helpTargets(p);
-      if (kind === 'field') { const idx = +arg; if (helps.some((h) => h.kind === 'water' && h.idx === idx)) return void this.doHelp({ kind: 'water', idx }); return this.toast(d.fields[idx]?.locked ? '這塊田還沒開' : '這塊田不用幫忙'); }
+      if (kind === 'field') { const idx = +arg; if (d.fields[idx]?.stage === 3) return void this.doVisitCollect({ kind: 'field', idx }); if (helps.some((h) => h.kind === 'water' && h.idx === idx)) return void this.doHelp({ kind: 'water', idx }); return this.toast(d.fields[idx]?.locked ? '這塊田還沒開' : '這塊田還不能採收'); }
+      if (kind === 'tree' && d.tree.state === 'ready') return void this.doVisitCollect({ kind: 'tree' });
       if (kind === 'tree' && helps.some((h) => h.kind === 'rescue')) return void this.doHelp({ kind: 'rescue' });
-      return this.toast('這裡不用幫忙，找「澆水」「救樹」的標籤');
+      if (kind === 'animal' && !d.animals[arg as AnimalStation]?.locked) return this.openPanel({ k: 'animal', st: arg as AnimalStation });
+      if (kind === 'craft' && !d.jobs[arg as CraftStation]?.locked) return this.openPanel({ k: 'craft', st: arg as CraftStation });
+      return this.toast('這裡沒有可採收的資源');
     }
     if (kind === 'field') {
       const idx = +arg, f = d.fields[idx];

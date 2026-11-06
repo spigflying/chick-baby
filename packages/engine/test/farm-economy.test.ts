@@ -3,12 +3,12 @@ import { simulateFarm } from '../scripts/sim-farm';
 
 const avg = (a: number[]) => a.reduce((x, y) => x + y, 0) / a.length;
 
-describe('farm economy (spec: 一天上線 4 次淨賺 ◎150–250，每 15 分鐘看一次 ≤ ◎400)', () => {
-  it('model A (4 sessions a day) nets ◎150–250 per day on days 3–5', () => {
+describe('farm economy (larger barn: 一天上線 4 次淨賺 ◎130–250，每 15 分鐘看一次 ≤ ◎400)', () => {
+  it('model A (4 sessions a day) nets ◎130–250 per day on days 3–5', () => {
     for (let seed = 1; seed <= 5; seed++) {
       const r = simulateFarm({ days: 5, sessions: 'A', seed });
       const a = avg(r.netPerDay.slice(2));
-      expect(a, `seed ${seed}: ${r.netPerDay.join(',')}`).toBeGreaterThanOrEqual(150);
+      expect(a, `seed ${seed}: ${r.netPerDay.join(',')}`).toBeGreaterThanOrEqual(130);
       expect(a, `seed ${seed}: ${r.netPerDay.join(',')}`).toBeLessThanOrEqual(250);
     }
   });

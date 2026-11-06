@@ -30,6 +30,19 @@ export const LAYOUT = {
   eastSign: { x: 864, y: 360, w: 78, h: 46 } as Box,
 };
 
+/** 仙境手繪主畫面對齊獨立背景；田的索引順序仍與既有存檔相同。 */
+export const STORYBOOK_LAYOUT = {
+  fields: [200, 268, 336].flatMap((y) => [270, 378, 486, 594].map((x) => ({ x, y, w: 96, h: 64 }))) as Box[],
+  hutch: { x: 8, y: 70, w: 176, h: 130 } as Box,
+  coop: { x: 184, y: 70, w: 184, h: 130 } as Box,
+  bakery: { x: 568, y: 52, w: 188, h: 145 } as Box,
+  jamhouse: { x: 760, y: 52, w: 188, h: 145 } as Box,
+  tree: { x: 4, y: 304, w: 180, h: 170 } as Box,
+  board: { x: 190, y: 438, w: 142, h: 130 } as Box,
+  barn: { x: 706, y: 368, w: 244, h: 210 } as Box,
+  eastSign: { x: 872, y: 265, w: 78, h: 46 } as Box,
+};
+
 /** 第二階段「東邊新地」：第二個 960×600 畫面。田 12–17、蜂箱、牛棚、起司小屋、熱氣球、小攤、6 個裝飾格。 */
 const ECOLS = [176, 284, 392], EROWS = [230, 315];
 export const EAST = {
