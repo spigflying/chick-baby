@@ -39,6 +39,8 @@ export interface FarmState {
   /** 第二階段 */
   expand: number; decos: (DecoId | null)[]; decoBag: DecoId[]; chickWater: { day: string; used: number };
   balloon: Balloon; stall: (StallSlot | null)[]; saleLog: SaleNote[];
+  /** 今天（台北日期）拜訪過、已經拿過友情點數的好友農場 */
+  visitHearts: { day: string; owners: string[] };
 }
 export type FarmAction =
   | { type: 'plant'; idx: number; crop: CropId } | { type: 'harvest'; idx: number } | { type: 'collectAll' }
@@ -88,6 +90,8 @@ export const FARM = {
   barn: { base: 200, step: 50, maxLevel: 6, costBase: 100, bonusSlots: 10, bonusCostStep: 10 },
   queue: { base: 2, max: 4, costs: [80, 160] },
   help: { waterCut: 0.2, perDay: 10, perFarm: 5, friendPoints: 1, logMax: 20 },
+  /** 每天第一次拜訪某位好友的農場送友情點數（好友沒種東西也拿得到） */
+  visit: { friendPoints: 1, perDay: 3 },
 };
 
 export const FARM_ITEMS: Record<FarmItemId, { name: string; sell: number; xp: number }> = {
@@ -181,7 +185,7 @@ export function newFarm(seed: number, now: number, clock: Clock): FarmState {
     queueSlots: Object.fromEntries(STATION_IDS.map((k) => [k, FARM.queue.base])) as FarmState['queueSlots'],
     inv: {}, orders: Array(FARM.orders.maxSlots).fill(null), orderWait: Array(FARM.orders.maxSlots).fill(0), orderSeq: 0, helpLog: [],
     expand: 0, decos: Array(FARM.decoSlots).fill(null), decoBag: [], chickWater: { day: '', used: 0 },
-    balloon: emptyBalloon(), stall: Array(FARM.stall.slots).fill(null), saleLog: [],
+    balloon: emptyBalloon(), stall: Array(FARM.stall.slots).fill(null), saleLog: [], visitHearts: { day: '', owners: [] },
   };
   refreshOrders(s, now); refreshBalloon(s, now, clock);
   return s;
@@ -211,6 +215,7 @@ export function loadFarm(json: unknown, now: number, clock: Clock): FarmState {
     chickWater: j.chickWater && typeof j.chickWater.day === 'string' ? j.chickWater : { day: '', used: 0 },
     balloon: j.balloon && Array.isArray(j.balloon.crates) ? j.balloon : emptyBalloon(),
     stall: pad(j.stall, FARM.stall.slots, () => null), saleLog: Array.isArray(j.saleLog) ? j.saleLog : [],
+    visitHearts: j.visitHearts && typeof j.visitHearts.day === 'string' && Array.isArray(j.visitHearts.owners) ? j.visitHearts : { day: '', owners: [] },
   } as FarmState;
   // 等待時間已過的訂單格直接補上（genOrder 是決定性的，沒存檔也不會跟下一次動作算出來的不一樣）；熱氣球也照班次走
   refreshOrders(s, now); refreshBalloon(s, now, clock);
@@ -582,6 +587,15 @@ export function takeFarmFood(s: FarmState, item: unknown): Food {
 }
 
 // ---------- 好友幫忙 ----------
+/** 拜訪好友農場：每天每位好友第一次 +友情點數，每天最多 FARM.visit.perDay 位。回傳這次拿到幾點（0＝今天拿過或到上限）。 */
+export function visitHeart(s: FarmState, ownerId: string, day: string): number {
+  if (s.visitHearts.day !== day) s.visitHearts = { day, owners: [] };
+  const v = s.visitHearts;
+  if (v.owners.includes(ownerId) || v.owners.length >= FARM.visit.perDay) return 0;
+  v.owners.push(ownerId);
+  s.friendPts += FARM.visit.friendPoints;
+  return FARM.visit.friendPoints;
+}
 export function applyHelp(s: FarmState, a: HelpAction, helper: { id: string; name: string }, now: number, clock: Clock) {
   if (a?.kind === 'water') {
     const f = fieldAt(s, a.idx);

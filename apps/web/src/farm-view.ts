@@ -6,7 +6,7 @@ import { EAST, LAYOUT, SCENE, STORYBOOK_LAYOUT, type Box } from './farm-layout';
 import * as realisticArt from './farm-art';
 import * as classicArt from './farm-art-classic';
 import * as storybookArt from './farm-art-storybook';
-import { expandOffer, FARM_ERR, feedChoices, fieldBadge, helpTargets, hudModel, loadErrorAction, panelValid, plantChoices, remainText, stallDefaults, type FarmPayload } from './farm-model';
+import { expandOffer, FARM_ERR, feedChoices, fieldBadge, helpTargets, hudModel, loadErrorAction, panelValid, plantChoices, remainText, stallDefaults, visitHeartAvailable, type FarmPayload } from './farm-model';
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const ic = (id: string, cls = 'fic') => `<svg class="${cls}" aria-hidden="true"><use href="#fi-${id}"/></svg>`;
@@ -36,6 +36,10 @@ export class FarmView {
   private data: FarmPayload | null = null;
   private ownerId: string | null = null;
   private species: string | null = null;
+  /** 打開自己農場時的寵物種類；從別人家按「回家」回自己農場時沿用 */
+  private mySpecies: string | null = null;
+  /** 自己今天拜訪好友拿友情點數的紀錄（好友清單標「+1♥」用） */
+  private myVisit: FarmPayload['state']['visitHearts'] | null = null;
   private loadedAt = 0;
   private timer = 0;
   private panel: Panel = null;
@@ -60,9 +64,11 @@ export class FarmView {
 
   async open(ownerId: string, species?: string | null) {
     if (this.live.touch) return this.toast('農場只能用電腦玩');
-    this.ownerId = ownerId; this.species = species ?? null; this.panel = null; this.paused = false; this.area = 'main';
+    if (ownerId === this.me.id && species) this.mySpecies = species;
+    this.ownerId = ownerId; this.species = species ?? (ownerId === this.me.id ? this.mySpecies : null); this.panel = null; this.paused = false; this.area = 'main';
     try { await this.load(); } catch (e) { this.ownerId = null; return this.toast(this.err(e)); }
     this.root.hidden = false; requestAnimationFrame(() => this.root.classList.add('on'));
+    if (ownerId !== this.me.id) void this.visitHeart(ownerId);
     clearInterval(this.timer); this.timer = window.setInterval(() => this.tickTimers(), 1000);
     this.showHelpLog(); this.showSaleLog();
   }
@@ -76,7 +82,17 @@ export class FarmView {
   // ---------- 資料 ----------
   private async load() {
     const p = await api<FarmPayload>('GET', `/farm/${this.ownerId}`);
-    this.data = p; this.loadedAt = Date.now(); this.render();
+    this.data = p; this.loadedAt = Date.now();
+    if (p.is_owner) this.myVisit = p.state.visitHearts;
+    this.render();
+  }
+  /** 打開好友農場：每天第一次拜訪這位送友情點數（伺服器判斷；拿過或到上限就安靜略過）。 */
+  private async visitHeart(ownerId: string) {
+    try {
+      const r = await act<{ gained: number; friend_pts: number; today: { used: number; cap: number }; visit_hearts: FarmPayload['state']['visitHearts'] }>('POST', `/farm/${ownerId}/visit`);
+      this.myVisit = r.visit_hearts;
+      if (r.gained > 0 && this.ownerId === ownerId) this.toast(`來拜訪好友，友情點數 +${r.gained}（今天 ${r.today.used}/${r.today.cap}）`);
+    } catch { /* 拿不到愛心不影響拜訪 */ }
   }
   /** 背景重讀（推播、倒數歸零）：失敗時不重試轟炸伺服器。 */
   private async bgLoad() {
@@ -196,16 +212,14 @@ export class FarmView {
     const hud = hudModel(p, this.wallet());
     this.root.innerHTML = `
       <div class="farm-top"><b class="farm-title">${owner ? '我的農場' : `${esc(p.owner.display_name)} 的農場`}</b><span class="farm-place">${this.area === 'east' ? '東邊新地' : '陽光農場'}</span>
+        <div class="farm-hud">
+          <div class="fpill"><span class="flv">${hud.level}</span><span class="fxp"><i style="width:${hud.xpPct}%"></i></span><span>Lv${hud.level}</span></div>
+          ${owner ? `<div class="fpill">${ic('coin')}${hud.coins.toLocaleString()}</div><div class="fpill" title="倉庫">${ic('box')}${hud.barn}</div><div class="fpill" title="友情點數">${ic('heart')}${hud.friendPts}</div>` : `<div class="fpill visit" title="成熟資源可以採收・成長中的田可澆水・枯樹可救">成熟資源可以採收・成長中的田可澆水・枯樹可救</div>`}
+        </div>
         <button type="button" class="farm-theme" data-act="theme" aria-label="切換農場畫風，目前為${THEME_LABEL[this.theme]}">畫風：${THEME_LABEL[this.theme]}</button>
         <button type="button" class="farm-x" data-act="close" aria-label="關閉農場（Esc）">✕</button></div>
       <div class="farm-stage">
         <svg class="scene" viewBox="0 0 ${SCENE.w} ${SCENE.h}" role="img" aria-label="農場畫面">${this.art.sceneDefs()}${this.scene()}<g class="pills">${this.pills()}</g></svg>
-        <div class="farm-hud">
-          <div class="fpill"><span class="flv">${hud.level}</span><span class="fxp"><i style="width:${hud.xpPct}%"></i></span><span>Lv${hud.level}</span></div>
-          ${owner ? `<div class="fpill">${ic('coin')}${hud.coins.toLocaleString()}</div>` : ''}
-          <span class="fgrow"></span>
-          ${owner ? `<div class="fpill" title="倉庫">${ic('box')}${hud.barn}</div><div class="fpill" title="友情點數">${ic('heart')}${hud.friendPts}</div>` : `<div class="fpill visit">成熟資源可以採收・成長中的田可澆水・枯樹可救</div>`}
-        </div>
         <div class="farm-panel" hidden></div>
       </div>
       <div class="farm-footer">${this.guide()}<div class="farm-tools">${owner ? `
@@ -215,7 +229,7 @@ export class FarmView {
         <button type="button" class="ftool" data-act="collectAll">${ic('wheat', 'fic big')}全部收成</button>
         <button type="button" class="ftool" data-act="feedPanel">${ic('apple', 'fic big')}餵寵物</button>` : ''}
         <button type="button" class="ftool" data-act="friends">${ic('friend', 'fic big')}好友</button>
-        <button type="button" class="ftool" data-act="close">${ic('home', 'fic big')}回家</button>
+        <button type="button" class="ftool" data-act="${owner ? 'close' : 'goHome'}" title="${owner ? '回到小雞畫面' : '回到我的農場'}">${ic('home', 'fic big')}回家</button>
       </div></div>`;
     this.renderPanel();
   }
@@ -372,7 +386,7 @@ export class FarmView {
       const list = pn.list;
       html = head('好友農場', 'friend', 'purple') + `<div class="fpb">${!list ? '<p class="fnote">讀取中…</p>' : !list.length ? '<p class="fnote">還沒有朋友的農場。先用分享碼去朋友家拜訪，之後就會出現在這裡。</p>'
         : `<div class="flist">${list.map((f) => `<button type="button" class="frow" data-act="visit" data-user="${esc(f.user_id)}"><span class="fav">${esc(String(f.display_name).slice(0, 1))}</span>
-          <span class="fname">${esc(f.display_name)} 的農場<small>Lv ${f.level}</small></span>${f.needs_help ? '<span class="fhelp">需要幫忙</span>' : ''}</button>`).join('')}</div>`}
+          <span class="fname">${esc(f.display_name)} 的農場<small>Lv ${f.level}</small></span>${f.needs_help ? '<span class="fhelp">需要幫忙</span>' : ''}${f.user_id !== this.me.id && visitHeartAvailable(this.myVisit, f.user_id, p.server_time + (Date.now() - this.loadedAt)) ? '<span class="fheart" title="今天第一次來拜訪，友情點數 +1">+1 ♥</span>' : ''}</button>`).join('')}</div>`}
         ${p.is_owner ? '' : `<button type="button" class="fbtn wide" data-act="visit" data-user="${esc(this.me.id)}">回我的農場</button>`}</div>`;
     }
     else html = this.phase2Panel(pn, head);
@@ -461,6 +475,7 @@ export class FarmView {
       return this.root.querySelector<HTMLButtonElement>('.farm-theme')?.focus();
     }
     if (a === 'close') return this.close();
+    if (a === 'goHome') { this.close(); return void this.open(this.me.id); }
     if (a === 'guide') return this.onHit(b.dataset.target!);
     if (a === 'panelClose') return this.openPanel(null);
     if (a === 'shop' || a === 'store' || a === 'orders') return this.openPanel({ k: a });

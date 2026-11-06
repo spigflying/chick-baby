@@ -1,7 +1,7 @@
 import { buyCar, buyPart, getProfile as getRaceProfile, raceCatalog, raceLeaderboard } from './racing';
 import { buyOutfit, outfitCatalog, ownedOutfits, wearOutfit } from './outfits';
 import { fightRecord } from './fight1v1';
-import { farmAct, farmBuy, farmFeedPet, farmFriends, farmHelp, farmVisitCollect, getFarm } from './farm';
+import { farmAct, farmBuy, farmFeedPet, farmFriends, farmHelp, farmVisit, farmVisitCollect, getFarm } from './farm';
 import Fastify, { type FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
 import rateLimitPlugin from '@fastify/rate-limit';
@@ -141,6 +141,7 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
         a.get('/farm/friends', async (req) => farmFriends(db, req.user!.id));
         a.get('/farm/:id', async (req) => getFarm(db, (req.params as any).id, req.user!.id));
         a.post('/farm/act', async (req) => { const b = (req.body ?? {}) as any; return farmAct(db, ctx(req), b.action, b.request_id); });
+        a.post('/farm/:id/visit', async (req) => { const b = (req.body ?? {}) as any; return farmVisit(db, ctx(req), (req.params as any).id, b.request_id); });
         a.post('/farm/:id/help', async (req) => { const b = (req.body ?? {}) as any; return farmHelp(db, ctx(req), (req.params as any).id, b, b.request_id); });
         a.post('/farm/:id/collect', async (req) => { const b = (req.body ?? {}) as any; return farmVisitCollect(db, ctx(req), (req.params as any).id, b.action, b.request_id); });
         a.post('/farm/feed-pet', async (req) => { const b = (req.body ?? {}) as any; return farmFeedPet(db, ctx(req), b.item, b.request_id); });

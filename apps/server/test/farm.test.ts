@@ -189,6 +189,26 @@ describe('farm help', () => {
     await sql`UPDATE farm_help SET day = day - 1`.execute(db);
     expect((await help(helper, owners[0].id, { kind: 'water', idx: 5 })).status).toBe(200);
   });
+  it('daily visit hearts: first visit per friend farm per day, capped, hidden from others', async () => {
+    const v = await login('visitor');
+    const owners = [await login('v1'), await login('v2'), await login('v3'), await login('v4')];
+    for (const o of owners) await o.call('GET', `/api/farm/${o.id}`); // 建立農場（不用種東西也能拿）
+    await v.call('GET', `/api/farm/${v.id}`);
+    const visit = (owner: string) => v.call('POST', `/api/farm/${owner}/visit`, { request_id: rid() });
+    const r1 = await visit(owners[0].id);
+    expect(r1.status).toBe(200); expect(r1.json).toMatchObject({ gained: 1, friend_pts: 1, today: { used: 1, cap: 3 } });
+    expect((await visit(owners[0].id)).json).toMatchObject({ gained: 0, friend_pts: 1 });
+    expect((await visit(owners[1].id)).json.gained).toBe(1);
+    expect((await visit(owners[2].id)).json.gained).toBe(1);
+    expect((await visit(owners[3].id)).json).toMatchObject({ gained: 0, friend_pts: 3, today: { used: 3, cap: 3 } });
+    expect((await state(v.id)).friendPts).toBe(3);
+    expect((await v.call('POST', `/api/farm/${v.id}/visit`, { request_id: rid() })).json.error).toBe('BAD_REQUEST');
+    expect((await owners[0].call('GET', `/api/farm/${v.id}`)).json.state.visitHearts).toEqual({ day: '', owners: [] });
+    await patchState(v.id, (s) => { s.visitHearts.day = '2000-01-01'; });
+    expect((await visit(owners[3].id)).json.gained).toBe(1);
+    expect((await owners[0].call('PATCH', `/api/homes/${owners[0].home}`, { access_mode: 'closed', request_id: rid() })).status).toBe(200);
+    expect((await visit(owners[0].id)).json.error).toBe('FORBIDDEN');
+  });
   it('friends list shows farms that need help', async () => {
     const a = await login('alice'), b = await login('bob');
     await growingCarrot(a);

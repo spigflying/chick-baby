@@ -1,7 +1,7 @@
 // 小雞農場（docs/superpowers/specs/2026-11-03-farm-design.md）：一人一座農場，整座存成 farms.state jsonb。
 // 規則全部在 @chick/engine 的 farm.ts；這裡只負責權限、上鎖、金幣帳本、幫忙上限與通知。
 import {
-  applyFarm, applyFood, applyHelp, checkFeed, createRng, describeFarm, FarmError, FARM, GAME, loadFarm, newFarm, stallBuy, takeFarmFood, visitCollect,
+  applyFarm, applyFood, applyHelp, checkFeed, createRng, describeFarm, FarmError, FARM, GAME, loadFarm, newFarm, stallBuy, takeFarmFood, visitCollect, visitHeart,
   type FarmAction, type FarmCtx, type FarmState, type HelpAction, type VisitCollectAction,
 } from '@chick/engine';
 import { sql, type Db, type Tx } from './db';
@@ -59,7 +59,7 @@ async function ownerInfo(db: Db | Tx, userId: string) {
 function payload(owner: { id: string; display_name: string }, viewerId: string, s: FarmState, now: number, ctx: FarmCtx = {}) {
   const isOwner = owner.id === viewerId;
   return {
-    owner, is_owner: isOwner, state: isOwner ? s : { ...s, helpLog: [], saleLog: [], decoBag: [] },
+    owner, is_owner: isOwner, state: isOwner ? s : { ...s, helpLog: [], saleLog: [], decoBag: [], visitHearts: { day: '', owners: [] } },
     derived: describeFarm(s, now, clock(), isOwner ? ctx : {}), server_time: now,
   };
 }
@@ -99,6 +99,24 @@ export async function farmAct(db: Db, ctx: ReqCtx, action: unknown, requestId: u
     const w = await tx.selectFrom('wallets').select('balance').where('user_id', '=', ctx.userId).executeTakeFirstOrThrow();
     return { ...payload(await ownerInfo(tx, ctx.userId), ctx.userId, s, now, fctx), balance: w.balance as number, leveled: out.leveled };
   }, { type: 'farm', id: ctx.userId });
+}
+
+/** POST /api/farm/:id/visit：訪客打開好友農場時呼叫；每天第一次拜訪這位好友送友情點數（每天上限 FARM.visit.perDay 位）。 */
+export async function farmVisit(db: Db, ctx: ReqCtx, ownerId: string, requestId: unknown) {
+  if (!rateLimit(`farm.visit:${ctx.userId}`, 30, 60_000)) fail('RATE_LIMITED');
+  return runAction(db, ctx, 'farm.visit', requestId, { owner: ownerId }, async (tx) => {
+    if (ownerId === ctx.userId) fail('BAD_REQUEST');
+    const home = await homeOf(tx, ownerId);
+    if (!home) fail('NOT_FOUND');
+    if (!(await canEnter(tx, home, ctx.userId))) fail('FORBIDDEN');
+    const exists = await tx.selectFrom('farms').select('user_id').where('user_id', '=', ownerId).executeTakeFirst();
+    if (!exists) fail('NOT_FOUND');
+    const now = Date.now();
+    const me = await lockFarm(tx, ctx.userId, now);
+    const gained = visitHeart(me, ownerId, tpeDay(now));
+    if (gained) await saveFarm(tx, ctx.userId, me);
+    return { ok: true, gained, friend_pts: me.friendPts, today: { used: me.visitHearts.owners.length, cap: FARM.visit.perDay }, visit_hearts: me.visitHearts };
+  }, { type: 'farm', id: ownerId });
 }
 
 /** POST /api/farm/:id/help：訪客幫澆水或救枯樹。 */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   ALWAYS_OPEN, makeClock, parseOpenHours,
-  newFarm, loadFarm, applyFarm, applyHelp, visitCollect, describeFarm, stageOf, treeWithered, genOrder, refreshOrders, barnCap, invCount,
+  newFarm, loadFarm, applyFarm, applyHelp, visitCollect, visitHeart, describeFarm, stageOf, treeWithered, genOrder, refreshOrders, barnCap, invCount,
   fieldsUnlocked, orderSlots, FarmError, FARM, FARM_ITEMS, CROPS, ANIMALS, RECIPES, type FarmState, type FarmItemId,
 } from '../src';
 
@@ -325,6 +325,19 @@ describe('help', () => {
   });
 });
 
+describe('daily visit hearts', () => {
+  it('first visit to each friend farm per day gives a friend point, up to the daily cap', () => {
+    const s = fresh();
+    expect(visitHeart(s, 'a', '2026-11-06')).toBe(FARM.visit.friendPoints);
+    expect(visitHeart(s, 'a', '2026-11-06')).toBe(0); // 同一家同一天只算一次
+    for (let i = 1; i < FARM.visit.perDay; i++) expect(visitHeart(s, `f${i}`, '2026-11-06')).toBe(1);
+    expect(visitHeart(s, 'extra', '2026-11-06')).toBe(0); // 今日上限
+    expect(s.friendPts).toBe(FARM.visit.perDay * FARM.visit.friendPoints);
+    expect(visitHeart(s, 'a', '2026-11-07')).toBe(1); // 隔天重算
+    expect(s.visitHearts).toEqual({ day: '2026-11-07', owners: ['a'] });
+  });
+});
+
 describe('loadFarm', () => {
   it('fills defaults for missing fields', () => {
     const s: any = fresh();
@@ -334,6 +347,7 @@ describe('loadFarm', () => {
     expect(l.jobs).toEqual({ bakery: [], jamhouse: [], dairy: [] });
     expect(l.queueSlots).toEqual({ bakery: 2, jamhouse: 2, dairy: 2 });
     expect(l.helpLog).toEqual([]);
+    expect(l.visitHearts).toEqual({ day: '', owners: [] });
     expect(code(() => loadFarm(null, T0, C))).toBe('BAD_REQUEST');
   });
 });

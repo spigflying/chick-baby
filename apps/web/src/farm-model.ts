@@ -122,3 +122,10 @@ export function farmOwnerFor(homeOwnerId: string | null | undefined, meId: strin
 export function loadErrorAction(code: string): 'close' | 'pause' {
   return code === 'FORBIDDEN' || code === 'NOT_FOUND' || code === 'UNAUTHORIZED' ? 'close' : 'pause';
 }
+
+/** 好友清單的「+1♥」：今天（台北日期）還沒拜訪過這位、也還沒到每日上限。v 是自己的 visitHearts（還沒讀過自己的農場就是 null）。 */
+export function visitHeartAvailable(v: FarmState['visitHearts'] | null, ownerId: string, serverTime: number): boolean {
+  const day = new Date(serverTime + 8 * 3600_000).toISOString().slice(0, 10);
+  if (!v || v.day !== day) return FARM.visit.perDay > 0;
+  return !v.owners.includes(ownerId) && v.owners.length < FARM.visit.perDay;
+}

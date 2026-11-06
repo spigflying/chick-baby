@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ALWAYS_OPEN, applyFarm, describeFarm, newFarm, applyHelp, FARM_ERROR_CODES, type FarmState } from '@chick/engine';
-import { remainText, fieldBadge, plantChoices, hudModel, helpTargets, FARM_ERR, farmCellState, farmOwnerFor, loadErrorAction, feedChoices, stallDefaults, expandOffer, panelValid, type FarmPayload } from '../src/farm-model';
+import { remainText, fieldBadge, plantChoices, hudModel, helpTargets, FARM_ERR, farmCellState, farmOwnerFor, loadErrorAction, feedChoices, stallDefaults, expandOffer, panelValid, visitHeartAvailable, type FarmPayload } from '../src/farm-model';
 
 const T0 = Date.parse('2026-11-02T10:00:00+08:00');
 const M = 60_000;
@@ -122,5 +122,19 @@ describe('phase 2 models', () => {
     expect(expandOffer(payload(s), 14)).toEqual({ kind: 'later', text: '先買前一格' });
     s.expand = 2; expect(expandOffer(payload(s), 14)).toEqual({ kind: 'later', text: 'Lv 11 才能買' });
     expect(expandOffer(payload(s), 12)).toEqual({ kind: 'open' });
+  });
+});
+
+describe('visitHeartAvailable', () => {
+  const t = Date.parse('2026-11-06T10:00:00+08:00');
+  it('unknown or old day → available; visited or capped today → not', () => {
+    expect(visitHeartAvailable(null, 'a', t)).toBe(true);
+    expect(visitHeartAvailable({ day: '2026-11-05', owners: ['a', 'b', 'c'] }, 'a', t)).toBe(true);
+    expect(visitHeartAvailable({ day: '2026-11-06', owners: ['a'] }, 'a', t)).toBe(false);
+    expect(visitHeartAvailable({ day: '2026-11-06', owners: ['a'] }, 'b', t)).toBe(true);
+    expect(visitHeartAvailable({ day: '2026-11-06', owners: ['a', 'b', 'c'] }, 'd', t)).toBe(false);
+  });
+  it('uses the Taipei date (00:30 Taipei is already the next day)', () => {
+    expect(visitHeartAvailable({ day: '2026-11-06', owners: ['a'] }, 'a', Date.parse('2026-11-07T00:30:00+08:00'))).toBe(true);
   });
 });
