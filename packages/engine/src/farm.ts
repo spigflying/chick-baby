@@ -46,7 +46,7 @@ export type FarmAction =
   | { type: 'plant'; idx: number; crop: CropId } | { type: 'harvest'; idx: number } | { type: 'collectAll' }
   | { type: 'feed'; station: AnimalStation; i: number } | { type: 'collect'; station: AnimalStation; i: number }
   | { type: 'tree' } | { type: 'rescue' }
-  | { type: 'craft'; recipe: RecipeId } | { type: 'collectJobs'; station: CraftStation }
+  | { type: 'craft'; recipe: RecipeId } | { type: 'collectJob'; station: CraftStation; i: number } | { type: 'collectJobs'; station: CraftStation }
   | { type: 'deliver'; slot: number } | { type: 'discard'; slot: number } | { type: 'sell'; item: FarmItemId; qty: number }
   | { type: 'upgradeBarn' } | { type: 'upgradeQueue'; station: CraftStation } | { type: 'barnBonus' } | { type: 'ackHelp' }
   | { type: 'expand' } | { type: 'chickWater'; idx: number }
@@ -330,6 +330,15 @@ function collectJobs(s: FarmState, st: CraftStation, now: number, out: FarmOutco
     put(s, r.out); gainXp(s, FARM_ITEMS[r.out.item].xp * r.out.qty, out); q.shift();
   }
 }
+function collectJob(s: FarmState, st: CraftStation, i: number, now: number, out: FarmOutcome) {
+  if (!has(CRAFT_STATIONS, st) || !isInt(i) || i < 0) fail('BAD_REQUEST');
+  const q = s.jobs[st], job = q[i];
+  if (!job || job.ready > now) fail('NOT_READY');
+  const r = RECIPES[job.recipe];
+  if (!fits(s, r.out.qty)) fail('BARN_FULL');
+  put(s, r.out); gainXp(s, FARM_ITEMS[r.out.item].xp * r.out.qty, out);
+  q.splice(i, 1);
+}
 const tryDo = (f: () => void) => { try { f(); } catch (e) { if (!(e instanceof FarmError)) throw e; } };
 
 export function applyFarm(s: FarmState, a: FarmAction, now: number, clock: Clock, ctx: FarmCtx = {}): FarmOutcome {
@@ -384,6 +393,7 @@ export function applyFarm(s: FarmState, a: FarmAction, now: number, clock: Clock
       q.push({ recipe: a.recipe, ready: clock.addOpen(from, r.ms) });
       break;
     }
+    case 'collectJob': collectJob(s, a.station, a.i, now, out); break;
     case 'collectJobs': {
       if (!has(CRAFT_STATIONS, a.station)) fail('BAD_REQUEST');
       collectJobs(s, a.station, now, out); break;

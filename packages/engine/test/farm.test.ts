@@ -179,6 +179,24 @@ describe('crafting', () => {
     expect(s.inv.bread).toBe(1); expect(s.jobs.bakery).toHaveLength(1);
     expect(code(() => applyFarm(fresh(1), { type: 'craft', recipe: 'bread' }, T0, C))).toBe('NOT_UNLOCKED');
   });
+  it('collects a chosen finished bakery slot without taking other goods', () => {
+    const s = fresh(9); give(s, 'wheat', 4); give(s, 'egg', 2); give(s, 'honey', 1);
+    applyFarm(s, { type: 'craft', recipe: 'bread' }, T0, C);
+    applyFarm(s, { type: 'craft', recipe: 'honeycake' }, T0, C);
+    const ready = s.jobs.bakery[1].ready;
+    expect(code(() => applyFarm(s, { type: 'collectJob', station: 'bakery', i: 1 }, ready - 1, C))).toBe('NOT_READY');
+    expect(code(() => applyFarm(s, { type: 'collectJob', station: 'bakery', i: -1 }, ready, C))).toBe('BAD_REQUEST');
+    expect(s.jobs.bakery).toHaveLength(2);
+    give(s, 'carrot', barnCap(s));
+    expect(code(() => applyFarm(s, { type: 'collectJob', station: 'bakery', i: 1 }, ready, C))).toBe('BARN_FULL');
+    expect(s.jobs.bakery).toHaveLength(2);
+    s.inv.carrot = 0;
+    applyFarm(s, { type: 'collectJob', station: 'bakery', i: 1 }, ready, C);
+    expect(s.inv.honeycake).toBe(1); expect(s.inv.bread ?? 0).toBe(0);
+    expect(s.jobs.bakery.map((j) => j.recipe)).toEqual(['bread']);
+    applyFarm(s, { type: 'collectJobs', station: 'bakery' }, ready, C);
+    expect(s.inv.bread).toBe(1); expect(s.jobs.bakery).toHaveLength(0);
+  });
 });
 
 describe('orders', () => {

@@ -54,7 +54,7 @@ export class FarmView {
 
   constructor(private live: Live, private me: { id: string; display_name: string }, private toast: (s: string) => void, private setWallet: (n: number) => void, private wallet: () => number) {
     this.theme = savedTheme(this.me.id);
-    if (!symbolsInjected) { document.body.insertAdjacentHTML('beforeend', classicArt.iconSymbols()); symbolsInjected = true; }
+    if (!symbolsInjected) { document.body.insertAdjacentHTML('beforeend', classicArt.iconSymbols() + storybookArt.bakeryIcons()); symbolsInjected = true; }
     this.root = document.createElement('div'); this.root.className = 'farm'; this.root.hidden = true;
     this.root.setAttribute('role', 'dialog'); this.root.setAttribute('aria-label', '小雞農場');
     document.body.append(this.root);
@@ -320,6 +320,7 @@ export class FarmView {
     const el = this.root.querySelector('.farm-panel') as HTMLElement | null; if (!el) return;
     if (this.panel && this.data && !panelValid(this.panel, this.data)) this.panel = null;
     const pn = this.panel, p = this.data;
+    el.classList.toggle('bakery-panel', pn?.k === 'craft' && pn.st === 'bakery' && this.theme === 'storybook');
     if (!pn || !p) { el.hidden = true; el.innerHTML = ''; return; }
     const head = (title: string, icon: string, tone: string) => `<header class="fph ${tone}">${ic(icon, 'fic hic')}<b>${title}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header>`;
     let html = '';
@@ -345,14 +346,22 @@ export class FarmView {
       const meta = CRAFT_STATIONS[pn.st], j = d.jobs[pn.st];
       const recipes = (Object.keys(RECIPES) as RecipeId[]).filter((r) => RECIPES[r].station === pn.st);
       const slots = s.queueSlots[pn.st];
-      html = head(meta.name, 'oven', 'pink') + `<div class="fpb" data-live>${j.locked ? `<p class="fnote">Lv ${meta.level} 解鎖</p>` : `
+      const bakery = pn.st === 'bakery' && this.theme === 'storybook';
+      const itemIcon = (item: FarmItemId) => ic(bakery ? `ro-${item}` : item, 'fic mid');
+      html = (bakery ? `<header class="fph bakery-head">${ic('ro-oven', 'fic hic')}<b>${meta.name}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header>` : head(meta.name, 'oven', 'pink')) + `<div class="fpb" data-live>${j.locked ? `<p class="fnote">Lv ${meta.level} 解鎖</p>` : `
+        ${bakery ? '<p class="fnote bakery-note">挑一份食譜，材料齊了就能開始烘焙。</p>' : ''}
         ${recipes.map((r) => { const R = RECIPES[r]; const ok = R.in.every((x) => (s.inv[x.item] ?? 0) >= x.qty);
-          return `<div class="frecipe">${R.in.map((x) => `${ic(x.item, 'fic mid')}<span class="fx">×${x.qty}<small>(${s.inv[x.item] ?? 0})</small></span>`).join('<span class="fplus">＋</span>')}<span class="farrow">➜</span>${ic(R.out.item, 'fic mid')}
-          <span class="ftime">${remainText(R.ms)}</span><button type="button" class="fbtn go" data-act="craft" data-recipe="${r}" ${ok && j.items.length < slots ? '' : 'disabled'}>做</button></div>`; }).join('')}
-        <div class="fqueue">${Array.from({ length: FARM.queue.max }, (_, i) => { const it = j.items[i];
+          return bakery ? `<div class="frecipe bakery-recipe"><strong>${R.name}</strong><div class="bakery-formula">${R.in.map((x) => `<span class="bakery-item" title="${FARM_ITEMS[x.item].name}">${itemIcon(x.item)}<small>×${x.qty}・有${s.inv[x.item] ?? 0}</small></span>`).join('<span class="fplus">＋</span>')}<span class="farrow">➜</span><span class="bakery-item product" title="${FARM_ITEMS[R.out.item].name}">${itemIcon(R.out.item)}<small>${FARM_ITEMS[R.out.item].name}</small></span></div>
+            <div class="bakery-recipe-foot"><span>${remainText(R.ms)}</span><button type="button" class="fbtn go" data-act="craft" data-recipe="${r}" ${ok && j.items.length < slots ? '' : 'disabled'}>製作</button></div></div>` : `<div class="frecipe">${R.in.map((x) => `${itemIcon(x.item)}<span class="fx">×${x.qty}<small>(${s.inv[x.item] ?? 0})</small></span>`).join('<span class="fplus">＋</span>')}<span class="farrow">➜</span>${itemIcon(R.out.item)}
+            <span class="ftime">${remainText(R.ms)}</span><button type="button" class="fbtn go" data-act="craft" data-recipe="${r}" ${ok && j.items.length < slots ? '' : 'disabled'}>做</button></div>`; }).join('')}
+        ${bakery ? '<h4 class="fsub bakery-sub">成品區 <small>點完成品可個別收取</small></h4>' : ''}
+        <div class="fqueue${bakery ? ' bakery-queue' : ''}">${Array.from({ length: FARM.queue.max }, (_, i) => { const it = j.items[i];
           if (i >= slots) return `<div class="fslot lockq">＋</div>`;
-          return it ? `<div class="fslot full">${ic(RECIPES[it.recipe].out.item, 'fic mid')}<small>${this.remain(it.remainMs) ? remainText(this.remain(it.remainMs)) : '好了'}</small></div>` : '<div class="fslot">空</div>'; }).join('')}</div>
-        <div class="fbtns"><button type="button" class="fbtn go" data-act="collectJobs" ${j.items.some((x) => this.remain(x.remainMs) === 0) ? '' : 'disabled'}>收成品</button>
+          if (!it) return '<div class="fslot">空</div>';
+          const item = RECIPES[it.recipe].out.item, ready = this.remain(it.remainMs) === 0;
+          return ready ? `<button type="button" class="fslot full ready" data-act="collectJob" data-i="${i}" aria-label="收取${FARM_ITEMS[item].name}">${itemIcon(item)}<small>點擊收取</small></button>`
+            : `<div class="fslot full">${itemIcon(item)}<small>${remainText(this.remain(it.remainMs))}</small></div>`; }).join('')}</div>
+        <div class="fbtns"><button type="button" class="fbtn go" data-act="collectJobs" ${j.items.some((x) => this.remain(x.remainMs) === 0) ? '' : 'disabled'}>${bakery ? '全收' : '收成品'}</button>
           <button type="button" class="fbtn up" data-act="upgradeQueue" ${slots >= FARM.queue.max ? 'disabled' : ''}>${slots >= FARM.queue.max ? '佇列已滿級' : `加一格 ◎${FARM.queue.costs[slots - FARM.queue.base]}`}</button></div>`}</div>`;
     } else if (pn.k === 'tree') {
       html = head('蘋果樹', 'apple', 'mint') + `<div class="fpb"><p class="fnote">${d.tree.state === 'withered' ? '果樹太久沒收，枯掉了。請朋友來救（免費），或自己花金幣救。' : '果樹好好的。'}</p>
@@ -488,6 +497,7 @@ export class FarmView {
     if (a === 'feed' && pn?.k === 'animal') return void this.doAct({ type: 'feed', station: pn.st, i: +b.dataset.i! });
     if (a === 'collect' && pn?.k === 'animal') return void this.doAct({ type: 'collect', station: pn.st, i: +b.dataset.i! });
     if (a === 'craft') return void this.doAct({ type: 'craft', recipe: b.dataset.recipe as RecipeId });
+    if (a === 'collectJob' && pn?.k === 'craft') return void this.doAct({ type: 'collectJob', station: pn.st, i: +b.dataset.i! });
     if (a === 'collectJobs' && pn?.k === 'craft') return void this.doAct({ type: 'collectJobs', station: pn.st });
     if (a === 'upgradeQueue' && pn?.k === 'craft') return void this.doAct({ type: 'upgradeQueue', station: pn.st }, '加工佇列多一格了');
     if (a === 'rescue') { this.panel = null; return void this.doAct({ type: 'rescue' }, '果樹救回來了！'); }

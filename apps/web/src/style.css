@@ -78,7 +78,8 @@ button.red{background:#ff5c8a;color:#fff;box-shadow:inset -3px -3px 0 #b02a55,in
 button:active{transform:translate(2px,2px)}
 button:disabled{filter:grayscale(1);opacity:.5}
 .modes label{display:block;margin:4px 0;cursor:pointer}
-.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#000;color:#ffd23f;padding:8px 14px;border:3px solid #ffd23f;z-index:9;font-size:14px}
+/* 提示要蓋在所有全螢幕畫面（農場 1150、格鬥 1300…）上面，不然農場裡的成功／錯誤訊息都看不到 */
+.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#000;color:#ffd23f;padding:8px 14px;border:3px solid #ffd23f;z-index:2000;font-size:14px}
 .presence{display:flex;flex-wrap:wrap;gap:4px}
 .presence span{background:#7ee07e;color:#000;padding:1px 6px;border:2px solid #000;font-size:12px}
 table{border-collapse:collapse;width:100%;font-size:13px}
@@ -439,6 +440,8 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .fslot{aspect-ratio:1;max-width:100%;border-radius:12px;background:#fff;border:2px dashed #f4cbd6;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#e9a2b6;font-size:13px}
 .fslot.full{border-style:solid;background:#fff0f5;color:var(--f-ink)}.fslot.full small{font-size:11px}
 .fslot.lockq{opacity:.4}
+button.fslot.ready{box-sizing:border-box;padding:0;font:inherit;cursor:pointer;border-color:var(--f-mint);box-shadow:0 3px 0 #7a9c75}
+button.fslot.ready:hover{filter:brightness(.96);transform:translateY(-2px)}
 .forders{display:flex;flex-direction:column;gap:8px}
 .forder{display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fff;border:2px solid #f6e3d2;border-radius:16px;padding:8px 10px}
 .forder.ok{border-color:#8fe3c2;background:#effcf6}
@@ -470,4 +473,27 @@ button.fdeco:hover{border-color:#c38cff}.fdeco small{font-size:11.5px}
 .finput{width:110px;font:inherit;font-weight:800;padding:6px 10px;border-radius:12px;border:2px solid var(--f-line);background:#fff;text-align:right}
 .finput:focus{outline:3px solid #ffd0dc;outline-offset:1px}
 button.ftile{font:inherit;color:inherit;cursor:pointer}button.ftile:hover{border-color:#63b6f2}
+/* 仙境手繪烘焙屋：道具與成品格採暖色羊皮紙、細線條，和場景素材一致。 */
+.farm.storybook .farm-panel.bakery-panel{width:min(430px,47%);border-color:#9f7347;background:#f7ebd2}
+.farm.storybook .bakery-panel .bakery-head{background:linear-gradient(#bb875b,#835532);border-bottom:2px solid #684222}
+.farm.storybook .bakery-panel .bakery-head .fic{background:#fff0cd;border:1px solid #d0a96d}
+.farm.storybook .bakery-panel .fpb{background:linear-gradient(#fbf4df,#ead7b4);gap:8px}
+.farm.storybook .bakery-panel .bakery-note{font-size:13px}
+.farm.storybook .bakery-recipe{display:block;padding:9px 10px;border-color:#bd9661;background:#fff8e8;box-shadow:0 3px 0 #bca07466}
+.farm.storybook .bakery-recipe>strong{display:block;color:#624224;margin-bottom:5px}
+.farm.storybook .bakery-formula{display:flex;justify-content:center;align-items:center;gap:3px;flex-wrap:wrap}
+.farm.storybook .bakery-item{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:46px;padding:2px 3px;border:1px solid #dec79d;border-radius:9px;background:#fffdf2}
+.farm.storybook .bakery-item.product{border-color:#b78b52;background:#fff0cf}
+.farm.storybook .bakery-item .fic{width:40px;height:40px;filter:drop-shadow(0 1px 1px #78533455)}
+.farm.storybook .bakery-item small{font-size:10px;font-weight:700;color:#73583d;white-space:nowrap}
+.farm.storybook .bakery-formula .farrow{font-size:18px;color:#906538}
+.farm.storybook .bakery-recipe-foot{display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:12px;color:#7c6245}
+.farm.storybook .bakery-recipe-foot .fbtn{padding:5px 16px}
+.farm.storybook .bakery-sub{color:#624224;margin:7px 0 2px}.farm.storybook .bakery-sub small{font-size:11px}
+.farm.storybook .bakery-queue .fslot{border-color:#c5a778;background:#fff9e9;color:#856b4b}
+.farm.storybook .bakery-queue .fslot.full{border-style:solid;background:#fff1cf;color:#4f3827}
+.farm.storybook .bakery-queue .fslot.ready{border-color:#78965d;background:#e9f2d8;box-shadow:0 3px 0 #738656}
+.farm.storybook .bakery-queue .fic{width:38px;height:38px;filter:drop-shadow(0 1px 1px #78533455)}
+.farm.storybook .bakery-panel .fbtn.go{background:#a4b477;color:#314527}
+.farm.storybook .bakery-panel .fbtn.up{background:#eac67b;color:#5b401f}
 @media (prefers-reduced-motion: reduce){.farm{transition:none}.ftool:hover{transform:none}}

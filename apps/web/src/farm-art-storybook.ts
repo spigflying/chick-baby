@@ -6,6 +6,32 @@ import * as classicArt from './farm-art-classic';
 export * from './farm-art';
 export const chick = classicArt.chick;
 
+/** 烘焙屋道具沿用場景的暖色細線；只在仙境手繪面板使用。 */
+export function bakeryIcons(): string {
+  return `<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+    <linearGradient id="ro-gold" x2=".8" y2="1"><stop stop-color="#fff0aa"/><stop offset=".55" stop-color="#e5b85d"/><stop offset="1" stop-color="#bb7838"/></linearGradient>
+    <linearGradient id="ro-cream" x2=".8" y2="1"><stop stop-color="#fffdf0"/><stop offset="1" stop-color="#e7ceb0"/></linearGradient>
+    <linearGradient id="ro-bread" x2=".8" y2="1"><stop stop-color="#fbe3a5"/><stop offset=".55" stop-color="#d69552"/><stop offset="1" stop-color="#a96739"/></linearGradient>
+    <linearGradient id="ro-honey" x2=".8" y2="1"><stop stop-color="#ffe394"/><stop offset="1" stop-color="#c97628"/></linearGradient>
+  </defs>
+  <symbol id="fi-ro-wheat" viewBox="0 0 48 48"><g stroke="#745333" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M13 43 Q17 29 17 7 M24 44 Q24 26 25 4 M35 43 Q31 27 33 9" fill="none" stroke-width="2"/>
+    <g fill="url(#ro-gold)" stroke-width="1.2"><ellipse cx="17" cy="8" rx="3" ry="5"/><ellipse cx="12" cy="15" rx="3" ry="5" transform="rotate(-32 12 15)"/><ellipse cx="21" cy="17" rx="3" ry="5" transform="rotate(32 21 17)"/><ellipse cx="25" cy="5" rx="3" ry="5"/><ellipse cx="20" cy="13" rx="3" ry="5" transform="rotate(-32 20 13)"/><ellipse cx="29" cy="15" rx="3" ry="5" transform="rotate(32 29 15)"/><ellipse cx="33" cy="10" rx="3" ry="5"/><ellipse cx="29" cy="20" rx="3" ry="5" transform="rotate(-32 29 20)"/><ellipse cx="37" cy="20" rx="3" ry="5" transform="rotate(32 37 20)"/></g>
+    <path d="M8 42 Q24 38 40 42" fill="none" stroke="#a37b4b" stroke-width="2"/></g></symbol>
+  <symbol id="fi-ro-egg" viewBox="0 0 48 48"><g stroke="#78543a" stroke-linejoin="round">
+    <ellipse cx="17" cy="24" rx="8" ry="13" fill="url(#ro-cream)" stroke-width="1.6" transform="rotate(-13 17 24)"/><ellipse cx="30" cy="24" rx="8" ry="13" fill="url(#ro-cream)" stroke-width="1.6" transform="rotate(13 30 24)"/>
+    <path d="M7 31 Q24 40 41 31 L37 40 Q24 46 11 40 Z" fill="#ba874e" stroke-width="1.5"/><path d="M8 35 Q23 43 40 35 M11 39 Q24 44 37 39" fill="none" stroke="#f0cf89" stroke-width="2"/><path d="M13 19 Q15 15 17 15 M27 18 Q29 15 31 16" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></g></symbol>
+  <symbol id="fi-ro-honey" viewBox="0 0 48 48"><g stroke="#765038" stroke-linejoin="round">
+    <rect x="11" y="13" width="26" height="30" rx="6" fill="url(#ro-honey)" stroke-width="1.8"/><path d="M13 22 Q24 26 35 22 V32 Q24 36 13 32 Z" fill="#f6c367" opacity=".75"/><rect x="9" y="9" width="30" height="8" rx="3" fill="#d7a86a" stroke-width="1.6"/><path d="M12 9 Q24 4 36 9" fill="#fff0cf" stroke-width="1.5"/><path d="M19 28 Q24 24 29 28 Q27 34 24 36 Q21 34 19 28" fill="#fff4cf" stroke-width="1"/><path d="M16 18 Q18 16 20 17" fill="none" stroke="#fff1b7" stroke-width="2" stroke-linecap="round"/></g></symbol>
+  <symbol id="fi-ro-bread" viewBox="0 0 48 48"><g stroke="#785031" stroke-linejoin="round">
+    <path d="M6 30 Q6 13 24 12 Q42 13 42 30 V37 Q40 42 34 42 H14 Q8 42 6 37 Z" fill="url(#ro-bread)" stroke-width="1.9"/><path d="M10 30 Q12 18 24 17 Q36 18 38 30" fill="none" stroke="#fff0bc" stroke-width="2"/><path d="M17 19 l3 8 M24 17 l3 9 M31 20 l3 8" fill="none" stroke="#fff3cc" stroke-width="2.5" stroke-linecap="round"/><path d="M9 36 Q24 39 39 36" fill="none" stroke="#a76939" stroke-width="1.5"/></g></symbol>
+  <symbol id="fi-ro-honeycake" viewBox="0 0 48 48"><g stroke="#775034" stroke-linejoin="round">
+    <path d="M8 20 H40 V39 Q24 45 8 39 Z" fill="#d99b5c" stroke-width="1.8"/><path d="M8 29 Q24 34 40 29 V33 Q24 38 8 33 Z" fill="#fff0c6" stroke-width="1.1"/><path d="M8 20 Q10 14 24 14 Q38 14 40 20 Q39 27 34 23 Q30 29 25 23 Q20 29 15 23 Q10 27 8 20 Z" fill="url(#ro-honey)" stroke-width="1.6"/><ellipse cx="24" cy="12" rx="5" ry="4" fill="#c96459" stroke-width="1.2"/><path d="M24 9 Q27 5 31 7" fill="none" stroke="#6d8a4d" stroke-width="2" stroke-linecap="round"/></g></symbol>
+  <symbol id="fi-ro-oven" viewBox="0 0 48 48"><g stroke="#765035" stroke-linejoin="round">
+    <path d="M5 17 L24 5 L43 17 Z" fill="#bc7650" stroke-width="1.8"/><path d="M9 17 H39 V43 H9 Z" fill="#e7cda9" stroke-width="1.8"/><path d="M14 41 V28 Q14 19 24 19 Q34 19 34 28 V41 Z" fill="#795035" stroke-width="1.6"/><path d="M19 38 Q14 31 23 26 Q22 31 27 31 Q33 34 28 38 Z" fill="#e99a4b" stroke-width="1"/><path d="M22 37 Q21 33 25 31 Q29 34 26 37 Z" fill="#ffe3a3" stroke="none"/><path d="M12 17 H36 M11 42 H37" fill="none" stroke="#fff0c7" stroke-width="1.5"/></g></symbol>
+  </svg>`;
+}
+
 const base = `${import.meta.env.BASE_URL}farm/storybook-ro-a/`;
 const image = (name: string, x: number, y: number, w: number, h: number) => `<image href="${base}${name}.webp" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="none"/>`;
 const hitBox = (b: Box, inner: string) => `<g transform="translate(${b.x} ${b.y})"><rect class="hitbg" width="${b.w}" height="${b.h}" fill="transparent"/>${inner}</g>`;
