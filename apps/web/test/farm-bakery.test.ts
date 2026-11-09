@@ -48,4 +48,28 @@ describe('仙境手繪烘焙屋', () => {
     expect(el.innerHTML).toContain('data-act="collectJob" data-i="0"');
     expect(el.innerHTML).toContain('data-act="collectJobs"');
   });
+  it('uses the illustrated recipe queue and dairy assets for the cheese cottage', () => {
+    const now = Date.now(), state = newFarm(42, now, ALWAYS_OPEN);
+    state.level = 12; state.inv.milk = 1;
+    state.jobs.dairy = [{ recipe: 'cheese', ready: now - 1 }];
+    const el = { classList: { toggle: () => {} }, hidden: true, innerHTML: '' };
+    const view = Object.create(FarmView.prototype) as any;
+    view.root = { querySelector: () => el };
+    view.theme = 'storybook'; view.loadedAt = now; view.panel = { k: 'craft', st: 'dairy' };
+    view.selectedCraftRecipe = { bakery: 'bread', jamhouse: 'jam', dairy: 'cheese' };
+    view.data = { owner: { id: 'demo', display_name: 'Demo' }, is_owner: true, state, derived: describeFarm(state, now, ALWAYS_OPEN), server_time: now };
+    view.renderPanel();
+    expect(el.innerHTML).toContain('起司小屋');
+    expect(el.innerHTML).toContain('farm/dairy/milk.webp');
+    expect(el.innerHTML).toContain('farm/dairy/cheese.webp');
+    expect(el.innerHTML).toContain('2 / 1');
+    expect(el.innerHTML).toContain('bk-ingredient short');
+    expect(el.innerHTML).toContain('data-act="collectJob" data-i="0"');
+    expect(el.innerHTML).toContain('data-act="collectJobs"');
+    const actions: unknown[] = [];
+    view.doAct = (action: unknown) => { actions.push(action); };
+    view.onAct({ dataset: { act: 'collectJob', i: '0' } });
+    view.onAct({ dataset: { act: 'collectJobs' } });
+    expect(actions).toEqual([{ type: 'collectJob', station: 'dairy', i: 0 }, { type: 'collectJobs', station: 'dairy' }]);
+  });
 });

@@ -22,10 +22,11 @@ describe('圖檔經 Vite 打包（網址帶 hash、長快取）', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
   });
-  it('麵包坊／果醬工坊的每個產品與原料都有圖', () => {
+  it('每個工坊的產品與原料都有圖', () => {
     for (const r of Object.values(RECIPES)) {
-      if (r.station !== 'bakery' && r.station !== 'jamhouse') continue;
-      expect(artPaths(), `${r.station}/${r.out.item}`).toContain(`farm/${r.station}/${r.out.item}.webp`);
+      for (const item of [...r.in.map((x) => x.item), r.out.item]) {
+        expect(artPaths(), `${r.station}/${item}`).toContain(`farm/${r.station}/${item}.webp`);
+      }
     }
   });
   it('程式不再用寫死的 /farm/*.png、/fight/* 或 BASE_URL 組圖檔網址（那些不會帶 hash、無法長快取）', () => {
