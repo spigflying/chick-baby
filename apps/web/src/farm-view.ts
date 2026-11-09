@@ -22,8 +22,10 @@ const ANIMAL_ART = {
   beehive: { animal: 'bee', feedDir: 'jamhouse', outDir: 'bakery' },
   cowshed: { animal: 'cow', feedDir: 'bakery', outDir: 'dairy' },
 } as const;
-const CROP_ART: Record<CropId, string> = {
+const ITEM_ART: Record<FarmItemId, string> = {
   wheat: 'bakery/wheat', carrot: 'hutch/carrot', strawberry: 'jamhouse/strawberry', pumpkin: 'crops/pumpkin',
+  wool: 'hutch/wool', egg: 'bakery/egg', apple: 'tree/apple', bread: 'bakery/bread', jam: 'jamhouse/jam',
+  honey: 'bakery/honey', milk: 'dairy/milk', honeycake: 'bakery/honeycake', cheese: 'dairy/cheese',
 };
 type Panel = null | { k: 'plant'; idx: number } | { k: 'animal'; st: AnimalStation } | { k: 'craft'; st: CraftStation } | { k: 'tree' } | { k: 'orders' } | { k: 'store' } | { k: 'shop' } | { k: 'friends'; list?: any[] }
   // 第二階段
@@ -335,6 +337,7 @@ export class FarmView {
     el.classList.toggle('animal-card-panel', pn?.k === 'animal' && pn.st in ANIMAL_ART && this.theme === 'storybook');
     el.classList.toggle('tree-panel', pn?.k === 'tree' && this.theme === 'storybook');
     el.classList.toggle('plant-panel', pn?.k === 'plant' && this.theme === 'storybook');
+    el.classList.toggle('orders-panel', pn?.k === 'orders' && this.theme === 'storybook');
     if (!pn || !p) { el.hidden = true; el.innerHTML = ''; return; }
     const head = (title: string, icon: string, tone: string) => `<header class="fph ${tone}">${ic(icon, 'fic hic')}<b>${title}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header>`;
     let html = '';
@@ -364,7 +367,7 @@ export class FarmView {
       html = head(CRAFT_STATIONS[pn.st].name, 'oven', 'pink') + `<div class="fpb"><p class="fnote">${j.items.length ? j.items.map((x) => `${RECIPES[x.recipe].name}：${this.remain(x.remainMs) ? remainText(this.remain(x.remainMs)) : '做好了'}`).join('、') : '沒有成品'}</p>${j.items.length && this.remain(j.items[0].remainMs) === 0 ? '<button type="button" class="fbtn go wide" data-act="visitJob">收一份成品</button>' : ''}</div>`;
     } else if (pn.k === 'plant') {
       html = head(`種什麼？（田 ${pn.idx + 1}）`, 'wheat', 'mint') + `<div class="fpb"><div class="flist">${plantChoices(p, this.wallet()).map((c) => `
-        <button type="button" class="frow" data-act="plant" data-crop="${c.crop}" ${c.enabled ? '' : 'disabled'}>${this.theme === 'storybook' ? `<img class="fic mid" src="${art(`farm/${CROP_ART[c.crop]}.webp`)}" alt="">` : ic(CROPS[c.crop].out.item, 'fic mid')}
+        <button type="button" class="frow" data-act="plant" data-crop="${c.crop}" ${c.enabled ? '' : 'disabled'}>${this.theme === 'storybook' ? `<img class="fic mid" src="${art(`farm/${ITEM_ART[c.crop]}.webp`)}" alt="">` : ic(CROPS[c.crop].out.item, 'fic mid')}
           <span class="fname">${esc(c.name)}<small>${remainText(CROPS[c.crop].growMs)}・收 ${CROPS[c.crop].out.qty} 個</small></span>
           <span class="fcost">${c.reason ? esc(c.reason) : esc(c.cost)}</span></button>`).join('')}</div></div>`;
     } else if (pn.k === 'animal') {
@@ -419,6 +422,12 @@ export class FarmView {
                 ${p.is_owner ? `<button type="button" class="fbtn up tp-action" data-act="rescue">花 ◎${FARM.tree.rescueCoins} 救樹</button>` : canHelp ? '<button type="button" class="fbtn go tp-action" data-act="visitRescue">幫忙救樹</button>' : ''}`}</div>`;
       } else html = head('蘋果樹', 'apple', 'mint') + `<div class="fpb"><p class="fnote">${d.tree.state === 'withered' ? '果樹太久沒收，枯掉了。請朋友來救（免費），或自己花金幣救。' : '果樹好好的。'}</p>
         ${d.tree.state === 'withered' ? `<button type="button" class="fbtn up wide" data-act="rescue">花 ◎${FARM.tree.rescueCoins} 自己救</button>` : ''}</div>`;
+    } else if (pn.k === 'orders' && this.theme === 'storybook') {
+      html = head('訂單看板', 'board', 'orange') + `<div class="fpb orders-body" data-live><p class="orders-note">確認訂單需要的貨物，備齊後就能交貨。</p><div class="orders-list">${d.orders.map((o, i) => 'order' in o ? `
+        <section class="orders-card"><div class="orders-card-head"><b>訂單 ${i + 1}</b><span class="${o.canDeliver ? 'ready' : 'short'}">${o.canDeliver ? '可以交貨' : '準備貨物中'}</span></div>
+          <div class="orders-items">${o.order.items.map((it) => { const have = s.inv[it.item] ?? 0; return `<div class="orders-item${have < it.qty ? ' short' : ''}"><img src="${art(`farm/${ITEM_ART[it.item]}.webp`)}" alt=""><b>${esc(FARM_ITEMS[it.item].name)}</b><strong>${it.qty} / ${have}</strong></div>`; }).join('')}</div>
+          <div class="orders-foot"><span>獎勵 <b>◎ ${o.order.coins}</b><small>經驗 +${o.order.xp}</small></span><button type="button" class="fbtn go" data-act="deliver" data-slot="${i}" ${o.canDeliver ? '' : 'disabled'}>交貨</button><button type="button" class="fbtn no" data-act="discard" data-slot="${i}">丟掉</button></div></section>`
+        : `<div class="orders-card orders-wait"><b>訂單 ${i + 1}</b><span>${this.remain(o.waitMs) ? `${remainText(this.remain(o.waitMs))}後有新訂單` : '新訂單來了'}</span></div>`).join('')}</div></div>`;
     } else if (pn.k === 'orders') {
       html = head('訂單看板', 'board', 'orange') + `<div class="fpb" data-live><div class="forders">${d.orders.map((o, i) => 'order' in o ? `
         <div class="forder ${o.canDeliver ? 'ok' : ''}">${o.order.items.map((it) => `<span class="fneed">${ic(it.item, 'fic mid')}<b>${s.inv[it.item] ?? 0}/${it.qty}</b></span>`).join('')}

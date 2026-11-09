@@ -1,0 +1,36 @@
+import { describe, expect, it } from 'vitest';
+import { ALWAYS_OPEN, describeFarm, newFarm } from '@chick/engine';
+import { FarmView } from '../src/farm-view';
+
+describe('仙境手繪訂單看板', () => {
+  it('shows item art, required/owned counts, shortages, rewards and working actions', () => {
+    const now = Date.now();
+    const state = newFarm(42, now, ALWAYS_OPEN);
+    state.level = 3;
+    state.inv = { wheat: 2, bread: 1 };
+    state.orders[0] = { items: [{ item: 'wheat', qty: 2 }, { item: 'egg', qty: 1 }], coins: 12, xp: 6 };
+    state.orders[1] = { items: [{ item: 'bread', qty: 1 }], coins: 20, xp: 10 };
+    state.orders[2] = null; state.orderWait[2] = now + 10 * 60_000;
+    const el = { classList: { toggle: () => {} }, hidden: true, innerHTML: '' };
+    const view = Object.create(FarmView.prototype) as any;
+    view.root = { querySelector: () => el };
+    view.theme = 'storybook'; view.loadedAt = now; view.panel = { k: 'orders' };
+    view.data = { owner: { id: 'demo', display_name: 'Demo' }, is_owner: true, state, derived: describeFarm(state, now, ALWAYS_OPEN), server_time: now };
+    view.renderPanel();
+    expect(el.innerHTML).toContain('orders-card');
+    expect(el.innerHTML).toContain('farm/bakery/wheat.webp');
+    expect(el.innerHTML).toContain('farm/bakery/egg.webp');
+    expect(el.innerHTML).toContain('2 / 2');
+    expect(el.innerHTML).toContain('1 / 0');
+    expect(el.innerHTML).toMatch(/orders-item short[^>]*>.*?farm\/bakery\/egg\.webp/s);
+    expect(el.innerHTML).toContain('經驗 +6');
+    expect(el.innerHTML).toContain('10 分後有新訂單');
+    expect(el.innerHTML).toMatch(/data-act="deliver" data-slot="0" disabled/);
+    expect(el.innerHTML).toMatch(/data-act="deliver" data-slot="1" >/);
+    const actions: unknown[] = [];
+    view.doAct = (action: unknown) => { actions.push(action); };
+    view.onAct({ dataset: { act: 'deliver', slot: '1' } });
+    view.onAct({ dataset: { act: 'discard', slot: '0' } });
+    expect(actions).toEqual([{ type: 'deliver', slot: 1 }, { type: 'discard', slot: 0 }]);
+  });
+});

@@ -428,6 +428,25 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .farm.storybook .plant-panel .frow{background:#fff8e9;border-color:#d8b887;color:#513822}
 .farm.storybook .plant-panel .frow:hover:not([disabled]){border-color:#af7941}
 .farm.storybook .plant-panel img.fic{width:48px;height:48px;object-fit:contain;filter:drop-shadow(0 2px 2px #78533455)}
+.farm.storybook .farm-panel.orders-panel{width:min(760px,90%);top:7%;bottom:7%;background:#f7ebd2;border-color:#9f7347}
+.farm.storybook .orders-panel .fph{background:linear-gradient(#bb875b,#835532);border-bottom:2px solid #684222}
+.farm.storybook .orders-panel .orders-body{background:linear-gradient(#fbf4df,#ead7b4);color:#54391f}
+.orders-note{margin:0;color:#806448;font-size:13px}
+.orders-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
+.orders-card{min-width:0;padding:10px;border:2px solid #c5a06a;border-radius:15px;background:#fff8e9;box-shadow:0 3px 0 #9f734733}
+.orders-card-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:9px}
+.orders-card-head b{font-size:17px}.orders-card-head span{border-radius:12px;padding:3px 8px;font-size:11px;font-weight:800;white-space:nowrap}
+.orders-card-head .ready{background:#e3eccd;color:#4e702c}.orders-card-head .short{background:#f8dfd5;color:#b74435}
+.orders-items{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+.orders-item{min-width:0;display:flex;flex-direction:column;align-items:center;padding:5px 2px;border:2px solid #dfc596;border-radius:11px;background:#fffdf2;text-align:center}
+.orders-item img{width:72px;height:72px;max-width:100%;object-fit:contain}
+.orders-item b{font-size:11px;white-space:nowrap}.orders-item strong{font-size:14px;color:#486a2c;white-space:nowrap}
+.orders-item.short{border-color:#d98873;background:#fff0e9}.orders-item.short strong{color:#c73d30}
+.orders-foot{display:flex;align-items:center;gap:7px;margin-top:9px;padding-top:9px;border-top:1px dashed #c8a977}
+.orders-foot>span{display:flex;flex:1;flex-direction:column;font-size:11px;color:#806448}.orders-foot>span b{font-size:16px;color:#a46a24}.orders-foot>span small{font-size:11px}
+.farm.storybook .orders-panel .fbtn.go{background:#a4b477;color:#314527}.farm.storybook .orders-panel .fbtn.no{background:#eac5ae;color:#713e2e}
+.orders-wait{display:flex;align-items:center;justify-content:space-between;gap:8px;border-style:dashed;color:#806448;min-height:58px}
+@media(max-width:650px){.orders-list{grid-template-columns:1fr}}
 .farm.storybook .fph.mint,.farm.storybook .fph.pink,.farm.storybook .fph.orange,.farm.storybook .fph.blue,.farm.storybook .fph.purple{background:linear-gradient(#9d794d,#6b4c2f)}
 /* 子畫面 */
 .farm-panel{position:absolute;right:2%;top:12%;bottom:4%;width:min(380px,46%);display:flex;flex-direction:column;background:var(--f-card);border-radius:22px;box-shadow:0 10px 30px rgba(120,70,50,.28);overflow:hidden}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>仙境手繪農場・訂單看板預覽</title>
+<script type="module">
+  import '../../src/style.css';
+  import { ALWAYS_OPEN, describeFarm, newFarm } from '@chick/engine';
+  import { FarmView } from '../../src/farm-view.ts';
+
+  const now = Date.now();
+  const state = newFarm(42, now, ALWAYS_OPEN);
+  state.level = 3;
+  state.inv = { wheat: 2, bread: 1, carrot: 3, strawberry: 1 };
+  state.orders[0] = { items: [{ item: 'wheat', qty: 2 }, { item: 'egg', qty: 1 }], coins: 12, xp: 6 };
+  state.orders[1] = { items: [{ item: 'bread', qty: 1 }, { item: 'carrot', qty: 2 }], coins: 28, xp: 14 };
+  state.orders[2] = { items: [{ item: 'strawberry', qty: 2 }, { item: 'pumpkin', qty: 1 }], coins: 42, xp: 20 };
+  state.orders[3] = null; state.orderWait[3] = now + 10 * 60_000;
+  const view = new FarmView({ touch: false }, { id: 'demo', display_name: 'Demo' }, () => {}, () => {}, () => 1200);
+  view.theme = 'storybook';
+  view.data = { owner: { id: 'demo', display_name: 'Demo' }, is_owner: true, state, derived: describeFarm(state, now, ALWAYS_OPEN), server_time: now };
+  view.ownerId = 'demo';
+  view.loadedAt = now;
+  view.panel = { k: 'orders' };
+  view.root.hidden = false;
+  view.root.classList.add('on');
+  view.render();
+</script>
+</html>
