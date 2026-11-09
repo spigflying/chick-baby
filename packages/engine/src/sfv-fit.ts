@@ -86,17 +86,26 @@ export function createFit(E) {
   }
   const SPECIAL = /^(DP|TATSU)_|^CA$|^SHINKU$/;
   /** -> { img, off（相對 p.x、面向右的 px）, s（圖的縮放）, ph, tag, fb（蛋波）, id, box（受擊判定用哪張圖）, cap（前緣封頂） } */
-  function pose(p) {
-    const st = p.st, N = E.ST, mk = (img, ph, extra) => { const [s, dx] = sc(img); return { img, off: NEUT + dx, s, ph, box: img, cap: null, ...extra }; };
+  function pose(p, s = null) {
+    const st = p.st, N = E.ST, mk = (img, ph, extra) => { const [sc0, dx] = sc(img); return { img, off: NEUT + dx, s: sc0, ph, box: img, cap: null, ...extra }; };
+    // SF5 近身防禦姿勢（無 blockstun；判定用防禦圖）
+    if (s && (st === N.IDLE || st === N.CROUCH)) {
+      const i = s.p.indexOf(p);
+      if (i >= 0) {
+        const pg = E.proxGuard(s, i);
+        if (pg === 1) return mk('n_cblock', 'prox_crouch', { cap: 24 });
+        if (pg === 4) return mk('n_sblock', 'prox_stand', { cap: 22 });
+      }
+    }
     if (st === N.MOVE) {
       const mv = E.MOVE_LIST[p.mv];
       if (SPECIAL.test(mv.id)) return special(p, mv);
       const S = SCHED[mv.id];
       if (!S) return { img: null, off: NEUT, s: 1, ph: 'noart', id: mv.id, box: null, cap: null };
-      const q = S.arr[Math.min(p.mt, S.arr.length - 1)] || S.arr[1], [s, dx] = sc(q.img), fm = D.moves[mv.id];
+      const q = S.arr[Math.min(p.mt, S.arr.length - 1)] || S.arr[1], [scv, dx] = sc(q.img), fm = D.moves[mv.id];
       const off = q.ph === 'active' && fm ? fm.offA : NEUT + dx;
       // 起手：前緣封頂在原本站姿 22／蹲姿 24（起手圖前傾，不封頂會被輕拳搶先）；持續幀用擬合封頂；收招不封頂（引擎再補原本的伸出框）
-      return { img: q.img, tag: q.tag, off, s, ph: q.ph, fb: S.fireball, id: mv.id, box: q.img, cap: q.ph === 'active' && fm ? fm.cap : S.cap != null ? S.cap : q.ph === 'startup' ? (mv.posture === 'crouch' ? 24 : 22) : null };
+      return { img: q.img, tag: q.tag, off, s: scv, ph: q.ph, fb: S.fireball, id: mv.id, box: q.img, cap: q.ph === 'active' && fm ? fm.cap : S.cap != null ? S.cap : q.ph === 'startup' ? (mv.posture === 'crouch' ? 24 : 22) : null };
     }
     if (st === N.IDLE && p.vx !== 0) {
       const S = WALK.S, w = p.x * p.f, k = Math.floor(w / S), d = w - k * S, nP = WALK.poses.length;
@@ -105,7 +114,7 @@ export function createFit(E) {
       return { img, off: NEUT + sc(img)[1] + WALK.Q[q] * K - d - WALK.M, s: 1, ph: p.vx * p.f > 0 ? 'walkF' : 'walkB', key: WALK.names[q] + (slot >= nP ? '2' : '1'), slot, box: img, cap: WALK.cap };
     }
     if (st === N.LAND && p.mv === THROW_ID && THROW_ID >= 0) return mk('n_th_slam', 'throw_recover', { cap: 22 });   // 摔完的收招（引擎在 LAND 標 mv = THROW）
-    if (st === N.LAND && p.t > 3) return mk('n_sland', 'land_special');
+    if (st === N.LAND && p.t > 4) return mk('n_sland', 'land_special');
     if (st === N.IDLE) return mk('body_1', 'idle');
     if (st === N.CROUCH || st === N.PREJUMP || st === N.LAND) return mk('n_crouch', 'crouch');
     if (st === N.BLOCK) return p.cr ? mk('n_cblock', 'block_crouch') : mk('n_sblock', 'block_stand');
@@ -121,14 +130,24 @@ export function createFit(E) {
     return { img: null, off: NEUT, s: 1, ph: 'other', box: null, cap: null };
   }
   /** 貼合美術的受擊判定（null = 用引擎原本的方框：還沒有圖的招式） */
-  function hurt(p) {
-    const q = pose(p); if (!q.box) return null;
+  function hurt(p, s = null) {
+    const q = pose(p, s); if (!q.box) return null;
     const b = D.hurt[q.box]; if (!b) return null;
     const off = q.box === 'hit_stand' ? NEUT : q.off - sc(q.img)[1];
     const out = [];
     for (const [x0, y, w0, h] of b) { const x = x0 + off; let w = w0; if (q.cap != null && x + w > q.cap) w = q.cap - x; if (w > 0) out.push([x, y, w, h]); }
+    // B：空中下盤瘦身 — 受擊框底不高於 y=-40（引擎 HURT.air 同步），避免腳尖擦到蛋波
+    if (p.y < 0 || stAir(p)) {
+      const slim = [];
+      for (const [x, y, w, h] of out) {
+        if (y + h <= -40) slim.push([x, y, w, h]);
+        else if (y < -40) slim.push([x, y, w, -40 - y]);
+      }
+      return slim;
+    }
     return out;
   }
+  const stAir = (p) => p.st === E.ST.JUMP || p.st === E.ST.AIRHIT;
   const hit = (p) => (p.st === E.ST.MOVE && D.moves[E.MOVE_LIST[p.mv].id]?.hit) || null;
   return { pose, hurt, hit, SCHED, WALK, K, NEUT, scale: sc };
 }

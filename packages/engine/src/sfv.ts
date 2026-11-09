@@ -19,7 +19,7 @@ export const SFV = (() => {
   const BUFFER = 8;
   // 頓幀（hit-stop）採 SF6 數值：輕攻擊 9、重攻擊 13；必殺／超必殺逐段見各招 hs（可為逐段陣列）
   const HS_LIGHT = 9, HS_HEAVY = 13;
-  const GRAVITY = 1, JUMP_VY = -15, WALK_F = 4, WALK_B = 3, JUMP_VX = 4, PREJUMP_T = 3, JUMP_LAND = 3;
+  const GRAVITY = 1, JUMP_VY = -18, WALK_F = 4, WALK_B = 3, JUMP_VX = 4, PREJUMP_T = 4, JUMP_LAND = 4;
   const KD_SOFT = 40, KD_HARD = 60, DIZZY_T = 120, TECH_WINDOW = 7, TECH_T = 16, THROW_RECOVERY = 14, THROW_ANIM = 24, DASH_WINDOW = 10;
   const WHITE_DELAY = 90, WHITE_REGEN = 3, STUN_DELAY = 120, STUN_DECAY = 3;
   const SUPER_FREEZE = 30, VT_TICKS = 480;
@@ -34,7 +34,7 @@ export const SFV = (() => {
   const RS = Object.freeze({ FIGHT: 0, KO: 1, OVER: 2, INTRO: 3 });
 
   // 盒子都是 [x, y, w, h]，x 以「面向前方」為正，相對角色中心與腳底
-  const HURT = { stand: [[-18, -92, 36, 42], [-22, -50, 44, 50]], crouch: [[-20, -62, 40, 28], [-24, -34, 48, 34]], air: [[-18, -86, 36, 44], [-16, -42, 32, 30]] };
+  const HURT = { stand: [[-18, -92, 36, 42], [-22, -50, 44, 50]], crouch: [[-20, -62, 40, 28], [-24, -34, 48, 34]], air: [[-18, -86, 36, 44], [-16, -70, 32, 30]] };
   const PUSH = { stand: [-16, -82, 32, 82], crouch: [-18, -56, 36, 56], air: [-14, -80, 28, 60], down: [-30, -18, 60, 18] };
 
   // ---------- defineMove：用區間算每一 tick 的判定與速度，不寫逐幀表 ----------
@@ -71,8 +71,8 @@ export const SFV = (() => {
     defineMove({ id: '2HP', limb: 'arm', reach: [18, -120], name: '蹲重拳（對空）', ...HEAVY, posture: 'crouch', startup: 6, active: 4, recovery: 20, dmg: 80, stun: 150, hitstun: 20, blockstun: 16, hitbox: [6, -124, 36, 70], hurtExt: [4, -116, 30, 54], cancel: ['special'] }),
     defineMove({ id: '2LK', limb: 'leg', name: '蹲輕腳', ...LIGHT, posture: 'crouch', guard: 'low', startup: 5, active: 2, recovery: 9, dmg: 20, stun: 50, hitstun: 12, blockstun: 10, hitbox: [16, -16, 48, 14], hurtExt: [16, -20, 42, 20], cancel: ['chain', 'special'] }),
     defineMove({ id: '2HK', limb: 'leg', name: '掃堂腿', ...HEAVY, posture: 'crouch', guard: 'low', kd: true, startup: 8, active: 3, recovery: 26, dmg: 90, stun: 150, blockstun: 16, hitbox: [14, -14, 74, 14], hurtExt: [14, -18, 66, 18] }),
-    defineMove({ id: '8HP', limb: 'arm', name: '跳重拳', ...HEAVY, air: true, guard: 'overhead', startup: 7, active: 5, recovery: 8, dmg: 80, stun: 150, hitstun: 18, blockstun: 15, hitbox: [10, -62, 44, 26], hurtExt: [10, -66, 36, 30] }),
-    defineMove({ id: '8HK', limb: 'leg', name: '跳重腳', ...HEAVY, air: true, guard: 'overhead', startup: 8, active: 6, recovery: 8, dmg: 90, stun: 150, hitstun: 18, blockstun: 15, hitbox: [6, -38, 60, 20], hurtExt: [6, -42, 52, 24] }),
+    defineMove({ id: '8HP', limb: 'arm', name: '跳重拳', ...HEAVY, air: true, guard: 'overhead', startup: 7, active: 5, recovery: 8, dmg: 80, stun: 150, hitstun: 18, blockstun: 15, hitbox: [10, -44, 44, 26], hurtExt: [10, -48, 36, 30] }),
+    defineMove({ id: '8HK', limb: 'leg', name: '跳重腳', ...HEAVY, air: true, guard: 'overhead', startup: 8, active: 6, recovery: 8, dmg: 90, stun: 150, hitstun: 18, blockstun: 15, hitbox: [6, -60, 60, 20], hurtExt: [6, -64, 52, 24] }),
     defineMove({ id: 'THROW', limb: 'arm', both: true, name: '摔技', kind: 'throw', startup: 5, active: 2, recovery: 20, dmg: 120, stun: 150, throwBox: [12, -84, 40, 64], hurtExt: [12, -80, 30, 40] }),
     // 快按兩下：後退步前 2 tick 不會被摔、3～9 tick 小跳離地（地面摔抓不到，但打得到），之後是破綻；前衝沒有無敵
     defineMove({ id: 'BDASH', name: '後退步', kind: 'system', startup: 1, recovery: 22, invuln: [[1, 2, 'throw']], vel: [[1, 2, -7, null], [3, 3, -7, -4], [4, 10, -7, null], [11, 14, -3, null]] }),
@@ -183,7 +183,7 @@ export const SFV = (() => {
     return wbox(p, PUSH[lying ? 'down' : poseOf(p)]);
   }
   // 貼合美術的判定（sfv-fit.ts）：玩家狀態的純函數，回傳 null 時用下面原本的方框
-  let FIT = null;
+  let FIT = null, FRAME = null;
   const setFit = (h) => { FIT = h; };
   /** vsAir：攻擊方人在空中（對空無敵 'air' 只擋這種） */
   function hurtboxes(p, vsAir = false) {
@@ -191,7 +191,7 @@ export const SFV = (() => {
     if (st === ST.KD || st === ST.KO || st === ST.THROWN || st === ST.THROWING || st === ST.TECH) return [];
     if (st === ST.AIRHIT && p.jg >= JUGGLE_MAX) return [];
     let boxes = HURT[poseOf(p)];
-    const fit = FIT && FIT.hurt(p);
+    const fit = FIT && FIT.hurt(p, FRAME);
     if (st === ST.MOVE) {
       const mv = MOVE_LIST[p.mv];
       if (mv.invulnAt(p.mt, 'full') || (vsAir && mv.invulnAt(p.mt, 'air'))) return [];
@@ -228,6 +228,39 @@ export const SFV = (() => {
     if (guard === 'low') return d === 1;
     if (guard === 'overhead') return d === 4;
     return d === 1 || d === 4;
+  }
+  // SF5 近身防禦：對手招式發生/持續（或飛彈）在 X 軸掃到你時，按住後/後下 → 停步並擺防禦姿勢（無 blockstun，可立刻取消）
+  const PROX_MARGIN = 32;
+  const xOverlap = (a, b) => a[0] < b[0] + b[2] && b[0] < a[0] + a[2];
+  function proxRangeActive(s, i) {
+    const B = s.p[i], A = s.p[1 - i];
+    // 防禦方用站/蹲基礎框做 X 柱（不走 FIT，避免和 pose 循環）
+    const base = B.st === ST.CROUCH || (B.st === ST.IDLE && dirOf(maskAt(B, s.tick), B.f) <= 3) ? HURT.crouch : HURT.stand;
+    const defBoxes = base.map((b) => wbox(B, b));
+    const hitsProx = (box) => defBoxes.some((h) => xOverlap(box, h));
+    if (A.st === ST.MOVE) {
+      const mv = MOVE_LIST[A.mv];
+      if (mv.kind !== 'throw' && mv.kind !== 'system' && A.mt < mv.S + mv.A) {
+        const src = mv.hitbox || mv.hurtExt || [12, -84, 40, 40];
+        const prox = [src[0], src[1], src[2] + PROX_MARGIN, Math.max(src[3], 40)];
+        if (hitsProx(wbox(A, prox))) return true;
+      }
+    }
+    for (const q of s.pr) {
+      if (q.o !== 1 - i || q.n <= 0) continue;
+      // SF5：場上飛向你的飛彈（不需已碰到）就觸發近身防禦
+      if (q.vx === 0 || Math.sign(q.vx) === Math.sign(B.x - q.x) || Math.abs(B.x - q.x) <= PROJ[q.lv].w) return true;
+    }
+    return false;
+  }
+  /** 回傳 0=無、4=站近身防、1=蹲近身防（純函數，伺服器/客戶端同一套） */
+  function proxGuard(s, i) {
+    const B = s.p[i];
+    if (B.y !== 0 || !(B.st === ST.IDLE || B.st === ST.CROUCH)) return 0;
+    const toward = s.p[1 - i].x === B.x ? B.f : s.p[1 - i].x > B.x ? 1 : -1;
+    const d = dirOf(maskAt(B, s.tick), toward);
+    if (d !== 4 && d !== 1) return 0;
+    return proxRangeActive(s, i) ? d : 0;
   }
 
   // ---------- 指令解析（優先序：炸毛 > 火雞連環踢 > 衝天啄 > 蛋波 > 旋風翅 > 摔 > 普通技） ----------
@@ -306,11 +339,14 @@ export const SFV = (() => {
     if (mv.kind === 'super') { p.ex -= EX_MAX; s.frz = SUPER_FREEZE; s.fo = i + 1; }
     if (mv.id === 'VT') { p.vg = 0; p.vt = VT_TICKS; }
   }
-  function walk(p, m) {
-    const d = dirOf(m, p.f);
+  function walk(s, i, m) {
+    const p = s.p[i], d = dirOf(m, p.f);
     if (d >= 7) { p.st = ST.PREJUMP; p.t = PREJUMP_T; p.vx = d === 9 ? JUMP_VX * p.f : d === 7 ? -JUMP_VX * p.f : 0; return; }
-    if (d <= 3) { p.st = ST.CROUCH; p.vx = 0; return; }
-    p.st = ST.IDLE; p.vx = d === 6 ? WALK_F * p.f : d === 4 ? -WALK_B * p.f : 0;
+    if (d <= 3) { p.st = ST.CROUCH; p.vx = 0; return; } // 後下：蹲（近身防時 pose 會換成蹲防圖）
+    p.st = ST.IDLE;
+    // SF5 近身防禦：範圍內按後不能後走（vx=0，畫面擺防禦）；前進仍可走
+    if (d === 4 && proxRangeActive(s, i)) { p.vx = 0; return; }
+    p.vx = d === 6 ? WALK_F * p.f : d === 4 ? -WALK_B * p.f : 0;
   }
   function decide(s, i) {
     const p = s.p[i], t = s.tick;
@@ -334,7 +370,7 @@ export const SFV = (() => {
     if (id >= 0) { startMove(s, i, id); return; }
     if (p.st === ST.IDLE && doubleTap(p, t, p.f, 4)) { startMove(s, i, M.BDASH); return; }
     if (p.st === ST.IDLE && doubleTap(p, t, p.f, 6)) { startMove(s, i, M.FDASH); return; }
-    if (p.st === ST.IDLE || p.st === ST.CROUCH) walk(p, maskAt(p, t));
+    if (p.st === ST.IDLE || p.st === ST.CROUCH) walk(s, i, maskAt(p, t));
   }
 
   // ---------- Phase 1：移動 ----------
@@ -590,13 +626,24 @@ export const SFV = (() => {
 
   /** 一個 tick：記輸入 → 決策 → Phase 1 移動與推擠 → Phase 2 判定 → 量表與回合 */
   function simulateSFVTick(s, m1, m2) {
+    FRAME = s;
     s.tick++;
     const t = s.tick;
     s.p[0].hist[t % HIST] = m1 & INPUT_MASK; s.p[1].hist[t % HIST] = m2 & INPUT_MASK;
     if (s.frz > 0) { s.frz--; return s; } // 超必殺暗場：全部凍結
     if (s.rs === RS.OVER) return s;
     if (s.rs === RS.INTRO) { if (--s.rt <= 0) s.rs = RS.FIGHT; return s; }
-    if (s.rs === RS.FIGHT) { decide(s, 0); decide(s, 1); }
+    if (s.rs === RS.FIGHT) {
+      decide(s, 0); decide(s, 1);
+      // 同一 tick 對手才出招：decide 順序會讓先行動的人還在後走 → 兩邊都決定完再凍住後走
+      for (let i = 0; i < 2; i++) {
+        const p = s.p[i];
+        if (!(p.st === ST.IDLE || p.st === ST.CROUCH) || !proxRangeActive(s, i)) continue;
+        const toward = s.p[1 - i].x === p.x ? p.f : s.p[1 - i].x > p.x ? 1 : -1;
+        const d = dirOf(maskAt(p, s.tick), toward);
+        if (d === 4 || d === 1) p.vx = 0;
+      }
+    }
     physics(s, 0); physics(s, 1);
     for (const q of s.pr) { if (q.cd > 0) q.cd--; q.x += q.vx; }
     s.pr = s.pr.filter((q) => q.x > -40 && q.x < STAGE_W + 40);
@@ -608,9 +655,9 @@ export const SFV = (() => {
   }
 
   return {
-    TICK_HZ, TICK_MS, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
+    TICK_HZ, TICK_MS, PREJUMP_T, JUMP_VY, JUMP_LAND, JUMP_VX, GRAVITY, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
     ST, ST_NAME, RS, MOVE_LIST, M, PROJ, P_FIELDS, defineMove, frameKind, createState, simulateSFVTick, packState, unpackState, cloneState, hashState, hashStr,
-    dirOf, maskAt, motion, canBlock, hurtboxes, hitboxOf, setFit, pushbox, projBox, overlap,
+    dirOf, maskAt, motion, canBlock, proxGuard, hurtboxes, hitboxOf, setFit, pushbox, projBox, overlap,
   };
 })();
 /** 美術姿勢（畫面用）與貼合判定（引擎用）同一個純函數 */
