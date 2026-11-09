@@ -8,8 +8,10 @@ export const SFV = (() => {
   'use strict';
   const TICK_HZ = 60, TICK_MS = 1000 / TICK_HZ;
   const UP = 1, DOWN = 2, LEFT = 4, RIGHT = 8, LP = 16, HP = 32, LK = 64, HK = 128;
-  const EASY_HADO = 256, EASY_DP = 512, EASY_TATSU = 1024, EASY_CA = 2048, INPUT_MASK = 4095;
-  const PUNCH = LP | HP, KICK = LK | HK, BUTTONS = 0xff0;
+  const EASY_HADO = 256, EASY_DP = 512, EASY_TATSU = 1024, EASY_CA = 2048;
+  // 初心 3x3 擴充（bit12–15）；INPUT_MASK 擴到 16 bit，BUTTONS 含所有可「按下」的技鍵（不含方向）
+  const EASY_HADO_EX = 4096, EASY_DP_EX = 8192, EASY_TATSU_EX = 16384, EASY_SHINKU = 32768, INPUT_MASK = 65535;
+  const PUNCH = LP | HP, KICK = LK | HK, BUTTONS = 0xfff0;
   const STAGE_W = 960, WALL = 24;
   const HP_MAX = 1000, STUN_MAX = 1000, EX_BAR = 100, EX_MAX = 300, VG_MAX = 300;
   // 狀態裡的輸入環形緩衝：搓招最長看 24 tick（236236K），32 夠用，也讓快照維持在 600 bytes 以下
@@ -125,9 +127,9 @@ export const SFV = (() => {
     return { tick: 0, frz: 0, fo: 0, fx: 0, fs: 0, fa: 0, fv: 0, ft: 0, rs: RS.INTRO, rt: INTRO_T, rnd: 1, tm: ROUND_TICKS, win: -1, to: 0, lw: -1, w: [0, 0],
       mode: modes.slice(), p: [newPlayer(STAGE_W / 2 - 120, 1), newPlayer(STAGE_W / 2 + 120, -1)], pr: [] };
   }
-  const hexOf = (a) => a.map((v) => v.toString(16).padStart(3, '0')).join('');
-  const histOf = (h) => { const a = new Array(HIST); for (let i = 0; i < HIST; i++) a[i] = parseInt(h.substr(i * 3, 3), 16); return a; };
-  /** 快照：純數字陣列＋輸入歷史 hex 字串，整包 < 600 bytes */
+  const hexOf = (a) => a.map((v) => v.toString(16).padStart(4, '0')).join(''); // 4 hex＝16 bit，涵蓋 EASY_*_EX／SHINKU
+  const histOf = (h) => { const a = new Array(HIST); for (let i = 0; i < HIST; i++) a[i] = parseInt(h.substr(i * 4, 4), 16); return a; };
+  /** 快照：純數字陣列＋輸入歷史 hex 字串，整包仍遠小於 1KB（hist 改 4 hex/slot） */
   function packState(s) {
     return JSON.stringify([S_FIELDS.map((k) => s[k]), s.w, s.p.map((p) => [...P_FIELDS.map((k) => p[k]), hexOf(p.hist)]), s.pr.map((q) => Q_FIELDS.map((k) => q[k])), s.mode]);
   }
@@ -268,8 +270,13 @@ export const SFV = (() => {
     const p = s.p[i], f = p.f, press = pressAt(p, t);
     if (!press) return -1;
     if (s.mode[i] === 1) {
+      // 初心一鍵：超必殺 → EX（氣不足退回通常版，同搓招邏輯）→ 通常必殺
       if (o.sup && p.ex >= EX_MAX && (press & EASY_CA)) return M.CA;
+      if (o.sup && p.ex >= EX_MAX && (press & EASY_SHINKU)) return M.SHINKU;
       if (o.special) {
+        if (press & EASY_DP_EX) return p.ex >= EX_BAR ? M.DP_EX : M.DP_H;
+        if ((press & EASY_HADO_EX) && !s.pr.some((q) => q.o === i)) return p.ex >= EX_BAR ? M.HADO_EX : M.HADO_L;
+        if (press & EASY_TATSU_EX) return p.ex >= EX_BAR ? M.TATSU_EX : M.TATSU_L;
         if (press & EASY_DP) return M.DP_H;
         if ((press & EASY_HADO) && !s.pr.some((q) => q.o === i)) return M.HADO_L;
         if (press & EASY_TATSU) return M.TATSU_L;
@@ -655,7 +662,7 @@ export const SFV = (() => {
   }
 
   return {
-    TICK_HZ, TICK_MS, PREJUMP_T, JUMP_VY, JUMP_LAND, JUMP_VX, GRAVITY, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
+    TICK_HZ, TICK_MS, PREJUMP_T, JUMP_VY, JUMP_LAND, JUMP_VX, GRAVITY, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, EASY_HADO_EX, EASY_DP_EX, EASY_TATSU_EX, EASY_SHINKU, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
     ST, ST_NAME, RS, MOVE_LIST, M, PROJ, P_FIELDS, defineMove, frameKind, createState, simulateSFVTick, packState, unpackState, cloneState, hashState, hashStr,
     dirOf, maskAt, motion, canBlock, proxGuard, hurtboxes, hitboxOf, setFit, pushbox, projBox, overlap,
   };

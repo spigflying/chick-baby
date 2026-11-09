@@ -8,7 +8,12 @@ import { api } from './api';
 import { art } from './art';
 
 const KEY_BITS = { KeyW: SFV.UP, KeyS: SFV.DOWN, KeyA: SFV.LEFT, KeyD: SFV.RIGHT, KeyU: SFV.LP, KeyI: SFV.HP, KeyJ: SFV.LK, KeyK: SFV.HK, KeyH: SFV.LP | SFV.LK, KeyL: SFV.HP | SFV.HK };
-const EASY_BITS = { KeyO: SFV.EASY_HADO, KeyP: SFV.EASY_DP, KeyN: SFV.EASY_TATSU, KeyM: SFV.EASY_CA };
+// 初心 3x3：RTY / FGH / VBN（H＝EX 旋風翅，不再當摔；摔改 V）。經典模式仍用 KEY_BITS（H＝摔）。
+const BEGINNER_BITS = {
+  KeyR: SFV.EASY_HADO, KeyT: SFV.EASY_DP, KeyY: SFV.EASY_TATSU,
+  KeyF: SFV.EASY_HADO_EX, KeyG: SFV.EASY_DP_EX, KeyH: SFV.EASY_TATSU_EX,
+  KeyV: SFV.LP | SFV.LK, KeyB: SFV.EASY_CA, KeyN: SFV.EASY_SHINKU,
+};
 const MODE_NAME = { classic: '經典模式', beginner: '初心模式' };
 const FACE_NAME: Record<string, string> = { chick: '雞臉', a: '臉 A', b: '臉 B', c: '臉 C' };
 const FACE_KEY = 'sfv-face';
@@ -234,10 +239,25 @@ export class FightView {
     if (!this.current?.pid) { help.textContent = '觀戰中・按 Esc 返回家裡'; return; }
     const mode = this.current.players[this.current.pid - 1].mode;
     help.innerHTML = mode === 'beginner'
-      ? '<b>初心模式出招表</b>　WASD 移動／後退防禦　U/I 拳　J/K 腳<br>O 蛋波　P 衝天啄（昇龍）　N 旋風翅　M 火雞連環踢（3 格 EX）　H 摔　L 炸毛'
+      ? '<b>初心模式出招表</b>　WASD 移動／後退防禦　U/I 拳　J/K 腳　L 炸毛<br>'
+        + '一鍵必殺（3×3）：<br>'
+        + 'R 蛋波　T 衝天啄　Y 旋風翅<br>'
+        + 'F EX蛋波　G EX衝天啄　H EX旋風翅（各需 1 格 EX，不足則出通常版）<br>'
+        + 'V 摔　B 火雞連環踢　N 真空蛋波（B／N 需 3 格 EX）'
       : '<b>經典模式出招表</b>　WASD 移動／後退防禦　U/I 拳　J/K 腳（面向左時左右相反）<br>↓↘→＋拳 蛋波　→↓↘＋拳 衝天啄（昇龍）　↓↙←＋腳 旋風翅　↓↘→↓↘→＋腳 火雞連環踢／＋拳 真空蛋波（3 格 EX）　H 摔　L 炸毛';
   }
-  private mask() { let m = 0; for (const code of this.held) m |= KEY_BITS[code] ?? (this.current?.players[this.current.pid - 1]?.mode === 'beginner' ? EASY_BITS[code] : 0) ?? 0; return m; }
+  private mask() {
+    const beginner = this.current?.players[this.current.pid - 1]?.mode === 'beginner';
+    let m = 0;
+    for (const code of this.held) {
+      if (beginner) {
+        // KeyH 在初心只走 BEGINNER_BITS（EX 旋風翅），不要套到經典的摔
+        if (BEGINNER_BITS[code] !== undefined) m |= BEGINNER_BITS[code];
+        else if (code !== 'KeyH' && KEY_BITS[code] !== undefined) m |= KEY_BITS[code];
+      } else if (KEY_BITS[code] !== undefined) m |= KEY_BITS[code];
+    }
+    return m;
+  }
   private keyDown = (e: KeyboardEvent) => {
     if (this.root.hidden) return;
     if (this.current?.result || this.current?.aborted) {
@@ -247,9 +267,15 @@ export class FightView {
       return;
     }
     if (!this.current?.pid) { if (e.code === 'Escape') { e.preventDefault(); this.closeView(); } return; }
-    if (KEY_BITS[e.code] !== undefined || (this.current.players[this.current.pid - 1]?.mode === 'beginner' && EASY_BITS[e.code] !== undefined)) { e.preventDefault(); this.held.add(e.code); }
+    const beginner = this.current.players[this.current.pid - 1]?.mode === 'beginner';
+    const known = beginner
+      ? (BEGINNER_BITS[e.code] !== undefined || (e.code !== 'KeyH' && KEY_BITS[e.code] !== undefined))
+      : KEY_BITS[e.code] !== undefined;
+    if (known) { e.preventDefault(); this.held.add(e.code); }
   };
-  private keyUp = (e: KeyboardEvent) => { if (KEY_BITS[e.code] !== undefined || EASY_BITS[e.code] !== undefined) this.held.delete(e.code); };
+  private keyUp = (e: KeyboardEvent) => {
+    if (KEY_BITS[e.code] !== undefined || BEGINNER_BITS[e.code] !== undefined) this.held.delete(e.code);
+  };
   private blur = () => this.held.clear();
   private draw = () => {
     if (!this.root.hidden && this.current) {

@@ -68,13 +68,14 @@ describe('fight rendering', () => {
     const view = Object.create(FightView.prototype) as any;
     view.root = { querySelector: () => help };
     view.current = { pid: 1, players: [{ mode: 'classic' }, { mode: 'beginner' }] };
-    view.held = new Set(['KeyO']);
+    view.held = new Set(['KeyR']);
     view.updateHelp();
     expect(help.innerHTML).toContain('↓↘→＋拳');
     expect(view.mask()).toBe(0);
     view.current.pid = 2;
     view.updateHelp();
-    expect(help.innerHTML).toContain('O 蛋波');
+    expect(help.innerHTML).toContain('R 蛋波');
+    expect(help.innerHTML).toContain('N 真空蛋波');
     expect(help.innerHTML).not.toContain('↓↘→＋拳');
     expect(view.mask()).toBe(SFV.EASY_HADO);
   });
