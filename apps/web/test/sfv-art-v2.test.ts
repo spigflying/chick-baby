@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SFV, SFV_FIT, FIT_IMAGES } from '@chick/engine';
-import { readFileSync, existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { SFV, SFV_FIT } from '@chick/engine';
 
 const { RIGHT, LP, LK, M, ST } = SFV;
 const P = (o: any) => ({ x: 400, y: -60, f: 1, vx: 0, vy: 0, t: 0, mt: 0, mv: -1, cr: 0, hs: 0, hm: 0, st: ST.IDLE, ...o });
@@ -45,11 +43,5 @@ describe('poc4 art port', () => {
     expect(SFV_FIT.pose(P({ st: ST.DIZZY, t: 10, y: 0 })).img).toBe('n_dz1');
     expect(SFV_FIT.pose(P({ st: ST.DIZZY, t: 30, y: 0 })).img).toBe('n_dz2');
     expect(SFV_FIT.pose(P({ st: ST.TECH, t: 5, y: 0 })).img).toBe('n_th_tech');
-  });
-  it('every preloaded image exists with a manifest entry', () => {
-    const dir = fileURLToPath(new URL('../src/art/fight/', import.meta.url));
-    const man = JSON.parse(readFileSync(dir + 'manifest.json', 'utf8'));
-    const need = FIT_IMAGES.filter((n: string) => !/^fx[bf]_/.test(n) || existsSync(dir + n + '.webp'));
-    for (const n of need) { expect(man[n], n).toBeTruthy(); expect(existsSync(dir + n + '.webp'), n).toBe(true); }
   });
 });

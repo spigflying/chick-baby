@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { SFV, SFVServer } from '@chick/engine';
-import { drawArtChick, drawArtExtras, drawHadoBall, drawFightFx, fightShake } from './sfv-art';
+import { drawArtExtras, drawHadoBall, drawFightFx, fightShake } from './sfv-art';
 
 // 預測、回滾與原型共用的繪圖函式；繪圖另由 sfv-draw.ts 對外重匯出。
 // 客戶端：自己與對手都不插值。每 tick 本地預測（對手沿用最後確認的輸入），收到伺服器確認的輸入跟預測不同 → 回到確認狀態用 while 迴圈重算到目前 tick。
@@ -235,15 +235,8 @@ export const SFVClient = ((SFV, SFVServer) => {
     ctx.fillStyle = '#3a4160'; ctx.fillRect(0, GROUND, W, 3);
     ctx.fillStyle = '#ff3b3b55'; ctx.fillRect(0, 90, SFV.WALL, GROUND - 90); ctx.fillRect(W - SFV.WALL, 90, SFV.WALL, GROUND - 90);
   }
-  // 人型成年雞：頭（雞冠、嘴、頭巾）＋身體＋兩手兩腳；出招時手／腳伸到攻擊判定的位置
-  const SKIN = [{ body: '#ffd84d', wing: '#d9a91a', belly: '#fff3b0' }, { body: '#f4f1ea', wing: '#bdb5a3', belly: '#ffffff' }];
-  const LEG = '#ff8c1a', LEG_BACK = '#c96f12', COMB = '#e8453c';
+  // 雞本體只由 3D 畫；這裡的姿勢只用來定位 2D 疊加（集氣光點、招式名、硬直差文字）
   const lerp2 = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-  /** 兩段肢體的關節：在起點與終點中間，往垂直方向彎 bend px */
-  function joint(a, b, bend) {
-    const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
-    return [(a[0] + b[0]) / 2 - (dy / L) * bend, (a[1] + b[1]) / 2 + (dx / L) * bend];
-  }
   const NEUTRAL = { lying: false, lean: 0, hip: -42, sh: -70, head: -87, ff: [12, 0], bf: [-12, 0], fh: [22, -68], bh: [12, -60] };
   /** 這一 tick 的姿勢（座標相對腳底、往前為正） */
   function figurePose(s, i) {
@@ -277,46 +270,8 @@ export const SFVClient = ((SFV, SFVServer) => {
     }
     return P;
   }
-  function drawFigure(ctx, ox, oy, f, P, sk) {
-    const pt = ([x, y]) => [ox + x * f, oy + y];
-    const line = (pts, color, w) => {
-      ctx.strokeStyle = color; ctx.lineWidth = w; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      ctx.beginPath(); pts.map(pt).forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.stroke();
-    };
-    const leg = (hip, foot, color) => { line([hip, joint(hip, foot, -7), foot], color, 7); line([foot, [foot[0] + 9, foot[1]]], color, 4); line([foot, [foot[0] + 6, foot[1] - 4]], color, 3); };
-    const arm = (sh, fist, color) => {
-      line([sh, joint(sh, fist, 6), fist], color, 8);
-      const [x, y] = pt(fist); ctx.fillStyle = sk.body; ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, 5.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    };
-    const hipF = [4 + P.lean * 0.3, P.hip], hipB = [-4 + P.lean * 0.3, P.hip], shF = [8 + P.lean, P.sh + 2], shB = [-6 + P.lean, P.sh + 2];
-    leg(hipB, P.bf, LEG_BACK);
-    arm(shB, P.bh, sk.wing);
-    // 身體＋肚子＋腰帶
-    const [tx] = pt([P.lean, 0]), top = oy + P.sh - 8, h = P.hip + 6 - (P.sh - 8);
-    ctx.fillStyle = sk.body; ctx.beginPath(); ctx.roundRect(tx - 16, top, 32, h, 12); ctx.fill();
-    ctx.fillStyle = sk.belly; ctx.beginPath(); ctx.ellipse(tx + 5 * f, top + h * 0.55, 9, h * 0.32, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#222'; ctx.fillRect(tx - 16, oy + P.hip - 4, 32, 4);
-    // 頭：雞冠、頭巾、眼睛、嘴、肉垂
-    const [hx, hy] = pt([2 + P.lean, P.head]);
-    ctx.fillStyle = COMB; for (const k of [-5, 0, 5]) { ctx.beginPath(); ctx.arc(hx + k * f, hy - 12 - (k === 0 ? 2 : 0), 4, 0, Math.PI * 2); ctx.fill(); }
-    ctx.fillStyle = sk.body; ctx.beginPath(); ctx.arc(hx, hy, 12, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#d62828'; ctx.fillRect(hx - 12, hy - 6, 24, 4);
-    line([[2 + P.lean - 11, P.head - 4], [2 + P.lean - 22, P.head + 2]], '#d62828', 3);
-    ctx.fillStyle = '#111'; ctx.beginPath(); ctx.arc(hx + 5 * f, hy, 2.5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#ff8c1a'; ctx.beginPath(); ctx.moveTo(hx + 10 * f, hy + 1); ctx.lineTo(hx + 23 * f, hy + 5); ctx.lineTo(hx + 10 * f, hy + 8); ctx.fill();
-    ctx.fillStyle = COMB; ctx.beginPath(); ctx.arc(hx + 9 * f, hy + 11, 3, 0, Math.PI * 2); ctx.fill();
-    leg(hipF, P.ff, LEG);
-    arm(shF, P.fh, sk.wing);
-  }
-  function drawLying(ctx, ox, oy, f, sk) {
-    ctx.fillStyle = sk.body; ctx.beginPath(); ctx.roundRect(ox - 26, oy - 20, 52, 18, 8); ctx.fill();
-    ctx.beginPath(); ctx.arc(ox - 34 * f, oy - 12, 11, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = COMB; ctx.beginPath(); ctx.arc(ox - 44 * f, oy - 14, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = LEG; ctx.lineWidth = 6; ctx.lineCap = 'round';
-    for (const d of [-6, 2]) { ctx.beginPath(); ctx.moveTo(ox + 22 * f, oy - 10 + d); ctx.lineTo(ox + 44 * f, oy - 16 + d); ctx.stroke(); }
-  }
   function drawChick(ctx, s, i, opt) {
-    const p = s.p[i], tick = s.tick, sk = SKIN[i];
+    const p = s.p[i], tick = s.tick;
     const shaking = p.hs > 0 && (p.st === SFV.ST.HIT || p.st === SFV.ST.BLOCK || p.st === SFV.ST.AIRHIT);
     const ox = p.x + (shaking ? (tick & 1 ? 3 : -3) : 0), oy = sy(p.y);
     const P = figurePose(s, i);
@@ -327,21 +282,18 @@ export const SFVClient = ((SFV, SFVServer) => {
         ctx.beginPath(); ctx.moveTo(fx - 8, oy + P.hip); ctx.lineTo(fx, oy + P.head - fh); ctx.lineTo(fx + 8, oy + P.hip); ctx.fill();
       }
     }
-    // 有水墨圖就畫圖（招式、走路、受擊都有）；還沒畫的招式（跳攻、摔、炸毛、衝刺、暈眩…）退回火柴雞
-    // 3D 模式（opt.three）：雞由 3D 畫，2D 只補集氣、昇龍光弧、星星、光束、文字
-    const art = opt.three ? false : drawArtChick(ctx, s, i);
-    if (opt.three) drawArtExtras(ctx, s, i);
-    else if (!art) { if (P.lying) drawLying(ctx, ox, oy, p.f, sk); else drawFigure(ctx, ox, oy, p.f, P, sk); }
+    // 雞由 3D 畫（sfv-3d.ts），2D 只補集氣、昇龍光弧、星星、光束、文字
+    drawArtExtras(ctx, s, i);
     const mv = p.st === SFV.ST.MOVE ? SFV.MOVE_LIST[p.mv] : null;
-    if (!art && mv?.id.startsWith('DP_') && p.mt >= mv.S - 2 && p.mt < mv.S + mv.A + 6) drawUppercut(ctx, ox, oy, p.f, p.mt - mv.S, mv.id === 'DP_EX');
-    if (!art && mv && mv.projectile !== undefined && p.mt <= mv.S + 4) drawCharge(ctx, s, i, P, ox, oy, mv);
+    if (mv?.id.startsWith('DP_') && p.mt >= mv.S - 2 && p.mt < mv.S + mv.A + 6) drawUppercut(ctx, ox, oy, p.f, p.mt - mv.S, mv.id === 'DP_EX');
+    if (mv && mv.projectile !== undefined && p.mt <= mv.S + 4) drawCharge(ctx, s, i, P, ox, oy, mv);
     const top = oy + (P.lying ? -30 : P.head - 18);
     if (p.st === SFV.ST.DIZZY) {
       for (let k = 0; k < 3; k++) { const a = tick * 0.12 + k * 2.09; ctx.fillStyle = '#ffe066'; ctx.beginPath(); ctx.arc(p.x + Math.cos(a) * 22, top - 4 + Math.sin(a) * 6, 4, 0, Math.PI * 2); ctx.fill(); }
     }
     const label = p.st === SFV.ST.MOVE ? SFV.MOVE_LIST[p.mv].name : STATE_TEXT[SFV.ST_NAME[p.st]];
     if (label) text(ctx, label, p.x, top - 14, 13, '#fff');
-    if (i === opt.me) text(ctx, '▼', p.x, top - 32, 12, sk.body, 'center', false);
+    if (i === opt.me) text(ctx, '▼', p.x, top - 32, 12, COL.body[i], 'center', false);
     if (s.ft > 0 && s.fa) { // 硬直差：先能動的一方綠色 +N、後能動的紅色 -N；最後 15 幀淡出
       const v = i === s.fa - 1 ? s.fv : -s.fv;
       ctx.globalAlpha = Math.min(1, s.ft / 15);
@@ -462,7 +414,10 @@ export const SFVClient = ((SFV, SFVServer) => {
     const freezeOwner = s.frz > 0 ? s.fo - 1 : -1;
     if (opt.three) { ctx.clearRect(0, 0, W, H); opt.three.render(s, { shake: [shx, shy], freezeOwner, faces: opt.faces }); }
     ctx.save(); ctx.translate(shx, shy);
-    if (!opt.three) drawStage(ctx);
+    if (!opt.three) { // 3D 還在載入或裝置不支援 WebGL：只留舞台底色和提示（不再有 2D 雞）
+      drawStage(ctx);
+      text(ctx, opt.noWebGL ? '這台裝置不支援 3D（WebGL），無法顯示格鬥畫面' : '3D 畫面載入中…', W / 2, H / 2, 22, '#ccc');
+    }
     drawProjectiles(ctx, s, opt);
     for (let i = 0; i < 2; i++) if (i !== freezeOwner) drawChick(ctx, s, i, opt);
     if (freezeOwner >= 0) { // 超必殺暗場特寫
@@ -545,7 +500,7 @@ export const SFVClient = ((SFV, SFVServer) => {
       ctx.fillStyle = on ? '#3a3410' : '#1a1d29'; ctx.fillRect(cx - 95, cy - 65, 190, 130);
       ctx.strokeStyle = on ? ((frame >> 3) & 1 ? '#ffe066' : '#ff9f43') : '#33384a'; ctx.lineWidth = on ? 4 : 2; ctx.strokeRect(cx - 95, cy - 65, 190, 130);
       if (known) {
-        ctx.save(); ctx.translate(cx - 30, cy + 24); ctx.scale(0.85, 0.85); drawFigure(ctx, 0, 0, 1, NEUTRAL, SKIN[0]); ctx.restore();
+        text(ctx, '🐔', cx - 30, cy - 6, 56, '#fff', 'center', false);
         text(ctx, ME, cx + 28, cy + 44, 13, '#fff');
       } else {
         text(ctx, '？', cx, cy - 6, 64, '#5a6178', 'center', false);

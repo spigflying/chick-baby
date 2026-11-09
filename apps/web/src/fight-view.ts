@@ -2,7 +2,6 @@
 import { SFV, FIGHT_FACES, fightFace } from '@chick/engine';
 import { NetClient, SpectatorClient } from './sfv-net';
 import { drawFight } from './sfv-draw';
-import { preloadFightArt } from './sfv-art';
 import type { Live } from './ws';
 import { api } from './api';
 import { art } from './art';
@@ -58,13 +57,12 @@ export class FightView {
   private closeTimer = 0;
   private visual: any = null;
   private lastDrawAt = 0;
-  private three: any = undefined; // undefined = 還沒建；null = 不支援 WebGL，用 2D
+  private three: any = undefined; // undefined = 還沒建；null = 不支援 WebGL（只顯示提示，不再有 2D 版）
   private load3d: Promise<any> | null = null;
 
   constructor(private live: Live, private me: { id: string; display_name: string; fight_face?: string | null }, private toast: (s: string) => void) {
     if (me.fight_face) this.face = fightFace(me.fight_face);
-    preloadFightArt(); // 水墨圖約 0.7 MB，進家裡就先載，開打時已就緒
-    // 3D（three.js 約 140 KB gzip）背景載入，不擋主畫面；載不到就用 2D
+    // 3D（three.js 約 140 KB gzip）背景載入，不擋主畫面；格鬥只有 3D 版
     this.load3d = import('./sfv-3d').then((m) => m.createFight3D, () => null);
     this.root = document.createElement('div'); this.root.className = 'sfv-live'; this.root.hidden = true;
     this.root.innerHTML = `<div class="sfv-top"><b class="sfv-title">1v1 格鬥</b><button class="sfv-close" aria-label="關閉">✕</button></div>
@@ -275,12 +273,12 @@ export class FightView {
       const shown = smoothFightState(state, this.visual, elapsed, this.current.pid);
       this.visual = shown;
       const ended = this.current.aborted ? { aborted: true } : this.current.result ? { aborted: false, win: this.current.result.winner ? this.current.players.findIndex((p: any) => p.user_id === this.current.result.winner) : 2 } : null;
-      if (this.three === undefined && this.load3d) { // 第一次打開格鬥畫面才建 WebGL；模組還沒到先畫 2D，失敗就藏起 3D 畫布
+      if (this.three === undefined && this.load3d) { // 第一次打開格鬥畫面才建 WebGL；模組還沒到先顯示「載入中」，失敗就藏起 3D 畫布並提示
         const cv3 = this.root.querySelector('canvas.sfv-3d') as HTMLCanvasElement, loading = this.load3d; this.load3d = null;
         cv3.hidden = true;
         loading.then((create) => { this.three = create ? create(cv3) : null; cv3.hidden = !this.three; });
       }
-      drawFight(this.ctx, shown, { three: this.three || null, faces: this.current.players.map((p: any) => p.face ?? 'chick'), showBoxes: false, me: this.current.pid ? this.current.pid - 1 : -1, names: this.current.players.map((p: any) => p.name), ended });
+      drawFight(this.ctx, shown, { three: this.three || null, noWebGL: this.three === null, faces: this.current.players.map((p: any) => p.face ?? 'chick'), showBoxes: false, me: this.current.pid ? this.current.pid - 1 : -1, names: this.current.players.map((p: any) => p.name), ended });
       const debug = this.root.querySelector('.sfv-debug') as HTMLElement;
       debug.hidden = new URLSearchParams(location.search).get('debug') !== '1';
       if (!debug.hidden) debug.textContent = this.current.player ? `確認 ${this.current.player.C}・預測 ${this.current.player.L}・rollback ${this.current.player.stats.rollbacks}` : `觀戰確認 ${this.current.spectator.tick}`;

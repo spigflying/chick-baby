@@ -1,49 +1,9 @@
 // @ts-nocheck
-// 格鬥水墨美術（poc3 移植）：圖檔在 src/art/fight/*.webp（已裁到透明邊界、縮成 0.5 倍），manifest 記原圖尺寸與裁切位移。
-// 圖與 manifest 都經 Vite 打包（網址帶 hash、長快取），不用再另外 fetch manifest.json。
-// 只管畫面：受擊判定在引擎（SFV_FIT），這裡讀同一個 pose 決定畫哪張圖，畫面和判定一定對得上。
-import { SFV, SFV_FIT, FIT_IMAGES } from '@chick/engine';
-import { art } from './art';
-import manifest from './art/fight/manifest.json';
+// 格鬥 2D 疊加層：命中火花、畫面震動、大招背景變色、暈眩星星、真空蛋波光束、蛋波能量球。
+// 雞本身只由 3D（sfv-3d.ts）畫；這裡全部是純畫面，從 state 推出來，不改判定。
+import { SFV } from '@chick/engine';
 
-const ART = { ready: false, loading: null as Promise<void> | null, img: {} as Record<string, any>, man: {} as Record<string, number[]> };
 const GROUND = 470;
-
-/** 進格鬥畫面前預載；失敗或沒有 DOM（測試）就維持舊的火柴雞 */
-export function preloadFightArt() {
-  if (ART.loading || typeof Image === 'undefined') return ART.loading;
-  ART.loading = (async () => {
-    try {
-      ART.man = manifest;
-      await Promise.all(FIT_IMAGES.filter((n) => ART.man[n]).map((n) => new Promise<void>((ok) => {
-        const im = new Image(); im.decoding = 'async';
-        im.onload = () => { ART.img[n] = im; ok(); }; im.onerror = () => ok(); im.src = art(`fight/${n}.webp`);
-      })));
-      ART.ready = !!ART.img.body_1;
-    } catch { ART.ready = false; }
-  })();
-  return ART.loading;
-}
-export const fightArtReady = () => ART.ready;
-
-const tintCv = typeof document !== 'undefined' ? document.createElement('canvas') : null;
-function tinted(im, color) {
-  const c = tintCv, t = c.getContext('2d');
-  if (c.width < im.width) c.width = im.width; if (c.height < im.height) c.height = im.height;
-  t.globalCompositeOperation = 'source-over'; t.clearRect(0, 0, c.width, c.height); t.drawImage(im, 0, 0);
-  t.globalCompositeOperation = 'source-atop'; t.fillStyle = color; t.fillRect(0, 0, im.width, im.height);
-  return c;
-}
-/** poc3 drawPose：圖的錨點（1100 寬 320／900 寬 120，y 510）對到世界 (p.x + f·off, 地面 − p.y) */
-function drawLayer(ctx, name, p, off, o) {
-  const im = ART.img[name], m = ART.man[name]; if (!im || !m) return false;
-  const ax = m[0] === 1100 ? 320 : 120, ay = 510, f = p.f, ks = SFV_FIT.K * (o.s || 1);
-  ctx.save(); ctx.translate(Math.round(p.x + f * off + (o.shake || 0)), Math.round(GROUND + p.y));
-  if (o.rot) ctx.rotate(o.rot * f);
-  ctx.scale(f * ks, ks * (o.sy || 1)); ctx.translate(-ax, -ay);
-  ctx.drawImage(o.tint ? tinted(im, o.tint) : im, 0, 0, im.width, im.height, m[2], m[3], m[4], m[5]);
-  ctx.restore(); return true;
-}
 
 // ---------- 受擊／防禦特效（純畫面，從狀態的邊緣推出來：防守方 hs 由 0 變正） ----------
 // HIT＝黃白星爆（貼在受擊框重疊處）；BLOCK＝不畫光（3D 模型純畫面抖動）；大招＝全場變色。
@@ -259,38 +219,7 @@ export const __fxTest = {
   drawHadoBall,
 };
 
-/** 用水墨圖畫一隻雞；沒圖（還沒畫的招式）回 false，呼叫端改畫舊的火柴雞 */
-export function drawArtChick(ctx, s, i) {
-  if (!ART.ready) return false;
-  const p = s.p[i], q = SFV_FIT.pose(p, s);
-  let name = q.img; if (!name || !ART.img[name]) return false;
-  const st = SFV.ST_NAME[p.st];
-  // 受擊姿勢：hit-stop 開始時 ≥13 用重受擊圖
-  const fx = [...FX.list].reverse().find((f) => f.def === i);
-  if (st === 'HIT' && !p.cr && fx && fx.kind === 'hit' && fx.heavy && ART.img.n_hitH) name = 'n_hitH';
-  let shake = 0, tint = i === 1 ? 'rgba(90,110,140,0.25)' : null;
-  if (p.hs > 0 && fx && fx.t < 4) shake = (s.tick % 2 ? 1 : -1) * (fx.heavy ? 2 : 1);
-  if (fx && fx.kind === 'hit') { if (fx.t < 1) tint = 'rgba(255,240,230,0.85)'; else if (fx.t < 2) tint = 'rgba(255,90,60,0.45)'; }
-  let rot = st === 'HIT' && !p.cr && name === 'n_hitL' ? -0.09 : 0, off = q.off;
-  // 只影響畫面：被摔的翻轉（抓住時用重受擊圖，拋起後依摔的進度轉半圈）、暈眩搖晃
-  const op = s.p[1 - i];
-  if (st === 'THROWN') {
-    if (op.st === SFV.ST.THROWING && op.t > SFV.THROW_ANIM) { name = 'n_hitH'; off = SFV_FIT.NEUT + SFV_FIT.scale('n_hitH')[1]; }
-    else rot = -Math.PI * Math.min(1, (SFV.THROW_ANIM - (op.st === SFV.ST.THROWING ? op.t : 0)) / SFV.THROW_ANIM);
-  }
-  if (st === 'DIZZY') rot = 0.04 * Math.sin(p.t * 2 * Math.PI / 40);
-  const o = { s: q.s, sy: q.breath, shake, tint, rot };
-  if (q.fb && q.tag) {
-    const fr = q.tag;
-    if (!['3', '4', '6'].includes(fr.split('_')[0]) || fr === '7_5') drawLayer(ctx, 'fxb_' + fr, p, q.off, { s: q.s });
-    drawLayer(ctx, name, p, off, o);
-    if (!['6', '7'].includes(fr)) drawLayer(ctx, 'fxf_' + fr, p, q.off, { s: q.s });
-  } else drawLayer(ctx, name, p, off, o);
-  if (st === 'DIZZY') dizzyStars(ctx, s, p);
-  if (q.id === 'SHINKU' && q.ph === 'active') drawBeam(ctx, s, p);
-  return true;
-}
-/** 3D 模式：雞交給 3D 畫，這裡只補 2D 疊加的暈眩星星與真空蛋波光束 */
+/** 雞交給 3D 畫，這裡只補 2D 疊加的暈眩星星與真空蛋波光束 */
 export function drawArtExtras(ctx, s, i) {
   const p = s.p[i];
   if (SFV.ST_NAME[p.st] === 'DIZZY') dizzyStars(ctx, s, p);
@@ -391,10 +320,4 @@ export function drawHadoBall(ctx, q, s) {
     ctx.stroke();
   }
   ctx.restore();
-}
-
-/** @deprecated 舊水墨球入口改走能量球（保留名稱以免外部引用炸掉） */
-export function drawInkOrb(ctx, cx, cy, r, dir, seed, col) {
-  drawHadoBall(ctx, { x: cx, y: cy - GROUND, vx: dir, lv: 0, n: 1 }, { tick: seed | 0 });
-  return true;
 }

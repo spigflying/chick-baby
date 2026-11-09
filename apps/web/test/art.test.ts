@@ -21,7 +21,8 @@ describe('圖檔經 Vite 打包（網址帶 hash、長快取）', () => {
     expect(p).toContain('farm/cowshed/cow.webp');
     expect(p).toContain('farm/tree/apple.webp');
     expect(p).toContain('fight/face_a.webp');
-    expect(p.filter((x) => x.startsWith('fight/')).length).toBeGreaterThan(50);
+    // 格鬥只剩 3D：fight/ 底下只留照片臉（2D 水墨姿勢圖已移除）
+    expect(p.filter((x) => x.startsWith('fight/')).sort()).toEqual(['fight/face_a.webp', 'fight/face_b.webp', 'fight/face_c.webp']);
   });
   it('art() 給出可用的網址；找不到的圖回空字串並警告一次，不讓畫面整個壞掉', () => {
     expect(art('farm/barn.png')).toMatch(/barn.*\.png/);
