@@ -22,6 +22,8 @@ export const SFV = (() => {
   // 頓幀（hit-stop）採 SF6 數值：輕攻擊 9、重攻擊 13；必殺／超必殺逐段見各招 hs（可為逐段陣列）
   const HS_LIGHT = 9, HS_HEAVY = 13;
   const GRAVITY = 1, JUMP_VY = -18, WALK_F = 4, WALK_B = 3, JUMP_VX = 4, PREJUMP_T = 4, JUMP_LAND = 4;
+  // 起身不能被摔：倒地（含被摔的硬倒地、空中被打落地）起身後 WAKE_THROW_INV tick 內摔技抓不到（打擊照吃）
+  const WAKE_THROW_INV = 6;
   const KD_SOFT = 40, KD_HARD = 60, DIZZY_T = 120, TECH_WINDOW = 7, TECH_T = 16, THROW_RECOVERY = 14, THROW_ANIM = 24, DASH_WINDOW = 10;
   const WHITE_DELAY = 90, WHITE_REGEN = 3, STUN_DELAY = 120, STUN_DECAY = 3;
   const SUPER_FREEZE = 30, VT_TICKS = 480;
@@ -83,11 +85,13 @@ export const SFV = (() => {
     ...variants([['L', 0, '輕'], ['H', 1, '重'], ['EX', 2, 'EX']], ([v, lv, n]) => defineMove({
       id: 'HADO_' + v, limb: 'arm', both: true, reach: [40, -66], name: `蛋波（${n}）`, kind: 'special', ex: lv === 2, projectile: lv, startup: 12, recovery: 33, hurtExt: [14, -84, 30, 22], cancel: ['super'],
     })),
-    // 衝天啄：重／EX 版出招到攻擊判定前段完全無敵（重 1～8、EX 1～9 tick），整段上升不吃空中攻擊、也穿波；
-  // 輕版沒有全身無敵，但前 10 tick 不吃空中攻擊（對空用）。起手往前滑一點、判定加寬，普通技取消接得上。
-    defineMove({ id: 'DP_L', hs: 15, limb: 'arm', reach: [22, -112], name: '衝天啄（輕）', kind: 'special', untilLand: true, landRec: 14, startup: 3, active: 8, dmg: 100, stun: 150, blockstun: 20, launch: [2, -12], hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 10, 'air']], vel: [[1, 2, DP_LUNGE, null], [3, 3, 2, -15]], cancel: ['super'] }),
-    defineMove({ id: 'DP_H', hs: 20, limb: 'arm', reach: [22, -112], name: '衝天啄（重）', kind: 'special', untilLand: true, landRec: 22, startup: 5, active: 8, dmg: 140, stun: 200, blockstun: 20, launch: [2, -12], hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 8, 'full'], [1, 16, 'air'], [1, 12, 'proj']], vel: [[1, 4, DP_LUNGE, null], [5, 5, 3, -15]], cancel: ['super'] }),
-    defineMove({ id: 'DP_EX', hs: [20, 13], limb: 'arm', reach: [22, -112], name: '衝天啄（EX）', kind: 'special', ex: true, untilLand: true, landRec: 22, startup: 4, active: 10, hits: 2, dmg: [80, 80], stun: 120, blockstun: 20, launch: [2, -12], launchLast: true, hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 9, 'full'], [1, 18, 'air'], [1, 13, 'proj']], vel: [[1, 3, DP_LUNGE, null], [4, 4, 3, -15]], cancel: ['super'] }),
+    // 衝天啄（SF5／SF6 式）：無敵只到攻擊判定出來的前一幀（判定第 S 幀出來，無敵 1～S-1），判定一出來就吃得到。
+    // → 兩人差不多同時出會相殺；對手判定已經出來才按的，頂多相殺、不會乾淨贏；對手落空在落地硬直時照樣能確反。
+    // 重 1～4、EX 1～3 tick 全身無敵（含穿波、不被摔）；輕版沒有全身無敵，只有 1～2 tick 對空無敵（比重版弱）。
+    // 起手往前滑一點、判定加寬，普通技取消接得上。
+    defineMove({ id: 'DP_L', hs: 15, limb: 'arm', reach: [22, -112], name: '衝天啄（輕）', kind: 'special', untilLand: true, landRec: 14, startup: 3, active: 8, dmg: 100, stun: 150, blockstun: 20, launch: [2, -12], hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 2, 'air']], vel: [[1, 2, DP_LUNGE, null], [3, 3, 2, -15]], cancel: ['super'] }),
+    defineMove({ id: 'DP_H', hs: 20, limb: 'arm', reach: [22, -112], name: '衝天啄（重）', kind: 'special', untilLand: true, landRec: 22, startup: 5, active: 8, dmg: 140, stun: 200, blockstun: 20, launch: [2, -12], hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 4, 'full']], vel: [[1, 4, DP_LUNGE, null], [5, 5, 3, -15]], cancel: ['super'] }),
+    defineMove({ id: 'DP_EX', hs: [20, 13], limb: 'arm', reach: [22, -112], name: '衝天啄（EX）', kind: 'special', ex: true, untilLand: true, landRec: 22, startup: 4, active: 10, hits: 2, dmg: [80, 80], stun: 120, blockstun: 20, launch: [2, -12], launchLast: true, hitbox: [8, -110, DP_W, 84], hurtExt: [4, -100, 34, 60], invuln: [[1, 3, 'full']], vel: [[1, 3, DP_LUNGE, null], [4, 4, 3, -15]], cancel: ['super'] }),
     ...variants([['L', 4, [40, 40, 40], null, '輕'], ['H', 6, [45, 45, 45], null, '重'], ['EX', 6, [50, 50, 60], [1, 7, 'full'], 'EX']], ([v, spd, dmg, inv, n]) => defineMove({
       id: 'TATSU_' + v, hs: v === 'EX' ? [6, 2, 15] : 15, limb: 'spin', name: `旋風翅（${n}）`, kind: 'special', ex: v === 'EX', untilLand: true, landRec: 10, startup: 7, active: 24, hits: 3, dmg, stun: 60,
       hitstun: 18, blockstun: 14, pb: 4, launch: [3, -9], launchLast: true, hitbox: [-56, -58, 112, 40], hover: [5, 30],
@@ -114,7 +118,7 @@ export const SFV = (() => {
   ];
 
   // ---------- 狀態 ----------
-  const P_FIELDS = ['x', 'y', 'vx', 'vy', 'f', 'st', 't', 'mv', 'mt', 'hm', 'cn', 'hs', 'bf', 'hp', 'wd', 'wdT', 'sg', 'sgT', 'dz', 'ex', 'vg', 'vt', 'cb', 'jg', 'kb', 'air', 'cr', 'lb', 'ch', 'fr'];
+  const P_FIELDS = ['x', 'y', 'vx', 'vy', 'f', 'st', 't', 'mv', 'mt', 'hm', 'cn', 'hs', 'bf', 'hp', 'wd', 'wdT', 'sg', 'sgT', 'dz', 'ex', 'vg', 'vt', 'cb', 'jg', 'kb', 'air', 'cr', 'lb', 'ch', 'fr', 'wk'];
   const Q_FIELDS = ['o', 'x', 'y', 'vx', 'n', 'lv', 'cd'];
   // fx = 正在量硬直差的攻擊方（index+1，0 = 沒在量）、fs = 開始量的 tick、fa = 上次結果的攻擊方（index+1）、fv = 攻擊方的硬直差、ft = 顯示剩幾幀
   const S_FIELDS = ['tick', 'frz', 'fo', 'rs', 'rt', 'rnd', 'tm', 'win', 'to', 'lw', 'fx', 'fs', 'fa', 'fv', 'ft'];
@@ -218,7 +222,7 @@ export const SFV = (() => {
   const projBox = (q) => { const d = PROJ[q.lv]; return [q.x - d.w / 2, q.y - d.h / 2, d.w, d.h]; };
   const projInvuln = (p) => p.st === ST.MOVE && MOVE_LIST[p.mv].invulnAt(p.mt, 'proj');
   function throwable(p) {
-    if (p.y !== 0) return false;
+    if (p.y !== 0 || p.wk > 0) return false; // wk：起身不能被摔的剩餘 tick
     if (p.st === ST.MOVE) return !MOVE_LIST[p.mv].invulnAt(p.mt, 'throw');
     return p.st === ST.IDLE || p.st === ST.CROUCH || p.st === ST.LAND || p.st === ST.PREJUMP || p.st === ST.DIZZY;
   }
@@ -363,7 +367,9 @@ export const SFV = (() => {
       return;
     }
     if ((p.st === ST.HIT || p.st === ST.BLOCK || p.st === ST.KD) && p.t <= 0 && p.hs === 0) {
+      const wake = p.st === ST.KD;
       recover(p);
+      if (wake && p.st === ST.IDLE) p.wk = WAKE_THROW_INV; // 起身（暈眩不算，暈眩照樣能被摔）
       if (p.st === ST.DIZZY) p.t++; // 同一幀的 physics 會先扣 1，補回來讓暈眩維持 DIZZY_T 幀
     }
     const opts = optionsFor(p);
@@ -609,6 +615,7 @@ export const SFV = (() => {
     if (p.st !== ST.DIZZY && !p.dz) { if (p.sgT > 0) p.sgT--; else if (p.sg > 0) p.sg = Math.max(0, p.sg - STUN_DECAY); }
     if (p.vt > 0) p.vt--;
     if (p.ch > 0) p.ch--;
+    if (p.wk > 0) p.wk--; // 在 combat 之後扣：起身那一 tick 起算剛好 WAKE_THROW_INV 個 tick 抓不到
   }
   function checkRound(s) {
     const [a, b] = s.p, ko0 = a.hp <= 0, ko1 = b.hp <= 0;
@@ -662,7 +669,7 @@ export const SFV = (() => {
   }
 
   return {
-    TICK_HZ, TICK_MS, PREJUMP_T, JUMP_VY, JUMP_LAND, JUMP_VX, GRAVITY, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, EASY_HADO_EX, EASY_DP_EX, EASY_TATSU_EX, EASY_SHINKU, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
+    TICK_HZ, TICK_MS, WAKE_THROW_INV, PREJUMP_T, JUMP_VY, JUMP_LAND, JUMP_VX, GRAVITY, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, EASY_HADO_EX, EASY_DP_EX, EASY_TATSU_EX, EASY_SHINKU, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
     ST, ST_NAME, RS, MOVE_LIST, M, PROJ, P_FIELDS, defineMove, frameKind, createState, simulateSFVTick, packState, unpackState, cloneState, hashState, hashStr,
     dirOf, maskAt, motion, canBlock, proxGuard, hurtboxes, hitboxOf, setFit, pushbox, projBox, overlap,
   };

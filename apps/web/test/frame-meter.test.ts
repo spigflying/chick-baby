@@ -25,7 +25,7 @@ describe('frame meter', () => {
   it('heavy 衝天啄 marks its invincible frames', () => {
     const m = record(800, (k) => [RIGHT, DOWN, DOWN | RIGHT | HP][k - 1] ?? 0, () => 0);
     const inv = m.rows[0].map((c: any) => (c.inv ? 1 : 0)).join('');
-    expect(inv.startsWith('11111111' + '0')).toBe(true); // 1～8 幀全身無敵
+    expect(inv.startsWith('1111' + '0')).toBe(true); // 1～4 幀全身無敵（判定第 5 幀出來前結束）
     expect(SFVClient.startupOf(m.rows[0])).toBe(5);
   });
   it('starts on the first action, stops after both sides are free, restarts on the next action', () => {

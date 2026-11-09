@@ -29,21 +29,22 @@ describe('defineMove', () => {
     expect(ca.dmg.reduce((a: number, b: number) => a + b, 0)).toBe(350);
     expect([4, 8, 9, 33, 34].map((t) => ca.hitIndex(t))).toEqual([0, 0, 1, 5, -1]);
   });
-  it('heavy 衝天啄 has no hurtbox on ticks 1-8, EX on ticks 1-9', () => {
-    for (const [id, last] of [['DP_H', 8], ['DP_EX', 9]] as const) {
+  it('heavy 衝天啄 has no hurtbox on ticks 1-4, EX on ticks 1-3 (invuln ends when the hitbox appears)', () => {
+    for (const [id, last] of [['DP_H', 4], ['DP_EX', 3]] as const) {
       const s = fight(300, 600);
       run(s, [RIGHT, DOWN, DOWN | RIGHT | (id === 'DP_EX' ? LP | HP : HP)]);
       expect(SFV.MOVE_LIST[s.p[0].mv].id).toBe('DP_H'); // 沒氣 → 不會變 EX
       const s2 = fight(300, 600); s2.p[0].ex = 100;
       run(s2, [RIGHT, DOWN, DOWN | RIGHT | (id === 'DP_EX' ? LP | HP : HP)]);
       expect(SFV.MOVE_LIST[s2.p[0].mv].id).toBe(id);
-      const seen: number[] = [];
-      for (let k = 0; k < last + 2; k++) { seen.push(SFV.hurtboxes(s2.p[0]).length); SFV.simulateSFVTick(s2, 0, 0); }
+      expect(last).toBe(SFV.MOVE_LIST[M[id]].S - 1); // 判定第 S 幀出來，無敵到 S-1
+      const seen: number[] = [], seenAir: number[] = [];
+      for (let k = 0; k < last + 2; k++) { seen.push(SFV.hurtboxes(s2.p[0]).length); seenAir.push(SFV.hurtboxes(s2.p[0], true).length); SFV.simulateSFVTick(s2, 0, 0); }
       // 第 3 個輸入那一 tick mt=1，所以 seen[0..last-1] 對應 mt 1..last
       expect(seen.slice(0, last)).toEqual(new Array(last).fill(0));
       expect(seen[last]).toBeGreaterThan(0);
-      // 對空無敵還在：空中攻擊打不到
-      expect(SFV.hurtboxes(s2.p[0], true).length).toBe(0);
+      // 判定出來後，對空也吃得到（不再有長段對空無敵）
+      expect(seenAir[last]).toBeGreaterThan(0);
     }
   });
 });
@@ -106,17 +107,17 @@ describe('command parser', () => {
 
 describe('衝天啄 priority', () => {
   const dp = (btn: number) => [RIGHT, DOWN, DOWN | RIGHT | btn];
-  it('heavy: beats a heavy punch that is already coming (invincible, and a counter hit)', () => {
-    const hps: number[] = [];
+  it('heavy: beats a heavy punch whose active frames end inside its invincibility; otherwise trades (no free win through active frames)', () => {
+    const res: number[][] = [];
     for (const late of [0, 1, 2, 3]) {
       const s = fight(440, 500), start = 6 - late;
       run(s, Array.from({ length: 40 }, (_, t) => (t >= start && t < start + 3 ? dp(HP)[t - start] : 0)), hold(HP, 40));
-      expect(s.p[0].hp).toBe(1000);
-      // 打在重拳發生／持續中 → Counter Hit（168），打在收招中 → 一般命中（140）
-      hps.push(s.p[1].hp);
+      res.push([s.p[0].hp, s.p[1].hp]);
     }
-    expect(hps.every((h) => h === 1000 - 168 || h === 860)).toBe(true);
-    expect(hps).toContain(1000 - 168);
+    // 早按（重拳持續幀都落在無敵 1～4）→ 乾淨贏，打在重拳收招中（140）
+    expect(res[0]).toEqual([1000, 860]); expect(res[1]).toEqual([1000, 860]);
+    // 晚按：衝天啄判定出來那一幀重拳還在 → 相殺（雙方都是 Counter Hit：90×1.2、140×1.2）
+    expect(res[2]).toEqual([1000 - 108, 1000 - 168]); expect(res[3]).toEqual([1000 - 108, 1000 - 168]);
   });
   /** 提早搓好 →↓、按住 ↘ 等，波距離 ≤ gap 時才按拳（衝天啄在那一 tick 出招） */
   function vsFireball(btn: number, gap: number, x2: number, ex = 0) {
@@ -137,22 +138,24 @@ describe('衝天啄 priority', () => {
     }
     return s;
   }
-  it('heavy and EX go through a fireball at any timing', () => {
-    // 波和身體相距約 40px 就碰到（波寬一半 16＋蹲姿受擊框一半 24），而波每 tick 前進 8 → 最晚 48 以內按都還來得及
+  it('heavy and EX no longer pass through a fireball from range (invincibility ends before the hitbox, at tick 4 / 3)', () => {
+    // 以前有 1～12／1～13 的穿波；現在穿波跟全身無敵一起在判定出來前結束 → 遠距離看到波才按會被打到（Counter Hit 60×1.2）
     for (const gap of [96, 80, 64, 50]) {
-      expect(vsFireball(HP, gap, 600).p[0].hp).toBe(1000);
-      expect(vsFireball(LP | HP, gap, 600, 100).p[0].hp).toBe(1000);
+      expect(vsFireball(HP, gap, 600).p[0].hp).toBe(1000 - 72);
+      expect(vsFireball(LP | HP, gap, 600, 100).p[0].hp).toBe(1000 - 72);
     }
   });
-  it('close range: goes through the fireball and hits the thrower', () => {
-    // 近身看到對方做出放波動作（波還沒出手）就按：無敵期間波出手、穿過去，打中還在收招的對方
-    const s = fight(300, 380), p2 = [DOWN, DOWN | LEFT, LEFT | HP];
-    let at = -1;
-    for (let t = 0; t < 120; t++) {
-      if (at < 0 && SFV.MOVE_LIST[s.p[1].mv]?.id === 'HADO_H' && s.p[1].mt >= 8) at = t;
-      SFV.simulateSFVTick(s, at >= 0 && t - at < 3 ? dp(HP)[t - at] : 0, p2[t] ?? 0);
+  it('close range: pressed as the fireball motion starts, goes through it and hits the thrower', () => {
+    // 近身看到對方開始放波就按：無敵期間波出手、穿過去，打中還在出招的對方（Counter Hit 140×1.2）
+    for (const th of [0, 2, 4]) {
+      const s = fight(300, 380), p2 = [DOWN, DOWN | LEFT, LEFT | HP];
+      let at = -1;
+      for (let t = 0; t < 120; t++) {
+        if (at < 0 && SFV.MOVE_LIST[s.p[1].mv]?.id === 'HADO_H' && s.p[1].mt >= th) at = t;
+        SFV.simulateSFVTick(s, at >= 0 && t - at < 3 ? dp(HP)[t - at] : 0, p2[t] ?? 0);
+      }
+      expect(s.p[0].hp).toBe(1000); expect(s.p[1].hp).toBe(1000 - 168);
     }
-    expect(s.p[0].hp).toBe(1000); expect(s.p[1].hp).toBe(860);
   });
   it('light has no invincibility: the fireball hits it', () => {
     for (const gap of [80, 64, 50]) expect(vsFireball(LP, gap, 600).p[0].hp).toBe(1000 - 60 * 1.2); // 出招中被波打到 → Counter Hit
