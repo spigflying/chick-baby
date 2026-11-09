@@ -63,17 +63,33 @@ function attack(mv, t, base, chamber, strike) {
 function poseFor(p, s) {
   const st = SFV.ST_NAME[p.st], tick = s.tick;
   const breath = Math.sin(tick * 0.09);
+  // SF5 近身防禦：跟 2D 一樣用引擎 proxGuard（純函數），站＝BLOCK_ST、蹲＝BLOCK_CR
+  const prox = (() => { const i = s.p.indexOf(p); return i >= 0 ? SFV.proxGuard(s, i) : 0; })();
   switch (st) {
     case 'IDLE': {
+      if (prox === 4) return BLOCK_ST;
+      if (prox === 1) return BLOCK_CR;
       if (p.vx !== 0) {
         const ph = (p.x * p.f) / 16, sw = Math.sin(ph), back = p.vx * p.f < 0;
         return P({ drop: -Math.abs(Math.cos(ph)) * 3, lean: back ? -0.12 : 0.1, hF: -HALF + 0.75 * sw, kF: -0.4 - 0.6 * Math.max(0, -sw), hB: -HALF - 0.75 * sw, kB: -0.4 - 0.6 * Math.max(0, sw), aF: -0.6 + 0.25 * sw, aB: -0.9 - 0.25 * sw, head: 0.08 * sw });
       }
       return P({ drop: 1.5 + breath * 1.5, sy: 1 + breath * 0.02, head: breath * 0.04 });
     }
-    case 'CROUCH': return CROUCH;
-    case 'PREJUMP': return P({ ...CROUCH, drop: 14, aF: 0.4, aB: 0.6 });
-    case 'LAND': return P({ ...CROUCH, drop: 10 + Math.min(10, p.t * 2), sx: 1.12, sy: 0.85 });
+    case 'CROUCH':
+      if (prox === 1) return BLOCK_CR;
+      if (prox === 4) return BLOCK_ST;
+      return CROUCH;
+    case 'PREJUMP': {
+      // 依剩餘預跳幀（PREJUMP_T）下蹲加深，不要寫死舊的 3 幀
+      const u = Math.max(0, Math.min(1, p.t / Math.max(1, SFV.PREJUMP_T)));
+      return P({ ...CROUCH, drop: 8 + 8 * u, aF: 0.3 + 0.2 * u, aB: 0.4 + 0.3 * u, sy: 0.92 - 0.04 * u });
+    }
+    case 'LAND': {
+      // 依落地硬直剩餘幀（JUMP_LAND 或招式 landRec）壓扁
+      const landT = (p.mv >= 0 && SFV.MOVE_LIST[p.mv]?.landRec) ? SFV.MOVE_LIST[p.mv].landRec : SFV.JUMP_LAND;
+      const u = Math.max(0, Math.min(1, p.t / Math.max(1, landT)));
+      return P({ ...CROUCH, drop: 8 + 12 * u, sx: 1.06 + 0.08 * u, sy: 0.92 - 0.1 * u });
+    }
     case 'JUMP': {
       const u = Math.max(-1, Math.min(1, p.vy / 12)); // -1 上升、+1 下降
       return P({ aF: 1.2 - u * 0.4, eF: 0.4, aB: 1.6 - u * 0.4, eB: 0.3, hF: -0.6, kF: -1.6, hB: -1.4, kB: -1.2, lean: 0.1, sy: 1 - u * 0.06, sx: 1 + u * 0.06, head: -0.1 * u });
