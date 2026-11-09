@@ -16,6 +16,11 @@ const LOOK: Record<string, { body: string; belly: string }> = {
   chicken: { body: '#ffd84d', belly: '#fff6c4' }, duck: { body: '#fff4d6', belly: '#ffffff' },
   penguin: { body: '#9ad7ff', belly: '#ffffff' }, dino: { body: '#9be37a', belly: '#e9ffd9' },
 };
+const ANIMAL_ART = {
+  hutch: { animal: 'rabbit', feedDir: 'hutch', outDir: 'hutch' },
+  coop: { animal: 'hen', feedDir: 'bakery', outDir: 'bakery' },
+  beehive: { animal: 'bee', feedDir: 'jamhouse', outDir: 'bakery' },
+} as const;
 type Panel = null | { k: 'plant'; idx: number } | { k: 'animal'; st: AnimalStation } | { k: 'craft'; st: CraftStation } | { k: 'tree' } | { k: 'orders' } | { k: 'store' } | { k: 'shop' } | { k: 'friends'; list?: any[] }
   // 第二階段
   | { k: 'grow'; idx: number } | { k: 'expand'; idx: number } | { k: 'balloon' } | { k: 'stall' } | { k: 'stallNew'; slot: number; item?: FarmItemId } | { k: 'deco'; slot: number } | { k: 'feed' };
@@ -323,22 +328,25 @@ export class FarmView {
     if (this.panel && this.data && !panelValid(this.panel, this.data)) this.panel = null;
     const pn = this.panel, p = this.data;
     el.classList.toggle('bakery-panel', pn?.k === 'craft' && this.theme === 'storybook');
-    el.classList.toggle('animal-card-panel', pn?.k === 'animal' && (pn.st === 'coop' || pn.st === 'hutch') && this.theme === 'storybook');
+    el.classList.toggle('animal-card-panel', pn?.k === 'animal' && pn.st in ANIMAL_ART && this.theme === 'storybook');
     if (!pn || !p) { el.hidden = true; el.innerHTML = ''; return; }
     const head = (title: string, icon: string, tone: string) => `<header class="fph ${tone}">${ic(icon, 'fic hic')}<b>${title}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header>`;
     let html = '';
     const s = p.state, d = p.derived;
-    if (pn.k === 'animal' && (pn.st === 'coop' || pn.st === 'hutch') && this.theme === 'storybook') {
-      const station = pn.st, def = ANIMALS[station], a = d.animals[station], feed = def.feed[0], have = s.inv[feed.item] ?? 0;
-      const animalImage = station === 'coop' ? 'hen' : 'rabbit', iconDir = station === 'coop' ? 'bakery' : 'hutch';
+    if (pn.k === 'animal' && pn.st in ANIMAL_ART && this.theme === 'storybook') {
+      const station = pn.st as keyof typeof ANIMAL_ART, def = ANIMALS[station], a = d.animals[station], feed = def.feed[0], have = s.inv[feed.item] ?? 0;
+      const assets = ANIMAL_ART[station], animalImage = assets.animal;
       const productName = station === 'coop' ? '雞蛋' : FARM_ITEMS[def.out.item].name;
-      const picture = (name: string, cls = 'cp-icon') => `<img class="${cls}" src="${art(`farm/${name === animalImage ? station : iconDir}/${name}.webp`)}" alt="">`;
+      const picture = (name: string, cls = 'cp-icon') => {
+        const dir = name === animalImage ? station : name === feed.item ? assets.feedDir : assets.outDir;
+        return `<img class="${cls}" src="${art(`farm/${dir}/${name}.webp`)}" alt="">`;
+      };
       html = `<header class="fph bakery-head">${picture(animalImage, 'fic hic')}<b>${def.name}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header><div class="fpb cp-body" data-live>${a.locked ? `<p class="fnote">Lv ${def.level} 解鎖</p>` : `
         <p class="cp-note">${p.is_owner ? `每隻${def.animal}餵${FARM_ITEMS[feed.item].name} ×${feed.qty}，${def.ms / 60000} 分鐘後產出${productName} ×${def.out.qty}。` : `看看${def.animal}有沒有產出${productName}。`}</p><div class="cp-cards">${a.items.map((x, i) => {
           const ready = x.state === 'ready' || (x.state === 'growing' && this.remain(x.remainMs) === 0);
           return `<section class="cp-card"><div class="cp-animal">${picture(animalImage)}<span><b>${def.animal} ${i + 1}</b><small>${ready ? `${productName}好了` : x.state === 'growing' ? `正在產出${productName}` : '等待餵食'}</small></span></div>
             ${ready ? `<div class="cp-product">${picture(def.out.item)}<span><b>${productName} ×${def.out.qty}</b><small>已完成，可以採收</small></span></div><button type="button" class="fbtn go cp-action" data-act="${p.is_owner ? 'collect' : 'visitAnimal'}" data-i="${i}">收取${productName}</button>`
-              : x.state === 'growing' ? `<div class="cp-product growing">${picture(def.out.item)}<span><b>${station === 'coop' ? '產蛋中' : '毛線球產出中'}</b><small>還要 ${remainText(this.remain(x.remainMs))}</small></span></div>`
+              : x.state === 'growing' ? `<div class="cp-product growing">${picture(def.out.item)}<span><b>${station === 'coop' ? '產蛋中' : `${productName}產出中`}</b><small>還要 ${remainText(this.remain(x.remainMs))}</small></span></div>`
               : p.is_owner ? `<div class="cp-feed${have < feed.qty ? ' short' : ''}">${picture(feed.item)}<span><b>${FARM_ITEMS[feed.item].name}</b><small>需要 / 現有</small></span><strong>${feed.qty} / ${have}</strong></div><button type="button" class="fbtn go cp-action" data-act="feed" data-i="${i}" ${have < feed.qty ? 'disabled' : ''}>餵食${def.animal}</button>`
                 : '<p class="cp-wait">還沒有產物</p>'}</section>`;
         }).join('')}</div>`}</div>`;
