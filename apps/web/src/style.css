@@ -551,6 +551,20 @@ button.ftile{font:inherit;color:inherit;cursor:pointer}button.ftile:hover{border
 .cp-feed.short{border-color:#d98873;background:#fff0e9}.cp-feed.short strong{color:#c73d30}
 .cp-action{width:100%;margin-top:auto;padding:9px;font-size:15px;font-weight:900}
 .cp-wait{margin:0;padding:30px 8px;color:#806448;text-align:center}
+/* 蘋果樹面板讓成熟、倒數與枯萎狀態都能直接辨識。 */
+.farm.storybook .farm-panel.tree-panel{width:min(430px,48%);top:10%;bottom:10%;border-color:#9f7347;background:#f7ebd2}
+.farm.storybook .tree-panel .tp-head{background:linear-gradient(#bb875b,#835532);border-bottom:2px solid #684222}
+.farm.storybook .tree-panel .tp-head img.fic{object-fit:contain;background:#fff0cd;border:1px solid #d0a96d;filter:none}
+.farm.storybook .tree-panel .tp-body{background:linear-gradient(#fbf4df,#ead7b4);color:#54391f;align-items:stretch}
+.tp-scene{display:flex;justify-content:center;align-items:center;min-height:180px;border:2px solid #c5a06a;border-radius:14px;background:#fff8e9}
+.tp-scene img{width:min(210px,75%);height:210px;object-fit:contain}
+.tp-fruit{display:flex;align-items:center;gap:12px;padding:8px;border:2px solid #dfc596;border-radius:12px;background:#fffdf2}
+.tp-fruit img{width:80px;height:80px;object-fit:contain;flex:none}
+.tp-fruit span{display:flex;flex-direction:column;gap:4px}.tp-fruit b{font-size:17px}.tp-fruit small{font-size:12px;color:#806448}
+.tp-fruit.growing img{opacity:.55}.tp-note{margin:0;padding:12px;border:2px solid #d98873;border-radius:12px;background:#fff0e9;line-height:1.5}
+.farm.storybook .tree-panel .fbtn.go{background:#a4b477;color:#314527}
+.farm.storybook .tree-panel .fbtn.up{background:#eac67b;color:#5b401f}
+.tp-action{width:100%;padding:9px;font-size:15px;font-weight:900}
 @media(max-width:650px){.cp-cards{grid-template-columns:1fr}.cp-animal .cp-icon{width:75px;height:75px}}
 @media(max-width:850px){.bk-layout{grid-template-columns:170px minmax(0,1fr)}.bk-queue{grid-column:1/-1;border-left:0;border-top:2px solid #c5a06a}.bk-slots{grid-template-columns:repeat(4,1fr)}.bk-queue .fbtn{max-width:220px}.bk-product .bk-icon{width:48px;height:48px}}
 @media (prefers-reduced-motion: reduce){.farm{transition:none}.ftool:hover{transform:none}}

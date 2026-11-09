@@ -330,6 +330,7 @@ export class FarmView {
     const pn = this.panel, p = this.data;
     el.classList.toggle('bakery-panel', pn?.k === 'craft' && this.theme === 'storybook');
     el.classList.toggle('animal-card-panel', pn?.k === 'animal' && pn.st in ANIMAL_ART && this.theme === 'storybook');
+    el.classList.toggle('tree-panel', pn?.k === 'tree' && this.theme === 'storybook');
     if (!pn || !p) { el.hidden = true; el.innerHTML = ''; return; }
     const head = (title: string, icon: string, tone: string) => `<header class="fph ${tone}">${ic(icon, 'fic hic')}<b>${title}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header>`;
     let html = '';
@@ -402,7 +403,17 @@ export class FarmView {
         <div class="fbtns"><button type="button" class="fbtn go" data-act="collectJobs" ${j.items.some((x) => this.remain(x.remainMs) === 0) ? '' : 'disabled'}>${bakery ? '全收' : '收成品'}</button>
           <button type="button" class="fbtn up" data-act="upgradeQueue" ${slots >= FARM.queue.max ? 'disabled' : ''}>${slots >= FARM.queue.max ? '佇列已滿級' : `加一格 ◎${FARM.queue.costs[slots - FARM.queue.base]}`}</button></div>`}</div>`;
     } else if (pn.k === 'tree') {
-      html = head('蘋果樹', 'apple', 'mint') + `<div class="fpb"><p class="fnote">${d.tree.state === 'withered' ? '果樹太久沒收，枯掉了。請朋友來救（免費），或自己花金幣救。' : '果樹好好的。'}</p>
+      if (this.theme === 'storybook') {
+        const state = d.tree.state === 'growing' && this.remain(d.tree.remainMs) === 0 ? 'ready' : d.tree.state;
+        const fruit = art('farm/tree/apple.webp'), tree = art(`farm/storybook-ro-a/tree-${state}.webp`);
+        const canHelp = !p.is_owner && helpTargets(p).some((h) => h.kind === 'rescue');
+        html = `<header class="fph tp-head"><img class="fic hic" src="${fruit}" alt=""><b>蘋果樹</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header>
+          <div class="fpb tp-body" data-live><div class="tp-scene"><img src="${tree}" alt="${state === 'withered' ? '枯萎的蘋果樹' : '蘋果樹'}"></div>
+          ${state === 'ready' ? `<div class="tp-fruit"><img src="${fruit}" alt=""><span><b>蘋果 ×${FARM.tree.out.qty}</b><small>已成熟，可以採收</small></span></div><button type="button" class="fbtn go tp-action" data-act="${p.is_owner ? 'harvestTree' : 'visitTree'}">收取蘋果</button>`
+            : state === 'growing' ? `<div class="tp-fruit growing"><img src="${fruit}" alt=""><span><b>蘋果生長中</b><small>還要 ${remainText(this.remain(d.tree.remainMs))}</small></span></div>`
+              : `<p class="tp-note">果樹太久沒收，已經枯萎。${p.is_owner ? '可以請朋友幫忙，或自己花金幣救樹。' : canHelp ? '你可以幫朋友免費救樹。' : '目前無法幫忙救樹。'}</p>
+                ${p.is_owner ? `<button type="button" class="fbtn up tp-action" data-act="rescue">花 ◎${FARM.tree.rescueCoins} 救樹</button>` : canHelp ? '<button type="button" class="fbtn go tp-action" data-act="visitRescue">幫忙救樹</button>' : ''}`}</div>`;
+      } else html = head('蘋果樹', 'apple', 'mint') + `<div class="fpb"><p class="fnote">${d.tree.state === 'withered' ? '果樹太久沒收，枯掉了。請朋友來救（免費），或自己花金幣救。' : '果樹好好的。'}</p>
         ${d.tree.state === 'withered' ? `<button type="button" class="fbtn up wide" data-act="rescue">花 ◎${FARM.tree.rescueCoins} 自己救</button>` : ''}</div>`;
     } else if (pn.k === 'orders') {
       html = head('訂單看板', 'board', 'orange') + `<div class="fpb" data-live><div class="forders">${d.orders.map((o, i) => 'order' in o ? `
@@ -529,8 +540,11 @@ export class FarmView {
     if (a === 'friends') return this.openPanel({ k: 'friends' });
     if (a === 'visit') { this.close(); return void this.open(b.dataset.user!); }
     if (a === 'visitAnimal' && pn?.k === 'animal') return void this.doVisitCollect({ kind: 'animal', station: pn.st, i: +b.dataset.i! });
+    if (a === 'visitTree' && pn?.k === 'tree') return void this.doVisitCollect({ kind: 'tree' });
+    if (a === 'visitRescue' && pn?.k === 'tree') return void this.doHelp({ kind: 'rescue' });
     if (a === 'visitJob' && pn?.k === 'craft') return void this.doVisitCollect({ kind: 'job', station: pn.st });
     if (a === 'collectAll') return void this.doAct({ type: 'collectAll' });
+    if (a === 'harvestTree' && pn?.k === 'tree') return void this.doAct({ type: 'tree' });
     if (a === 'plant' && pn?.k === 'plant') { const crop = b.dataset.crop as CropId; this.panel = null; return void this.doAct({ type: 'plant', idx: pn.idx, crop }); }
     if (a === 'feed' && pn?.k === 'animal') return void this.doAct({ type: 'feed', station: pn.st, i: +b.dataset.i! });
     if (a === 'collect' && pn?.k === 'animal') return void this.doAct({ type: 'collect', station: pn.st, i: +b.dataset.i! });
@@ -580,6 +594,7 @@ export class FarmView {
     if (kind === 'goEast') { if (d.east.locked) return this.toast(`Lv ${FARM.eastLevel} 開放東邊新地`); this.area = 'east'; this.panel = null; return this.render(); }
     if (kind === 'goMain') { this.area = 'main'; this.panel = null; return this.render(); }
     if (kind === 'stall') { if (p.state.level < FARM.stall.level) return this.toast(`Lv ${FARM.stall.level} 開放小攤`); return this.openPanel({ k: 'stall' }); }
+    if (kind === 'tree' && this.theme === 'storybook') return this.openPanel({ k: 'tree' });
     if (!p.is_owner) {
       const helps = helpTargets(p);
       if (kind === 'field') { const idx = +arg; if (d.fields[idx]?.stage === 3) return void this.doVisitCollect({ kind: 'field', idx }); if (helps.some((h) => h.kind === 'water' && h.idx === idx)) return void this.doHelp({ kind: 'water', idx }); return this.toast(d.fields[idx]?.locked ? '這塊田還沒開' : '這塊田還不能採收'); }
