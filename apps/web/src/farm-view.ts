@@ -20,6 +20,7 @@ const ANIMAL_ART = {
   hutch: { animal: 'rabbit', feedDir: 'hutch', outDir: 'hutch' },
   coop: { animal: 'hen', feedDir: 'bakery', outDir: 'bakery' },
   beehive: { animal: 'bee', feedDir: 'jamhouse', outDir: 'bakery' },
+  cowshed: { animal: 'cow', feedDir: 'bakery', outDir: 'dairy' },
 } as const;
 type Panel = null | { k: 'plant'; idx: number } | { k: 'animal'; st: AnimalStation } | { k: 'craft'; st: CraftStation } | { k: 'tree' } | { k: 'orders' } | { k: 'store' } | { k: 'shop' } | { k: 'friends'; list?: any[] }
   // 第二階段

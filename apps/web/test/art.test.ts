@@ -14,6 +14,7 @@ describe('圖檔經 Vite 打包（網址帶 hash、長快取）', () => {
     expect(p).toContain('farm/coop/hen.webp');
     for (const item of ['rabbit', 'carrot', 'wool']) expect(p).toContain(`farm/hutch/${item}.webp`);
     expect(p).toContain('farm/beehive/bee.webp');
+    expect(p).toContain('farm/cowshed/cow.webp');
     expect(p).toContain('fight/face_a.webp');
     expect(p.filter((x) => x.startsWith('fight/')).length).toBeGreaterThan(50);
   });
