@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { SFV, SFVServer } from '@chick/engine';
-import { drawArtChick, drawArtExtras, drawInkOrb, drawFightFx, fightShake } from './sfv-art';
+import { drawArtChick, drawArtExtras, drawHadoBall, drawFightFx, fightShake } from './sfv-art';
 
 // 預測、回滾與原型共用的繪圖函式；繪圖另由 sfv-draw.ts 對外重匯出。
 // 客戶端：自己與對手都不插值。每 tick 本地預測（對手沿用最後確認的輸入），收到伺服器確認的輸入跟預測不同 → 回到確認狀態用 while 迴圈重算到目前 tick。
@@ -369,22 +369,35 @@ export const SFVClient = ((SFV, SFVServer) => {
     ctx.restore();
   }
   function drawCharge(ctx, s, i, P, ox, oy, mv) {
-    const p = s.p[i], f = p.f, col = COL.proj[i], ex = mv.projectile === 2;
+    // 掌心聚氣／射出閃光（SF 風格能量球，不改判定）
+    const p = s.p[i], f = p.f, ex = mv.projectile === 2;
     const hx = ox + ((P.fh[0] + P.bh[0]) / 2) * f, hy = oy + (P.fh[1] + P.bh[1]) / 2;
     if (p.mt < mv.S) {
       const u = p.mt / mv.S, n = ex ? 18 : 12;
       for (let k = 0; k < n; k++) {
-        const a = (k * Math.PI * 2) / n + s.tick * 0.12 * (k % 2 ? 1 : -1), r = 58 + (k % 3) * 8;
-        const sx = ox + Math.cos(a) * r, syy = oy - 50 + Math.sin(a) * r * 0.9;
+        const a = (k * Math.PI * 2) / n + s.tick * 0.14 * (k % 2 ? 1 : -1), rr = 52 + (k % 3) * 8;
+        const sx = ox + Math.cos(a) * rr, syy = oy - 50 + Math.sin(a) * rr * 0.9;
         const x = sx + (hx - sx) * u, y = syy + (hy - syy) * u;
-        ctx.globalAlpha = 0.35 + 0.65 * u; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, 2 + 3 * u, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.3 + 0.7 * u;
+        ctx.fillStyle = k % 2 ? '#ffffff' : '#7ad8ff';
+        ctx.beginPath(); ctx.arc(x, y, 1.5 + 3.5 * u, 0, Math.PI * 2); ctx.fill();
       }
       ctx.globalAlpha = 1;
-      glow(ctx, hx, hy, 4 + (ex ? 16 : 12) * u, col);
-    } else { // 射出瞬間的爆光
+      const R = (ex ? 18 : 12) * u;
+      const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, R * 2);
+      g.addColorStop(0, '#ffffff'); g.addColorStop(0.35, '#b8f0ff'); g.addColorStop(1, 'rgba(40,140,255,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(hx, hy, R * 2, 0, 7); ctx.fill();
+    } else {
       const k = p.mt - mv.S;
-      ctx.globalAlpha = Math.max(0, 1 - k / 5); ctx.strokeStyle = col; ctx.lineWidth = 4;
-      ctx.beginPath(); ctx.arc(hx, hy, 16 + k * 9, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1;
+      if (k >= 6) return;
+      ctx.globalAlpha = Math.max(0, 1 - k / 6);
+      const R = 14 + k * 10 + (ex ? 8 : 0);
+      const g = ctx.createRadialGradient(hx, hy, 0, hx, hy, R);
+      g.addColorStop(0, '#ffffff'); g.addColorStop(0.4, 'rgba(160,230,255,0.85)'); g.addColorStop(1, 'rgba(40,120,255,0)');
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(hx, hy, R, 0, 7); ctx.fill();
+      ctx.strokeStyle = 'rgba(220,250,255,0.9)'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(hx, hy, R * 0.7, 0, 7); ctx.stroke();
+      ctx.globalAlpha = 1;
     }
   }
   function glow(ctx, x, y, r, col) {
@@ -394,14 +407,8 @@ export const SFVClient = ((SFV, SFVServer) => {
   }
   function drawProjectiles(ctx, s, opt) {
     for (const q of s.pr) {
-      const b = SFV.projBox(q), col = COL.proj[q.o], cx = q.x, cy = sy(q.y), r = b[3] / 2;
-      if (drawInkOrb(ctx, cx, cy, r, Math.sign(q.vx) || 1, q.x | 0, col)) { if (opt.showBoxes) rect(ctx, b, null, COL.hit); continue; }
-      for (let k = 3; k >= 1; k--) { ctx.globalAlpha = 0.18 * (4 - k); glow(ctx, cx - q.vx * k * 2.2, cy, r * (1 - k * 0.15), col); } // 尾巴
-      ctx.globalAlpha = 1; glow(ctx, cx, cy, r, col);
-      ctx.strokeStyle = '#ffffffaa'; ctx.lineWidth = 2; // 旋轉的光圈
-      const a = s.tick * 0.4;
-      ctx.beginPath(); ctx.ellipse(cx, cy, r * 0.9, r * 0.5, a, 0, Math.PI * 1.3); ctx.stroke();
-      if (opt.showBoxes) rect(ctx, b, null, COL.hit);
+      drawHadoBall(ctx, q, s);
+      if (opt.showBoxes) rect(ctx, SFV.projBox(q), null, COL.hit);
     }
   }
   function bar(ctx, x, y, w, h, frac, color, rightAnchored) {

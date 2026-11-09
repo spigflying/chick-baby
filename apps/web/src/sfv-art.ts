@@ -148,6 +148,7 @@ function hitFx(ctx, f) {
   if (f.kind !== 'hit') return;
   const cfg = FX_STR[f.str] || FX_STR.light, life = cfg.hitLife;
   const x = f.wx, y = GROUND + f.wy, t = f.t, r = hrng(f.seed * 7 + 1);
+  if ((f.str === 'special' || f.str === 'super') && t < 5) hadoDissipate(ctx, f);
   if (t < life) {
     const u = t / life;
     const pop = t < 2 ? 0.7 + t * 0.2 : 1 - (t - 2) / Math.max(1, life - 2) * 0.85;
@@ -186,7 +187,27 @@ export function fightShake(s) {
   return [(s.tick % 2 ? 1 : -1) * amp, (s.tick % 3 - 1) * amp * 0.5];
 }
 /** 只畫命中火花；防禦不再畫藍白圈 */
-export function drawFightFx(ctx) { for (const f of FX.list) if (f.kind === 'hit') hitFx(ctx, f); }
+export function drawFightFx(ctx) {
+  for (const f of FX.list) {
+    if (f.kind === 'hit') hitFx(ctx, f);
+    else if (f.kind === 'block' && (f.str === 'special' || f.str === 'super')) hadoDissipate(ctx, f);
+  }
+}
+/** 蛋波命中／被防消散的一小圈青白爆（短命，不回藍盾） */
+function hadoDissipate(ctx, f) {
+  if (f.t >= 6) return;
+  const x = f.wx, y = GROUND + f.wy, u = f.t / 6, R = 10 + f.t * 5;
+  ctx.save(); ctx.globalAlpha = (1 - u) * 0.9;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, R);
+  g.addColorStop(0, 'rgba(255,255,255,0.95)');
+  g.addColorStop(0.4, 'rgba(160,230,255,0.55)');
+  g.addColorStop(1, 'rgba(40,120,255,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, R, 0, 7); ctx.fill();
+  ctx.strokeStyle = 'rgba(220,250,255,0.85)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x, y, R * 0.75, 0, 7); ctx.stroke();
+  ctx.restore();
+}
+
 
 /** 大招全場變色：從暗場／起動到招式完全結束（含 SHINKU 光束段）。純畫面，由狀態推導。 */
 const SUPER_FADE = 6;
@@ -225,7 +246,7 @@ export function superScreenTint(s) {
   const hex = ca ? 0x1a0806 : 0x0c0820;
   return { active: true, owner, id, alpha, color, hex, elapsed, total };
 }
-/** 大招染色只改 3D 舞台背景／地板／牆（見 sfv-3d），不蓋全螢幕疊層。 */
+/** 大招染色只改 3D 舞台背景／地板／牆，不再蓋全螢幕疊層（避免角色／HUD 一起變色）。 */
 
 export const __fxTest = {
   reset() { FX.list = []; FX.prev = null; },
@@ -234,6 +255,7 @@ export const __fxTest = {
   track: trackFx,
   contactPoint,
   superScreenTint,
+  drawHadoBall,
 };
 
 /** 用水墨圖畫一隻雞；沒圖（還沒畫的招式）回 false，呼叫端改畫舊的火柴雞 */
@@ -284,34 +306,94 @@ function dizzyStars(ctx, s, p) {
   }
   ctx.restore();
 }
-/** 真空蛋波的光束：沿著引擎的長判定畫（圖只有推掌，光束要另外畫才看得出打多遠）；每段開始時亮一下 */
+/** 真空蛋波光束：同能量球風格的加長版（白芯＋青藍暈），貼引擎長判定 */
 function drawBeam(ctx, s, p) {
   const mv = SFV.MOVE_LIST[p.mv], hb = mv.hitbox, f = p.f, k = p.mt - mv.S, per = mv.A / mv.hits, ph = (k % per) / per;
-  const x0 = p.x + f * hb[0], x1 = p.x + f * (hb[0] + hb[2]), yc = GROUND + p.y + hb[1] + hb[3] / 2, h = hb[3] * (0.55 + 0.25 * (1 - ph));
+  const x0 = p.x + f * hb[0], x1 = p.x + f * (hb[0] + hb[2]);
+  const yc = GROUND + p.y + hb[1] + hb[3] / 2, h = hb[3] * (0.62 + 0.28 * (1 - ph));
+  const left = Math.min(x0, x1), w = Math.abs(x1 - x0);
   ctx.save();
-  const g = ctx.createLinearGradient(0, yc - h / 2, 0, yc + h / 2);
-  g.addColorStop(0, 'rgba(120,210,255,0)'); g.addColorStop(0.3, 'rgba(140,225,255,0.75)'); g.addColorStop(0.5, 'rgba(250,255,255,0.95)'); g.addColorStop(0.7, 'rgba(140,225,255,0.75)'); g.addColorStop(1, 'rgba(120,210,255,0)');
-  ctx.globalAlpha = 0.65 + 0.35 * (1 - ph); ctx.fillStyle = g;
-  ctx.fillRect(Math.min(x0, x1), yc - h / 2, Math.abs(x1 - x0), h);
-  ctx.strokeStyle = '#000'; ctx.globalAlpha = 0.5; const r = hrng(s.tick * 3 + 1);
-  for (let i = 0; i < 10; i++) { const y = yc + (r() - 0.5) * h * 0.8, a = x0 + f * r() * Math.abs(x1 - x0) * 0.8; ctx.lineWidth = 0.8 + r() * 1.6; ctx.beginPath(); ctx.moveTo(a, y); ctx.lineTo(a + f * (20 + r() * 50), y); ctx.stroke(); }
+  // 外暈
+  const g0 = ctx.createLinearGradient(0, yc - h, 0, yc + h);
+  g0.addColorStop(0, 'rgba(40,120,255,0)'); g0.addColorStop(0.25, 'rgba(80,180,255,0.35)');
+  g0.addColorStop(0.5, 'rgba(200,245,255,0.55)'); g0.addColorStop(0.75, 'rgba(80,180,255,0.35)'); g0.addColorStop(1, 'rgba(40,120,255,0)');
+  ctx.globalAlpha = 0.85; ctx.fillStyle = g0; ctx.fillRect(left, yc - h, w, h * 2);
+  // 白芯
+  const g1 = ctx.createLinearGradient(0, yc - h * 0.45, 0, yc + h * 0.45);
+  g1.addColorStop(0, 'rgba(180,230,255,0)'); g1.addColorStop(0.3, 'rgba(230,250,255,0.9)');
+  g1.addColorStop(0.5, 'rgba(255,255,255,1)'); g1.addColorStop(0.7, 'rgba(230,250,255,0.9)'); g1.addColorStop(1, 'rgba(180,230,255,0)');
+  ctx.globalAlpha = 0.95; ctx.fillStyle = g1; ctx.fillRect(left, yc - h * 0.45, w, h * 0.9);
+  // 旋流細線（seed＝tick，rollback 安全）
+  const rnd = hrng(s.tick * 5 + p.mt * 3 + 11);
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineCap = 'round';
+  for (let i = 0; i < 12; i++) {
+    const y = yc + (rnd() - 0.5) * h * 0.7, a = left + rnd() * w * 0.85;
+    ctx.globalAlpha = 0.35 + rnd() * 0.45; ctx.lineWidth = 1 + rnd() * 2;
+    ctx.beginPath(); ctx.moveTo(a, y); ctx.lineTo(a + f * (24 + rnd() * 60), y + (rnd() - 0.5) * 8); ctx.stroke();
+  }
+  // 前緣脈衝球
+  const tipX = f > 0 ? left + w : left, pulse = 1 + 0.08 * Math.sin(s.tick * 0.5);
+  const tipR = h * 0.55 * pulse;
+  const tg = ctx.createRadialGradient(tipX, yc, 0, tipX, yc, tipR * 1.8);
+  tg.addColorStop(0, '#ffffff'); tg.addColorStop(0.35, 'rgba(180,240,255,0.9)'); tg.addColorStop(1, 'rgba(40,120,255,0)');
+  ctx.globalAlpha = 0.95; ctx.fillStyle = tg; ctx.beginPath(); ctx.arc(tipX, yc, tipR * 1.8, 0, 7); ctx.fill();
   ctx.restore();
 }
 
-/** 水墨蛋波：毛邊墨球 + 乾筆拖尾，外圈一層玩家顏色的光讓它在暗色舞台上看得見 */
+/**
+ * SF 風格蛋波能量球：白熱核心、青藍光暈、旋流外圈、短拖尾、微脈衝。
+ * 半徑跟引擎 projBox 高／2，位置＝彈體中心——不改判定。
+ * lv：0/1 一般、2 EX（更亮更大暈）。
+ */
+export function drawHadoBall(ctx, q, s) {
+  const b = SFV.projBox(q), cx = q.x, cy = GROUND + q.y, r = b[3] / 2;
+  const dir = Math.sign(q.vx) || 1, ex = q.lv >= 2;
+  const pulse = 1 + 0.07 * Math.sin(s.tick * 0.45 + q.x * 0.03);
+  const R = r * pulse * (ex ? 1.08 : 1);
+  ctx.save();
+  // 拖尾
+  for (let k = 4; k >= 1; k--) {
+    const tx = cx - dir * k * (R * 0.58);
+    const tr = R * (1 - k * 0.13);
+    ctx.globalAlpha = 0.1 * (5 - k);
+    const g = ctx.createRadialGradient(tx, cy, 0, tx, cy, tr * 1.7);
+    g.addColorStop(0, 'rgba(220,250,255,0.95)');
+    g.addColorStop(0.45, 'rgba(80,190,255,0.45)');
+    g.addColorStop(1, 'rgba(30,100,220,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(tx, cy, tr * 1.7, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // 外暈（在染色背景上也清楚）
+  const haloR = R * (ex ? 2.35 : 2.05);
+  const halo = ctx.createRadialGradient(cx, cy, R * 0.15, cx, cy, haloR);
+  halo.addColorStop(0, 'rgba(255,255,255,1)');
+  halo.addColorStop(0.22, 'rgba(200,245,255,0.95)');
+  halo.addColorStop(0.5, 'rgba(60,170,255,0.5)');
+  halo.addColorStop(1, 'rgba(20,80,200,0)');
+  ctx.fillStyle = halo; ctx.beginPath(); ctx.arc(cx, cy, haloR, 0, 7); ctx.fill();
+  // 白熱核心
+  const core = ctx.createRadialGradient(cx - dir * R * 0.12, cy - R * 0.12, 0, cx, cy, R * 0.72);
+  core.addColorStop(0, '#ffffff');
+  core.addColorStop(0.45, '#eafcff');
+  core.addColorStop(1, 'rgba(90,190,255,0.25)');
+  ctx.fillStyle = core; ctx.beginPath(); ctx.arc(cx, cy, R * 0.7, 0, 7); ctx.fill();
+  // 旋流外圈
+  ctx.translate(cx, cy);
+  const a0 = (s.tick * 0.22 + q.x * 0.01) % (Math.PI * 2);
+  for (let i = 0; i < (ex ? 4 : 3); i++) {
+    ctx.rotate(a0 * (i % 2 ? 1 : -1) + i * 0.85);
+    ctx.strokeStyle = i === 0 ? 'rgba(255,255,255,0.9)' : 'rgba(140,220,255,0.75)';
+    ctx.lineWidth = (ex ? 2.4 : 1.8) - i * 0.25;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, R * (1.02 - i * 0.07), R * (0.58 - i * 0.05), 0.35, 0, Math.PI * 1.7);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** @deprecated 舊水墨球入口改走能量球（保留名稱以免外部引用炸掉） */
 export function drawInkOrb(ctx, cx, cy, r, dir, seed, col) {
-  if (!ART.ready) return false;
-  const g = ctx.createRadialGradient(cx, cy, r * 0.5, cx, cy, r * 1.9); g.addColorStop(0, col); g.addColorStop(1, col + '00');
-  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r * 1.9, 0, 7); ctx.fill();
-  let s = 99; const rb = () => (s = (s * 16807) % 2147483647) / 2147483647;
-  ctx.strokeStyle = '#000';
-  for (let b = 0; b < 16; b++) { const off = rb() * 2 - 1; ctx.lineWidth = 0.8 + rb() * 2.4; ctx.beginPath();
-    for (let k = 0; k <= 12; k++) { const u = k / 12, X = cx - dir * (r * 0.4 + u * r * 4), Y = cy + off * r * (1 - 0.75 * u); (rb() < 0.08 + 0.45 * u) ? ctx.moveTo(X, Y) : ctx.lineTo(X, Y); }
-    ctx.stroke(); }
-  const rnd = hrng(seed | 1);
-  ctx.fillStyle = '#000'; ctx.beginPath();
-  for (let k = 0; k <= 48; k++) { const a = k / 48 * Math.PI * 2, rr = r * (0.92 + 0.12 * Math.sin(a * 5 + 1) + 0.06 * rnd()); ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); }
-  ctx.fill();
-  for (let k = 0; k < 30; k++) { const a = rnd() * 6.283, l = r * (1.05 + rnd() * 0.4); ctx.lineWidth = 0.8 + rnd() * 1.5; ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * r * .8, cy + Math.sin(a) * r * .8); ctx.lineTo(cx + Math.cos(a) * l, cy + Math.sin(a) * l); ctx.stroke(); }
+  drawHadoBall(ctx, { x: cx, y: cy - GROUND, vx: dir, lv: 0, n: 1 }, { tick: seed | 0 });
   return true;
 }
