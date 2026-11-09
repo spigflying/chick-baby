@@ -7,6 +7,7 @@ import { OutlineEffect } from 'three/examples/jsm/effects/OutlineEffect.js';
 import { SFV } from '@chick/engine';
 import { art } from './art';
 import { superScreenTint } from './sfv-art';
+import { P, mix, keyed, smooth, overshoot, FighterAnim, interpPose, Spring, solveLeg, footOf } from './sfv-anim';
 
 const W = 960, H = 540, GROUND = 470, FOV = 30;
 
@@ -31,39 +32,42 @@ function faceTexture(src) {
 const CAM_D = (H / 2) / Math.tan((FOV / 2) * Math.PI / 180);
 const YAW = 0.32; // 身體往鏡頭轉一點，看得出立體
 const PI = Math.PI, HALF = PI / 2;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 
 // ---------- 姿勢 ----------
 // 角度都在「面向 +x」的側面平面：0 = 朝前，正 = 往上；手：a 上臂方向、e 手肘相對彎曲；腳：h 大腿方向、k 膝蓋相對彎曲
-const P = (o) => ({
-  drop: 0, lean: 0, roll: 0, spin: 0, head: 0, puff: 0, sx: 1, sy: 1,
-  aF: -0.95, eF: 1.25, aB: -0.65, eB: 1.35, hF: -HALF + 0.45, kF: -0.7, hB: -HALF - 0.45, kB: 0.5,
-  ik: 0, ikLimb: null, ...o,
-});
-const GUARD = P({});
-const CROUCH = P({ drop: 22, lean: 0.15, hF: -0.35, kF: -1.9, hB: -2.5, kB: 1.6, aF: -0.3, eF: 1.9, aB: -0.6, eB: 2.2, sy: 0.92, sx: 1.06 });
-const BLOCK_ST = P({ lean: -0.12, aF: 0.2, eF: 2.6, aB: 0.0, eB: 2.7, head: -0.15 });
+// 曲線、淡入、內插、彈簧、腳 IK 在 sfv-anim.ts（純函數，有單元測試）
+// plant：2 = 腳貼地（站、蹲、防禦、落地），1 = 只防腳穿進地板（出招、走路）
+const GUARD = P({ drop: 2 }); // 跟待機上下彈的平均高度一樣，出招／收招接回待機不會跳
+const CROUCH = P({ drop: 22, lean: 0.15, hF: -0.35, kF: -1.9, hB: -2.5, kB: 1.6, aF: -0.3, eF: 1.9, aB: -0.6, eB: 2.2, sy: 0.92, sx: 1.06, plant: 2 });
+const BLOCK_ST = P({ lean: -0.12, aF: 0.2, eF: 2.6, aB: 0.0, eB: 2.7, head: -0.15, drop: 3, plant: 2 });
 const BLOCK_CR = P({ ...CROUCH, aF: 0.3, eF: 2.6, aB: 0.1, eB: 2.7, head: -0.2 });
-const NUM = Object.keys(GUARD).filter((k) => typeof GUARD[k] === 'number');
-function mix(a, b, u) { const o = { ...b }; for (const k of NUM) o[k] = a[k] + (b[k] - a[k]) * u; o.ikLimb = u < 0.5 ? a.ikLimb ?? b.ikLimb : b.ikLimb ?? a.ikLimb; return o; }
-const smooth = (u) => u * u * (3 - 2 * u);
-/** keys: [[幀, 姿勢], ...]，幀遞增；兩格之間 smoothstep 補 */
-function keyed(keys, t) {
-  if (t <= keys[0][0]) return keys[0][1];
-  for (let i = 0; i < keys.length - 1; i++) {
-    const [a, A] = keys[i], [b, B] = keys[i + 1];
-    if (t <= b) return b === a ? B : mix(A, B, smooth((t - a) / (b - a)));
-  }
-  return keys[keys.length - 1][1];
-}
-/** 一般技：準備 → 打出（一幀到位、手腳伸長到判定）→ 停一下 → 收回 */
+/** 一般技：準備（預備動作）→ 打出（一幀到位、手腳伸長到判定、髖略沉）→ 停一下 → 收回略過頭（overshoot）→ 回架式 */
 function attack(mv, t, base, chamber, strike) {
-  const S = mv.S, A = mv.A, R = mv.R, hit = { ...strike, ik: 1 }, hold = { ...strike, ik: 0.85 };
-  return keyed([[0, base], [Math.max(1, S - 1), chamber], [S, hit], [S + A - 1, hit], [S + A + R * 0.35, hold], [S + A + R, base]], t);
+  const S = mv.S, A = mv.A, R = mv.R, hit = { ...strike, drop: strike.drop + 3, ik: 1 }, hold = { ...strike, drop: strike.drop + 2, ik: 0.85 };
+  return keyed([[0, base], [Math.max(1, S - 1), chamber], [S, hit], [S + A - 1, hit], [S + A + R * 0.2, hold], [S + A + R * 0.8, overshoot(hold, base)], [S + A + R, base]], t);
 }
-
-function poseFor(p, s) {
+/** 姿勢分組：組別一換，畫面就淡入（出招、被打第一幀等刻意的瞬間切換除外，見 blendTicks） */
+function groupOf(p, s) {
+  const st = SFV.ST_NAME[p.st];
+  if (st === 'IDLE' || st === 'CROUCH') {
+    const i = s.p.indexOf(p), prox = i >= 0 ? SFV.proxGuard(s, i) : 0;
+    if (prox === 1 || prox === 4) return 'prox';
+    return st === 'CROUCH' ? 'crouch' : p.vx !== 0 ? 'walk' : 'idle';
+  }
+  if (st === 'MOVE') return 'move:' + SFV.MOVE_LIST[p.mv].id;
+  return st.toLowerCase();
+}
+/** ctx.age：進入目前這組幾個 tick（走路步幅慢慢放大用；畫面記憶給的，不是引擎 state） */
+function poseFor(p, s, ctx = { age: 99 }) {
+  const o = poseRaw(p, s, ctx);
+  return { ...o, g: groupOf(p, s), plant: o.plant ?? (p.y === 0 && Math.abs(o.roll) < 0.3 ? 1 : 0) };
+}
+const LYING = P({ roll: -HALF, drop: 0, aF: 2.6, eF: 0.2, aB: 2.4, eB: 0.4, hF: -0.2, kF: -0.6, hB: -0.6, kB: -0.3, head: -0.3 });
+const SIT_UP = P({ ...CROUCH, plant: 0, roll: -0.75, drop: 18, aF: 0.5, eF: 1.0, aB: 0.9, eB: 0.8, head: 0.1 });
+const JUMP_EXT = { hF: -HALF + 0.25, kF: -0.35, hB: -HALF - 0.35, kB: 0.35 }, JUMP_TUCK = { hF: -0.6, kF: -1.6, hB: -1.4, kB: -1.2 };
+function poseRaw(p, s, ctx) {
   const st = SFV.ST_NAME[p.st], tick = s.tick;
-  const breath = Math.sin(tick * 0.09);
   // SF5 近身防禦：跟 2D 一樣用引擎 proxGuard（純函數），站＝BLOCK_ST、蹲＝BLOCK_CR
   const prox = (() => { const i = s.p.indexOf(p); return i >= 0 ? SFV.proxGuard(s, i) : 0; })();
   switch (st) {
@@ -71,10 +75,14 @@ function poseFor(p, s) {
       if (prox === 4) return BLOCK_ST;
       if (prox === 1) return BLOCK_CR;
       if (p.vx !== 0) {
-        const ph = (p.x * p.f) / 16, sw = Math.sin(ph), back = p.vx * p.f < 0;
-        return P({ drop: -Math.abs(Math.cos(ph)) * 3, lean: back ? -0.12 : 0.1, hF: -HALF + 0.75 * sw, kF: -0.4 - 0.6 * Math.max(0, -sw), hB: -HALF - 0.75 * sw, kB: -0.4 - 0.6 * Math.max(0, sw), aF: -0.6 + 0.25 * sw, aB: -0.9 - 0.25 * sw, head: 0.08 * sw });
+        // 走路：步伐跟著 x 走（不會滑步）；前幾步步幅慢慢放大；髖上下（一步兩次）＋重心前後換
+        const amp = Math.min(1, (ctx.age + 1) / 6), ph = (p.x * p.f) / 16, sw = Math.sin(ph), back = p.vx * p.f < 0, bob = Math.abs(Math.cos(ph));
+        const W = P({ drop: 3 - bob * 4.5, lean: (back ? -0.12 : 0.1) + 0.05 * Math.cos(2 * ph), hF: -HALF + 0.75 * sw, kF: -0.4 - 0.6 * Math.max(0, -sw), hB: -HALF - 0.75 * sw, kB: -0.4 - 0.6 * Math.max(0, sw), aF: -0.6 + 0.25 * sw, aB: -0.9 - 0.25 * sw, head: 0.08 * sw - 0.03 * Math.cos(2 * ph) });
+        return mix(GUARD, W, amp);
       }
-      return P({ drop: 1.5 + breath * 1.5, sy: 1 + breath * 0.02, head: breath * 0.04 });
+      // 待機：SF5 式有節奏的上下彈（約 0.7 秒一下），腳踩地、手跟著晃
+      const ph = tick * (2 * PI / 44), b = Math.sin(ph);
+      return P({ drop: 2 + 2.4 * b, sy: 1 + 0.015 * b, sx: 1 - 0.008 * b, head: 0.045 * Math.sin(ph + 1), lean: 0.025 * Math.sin(ph - 0.5), aF: -0.95 + 0.07 * Math.sin(ph + 0.6), eF: 1.25 - 0.09 * b, aB: -0.65 + 0.06 * Math.sin(ph + 0.9), eB: 1.35 - 0.07 * b, plant: 2 });
     }
     case 'CROUCH':
       if (prox === 1) return BLOCK_CR;
@@ -83,27 +91,32 @@ function poseFor(p, s) {
     case 'PREJUMP': {
       // 依剩餘預跳幀（PREJUMP_T）下蹲加深，不要寫死舊的 3 幀
       const u = Math.max(0, Math.min(1, p.t / Math.max(1, SFV.PREJUMP_T)));
-      return P({ ...CROUCH, drop: 8 + 8 * u, aF: 0.3 + 0.2 * u, aB: 0.4 + 0.3 * u, sy: 0.92 - 0.04 * u });
+      return P({ ...CROUCH, drop: 8 + 8 * u, aF: -0.5 + 0.5 * (1 - u), aB: -0.4 + 0.6 * (1 - u), sy: 0.92 - 0.04 * u }); // 手從架式往上帶，接起跳
     }
     case 'LAND': {
       // 依落地硬直剩餘幀（JUMP_LAND 或招式 landRec）壓扁
       const landT = (p.mv >= 0 && SFV.MOVE_LIST[p.mv]?.landRec) ? SFV.MOVE_LIST[p.mv].landRec : SFV.JUMP_LAND;
       const u = Math.max(0, Math.min(1, p.t / Math.max(1, landT)));
-      return P({ ...CROUCH, drop: 8 + 12 * u, sx: 1.06 + 0.08 * u, sy: 0.92 - 0.1 * u });
+      return P({ ...CROUCH, drop: 8 + 12 * u, sx: 1.06 + 0.08 * u, sy: 0.92 - 0.1 * u, aF: CROUCH.aF + 0.6 * u, aB: CROUCH.aB + 1.1 * u }); // 剛落地手還在上面，慢慢收
     }
     case 'JUMP': {
       const u = Math.max(-1, Math.min(1, p.vy / 12)); // -1 上升、+1 下降
-      return P({ aF: 1.2 - u * 0.4, eF: 0.4, aB: 1.6 - u * 0.4, eB: 0.3, hF: -0.6, kF: -1.6, hB: -1.4, kB: -1.2, lean: 0.1, sy: 1 - u * 0.06, sx: 1 + u * 0.06, head: -0.1 * u });
+      // 起跳腳先伸直、到頂點縮起來、落下前再伸出去準備著地
+      const tuck = p.vy < 0 ? 0.2 + 0.8 * smooth(Math.max(0, Math.min(1, (p.vy + 18) / 12))) : 1 - 0.7 * smooth(Math.max(0, Math.min(1, p.vy / 14)));
+      const legs = {}; for (const k in JUMP_EXT) legs[k] = JUMP_EXT[k] + (JUMP_TUCK[k] - JUMP_EXT[k]) * tuck;
+      return P({ aF: 0.3 + (0.9 - u * 0.4) * tuck, eF: 0.4 + 0.8 * (1 - tuck), aB: 0.4 + (1.2 - u * 0.4) * tuck, eB: 0.3 + 1.0 * (1 - tuck), ...legs, lean: 0.1, sy: 1 - u * 0.06, sx: 1 + u * 0.06, head: -0.1 * u });
     }
     case 'BLOCK': return p.cr ? BLOCK_CR : BLOCK_ST;
     case 'HIT': {
-      const k = Math.min(1, p.t / 12);
-      return P({ ...(p.cr ? CROUCH : GUARD), lean: -0.45 * k, head: -0.6 * k, aF: -1.6, eF: 0.3, aB: 1.4, eB: 0.6, sx: 1 + 0.08 * k, sy: 1 - 0.08 * k });
+      // 被打第一幀直接到最大後仰；最後 12 幀整個姿勢（含手）慢慢回到架式，硬直結束不會跳
+      const k = Math.min(1, p.t / 12), base = p.cr ? CROUCH : GUARD;
+      return mix(base, P({ ...base, lean: -0.45, head: -0.6, aF: -1.6, eF: 0.3, aB: 1.4, eB: 0.6, sx: base.sx + 0.08, sy: base.sy - 0.08 }), k);
     }
     case 'AIRHIT': return P({ roll: -0.6 - (p.vy > 0 ? 0.4 : 0), aF: 2.2, eF: 0.4, aB: 2.6, eB: 0.2, hF: 0.2, kF: -0.4, hB: -0.5, kB: 0.3, head: -0.5 });
     case 'KD': {
-      if (p.t <= 16 && p.y === 0) return P({ ...CROUCH, roll: -0.9 * (p.t / 16), drop: 18 });
-      return P({ roll: -HALF, drop: 0, aF: 2.6, eF: 0.2, aB: 2.4, eB: 0.4, hF: -0.2, kF: -0.6, hB: -0.6, kB: -0.3, head: -0.3 });
+      // 起身：從躺姿 → 坐起 → 蹲（最後 16 幀），接回待機時再淡入
+      if (p.t <= 16 && p.y === 0) return keyed([[0, LYING], [8, SIT_UP], [16, P({ ...CROUCH, drop: 18 })]], 16 - p.t);
+      return LYING;
     }
     case 'KO': return P({ roll: -HALF, aF: 2.8, eF: 0.1, aB: 2.7, eB: 0.1, hF: 0.4, kF: -0.2, hB: 0.1, kB: -0.1, head: -0.4, puff: 0.2 });
     case 'THROWN': {
@@ -112,9 +125,10 @@ function poseFor(p, s) {
       return P({ roll: -PI * Math.max(0, u), aF: 2.4, eF: 0.4, aB: 2.0, eB: 0.4, hF: 0.6, kF: -0.4, hB: 0.2, kB: -0.4, head: -0.5 });
     }
     case 'THROWING': {
-      const n = SFV.THROW_ANIM - p.t;
-      if (p.t > SFV.THROW_ANIM) return P({ aF: 0.1, eF: 0.4, aB: 0.2, eB: 0.4, lean: 0.25 });
-      return n <= 12 ? P({ aF: 1.4, eF: 0.2, aB: 1.6, eB: 0.2, lean: -0.25, drop: -4 }) : P({ aF: -1.2, eF: 0.2, aB: -1.0, eB: 0.2, lean: 0.5, drop: 8 });
+      // 抓住 → 舉起 → 往前摔（關鍵格之間用曲線補）
+      const grab = P({ aF: 0.1, eF: 0.4, aB: 0.2, eB: 0.4, lean: 0.25 }), lift = P({ aF: 1.4, eF: 0.2, aB: 1.6, eB: 0.2, lean: -0.25, drop: -4 }), slam = P({ aF: -1.2, eF: 0.2, aB: -1.0, eB: 0.2, lean: 0.5, drop: 8 });
+      if (p.t > SFV.THROW_ANIM) return grab;
+      return keyed([[0, grab], [5, lift], [11, lift], [15, slam], [SFV.THROW_ANIM, slam]], SFV.THROW_ANIM - p.t);
     }
     case 'DIZZY': return P({ lean: 0.18 * Math.sin(p.t * 0.16), head: 0.3 * Math.sin(p.t * 0.16 + 1), aF: -1.4, eF: 0.4, aB: -1.5, eB: 0.4, drop: 4 });
     case 'TECH': return P({ lean: -0.3, aF: 0.2, eF: 0.2, aB: 0.3, eB: 0.2 });
@@ -123,9 +137,9 @@ function poseFor(p, s) {
   return GUARD;
 }
 
-const CHAMBER_PUNCH = P({ lean: -0.18, drop: 3, aF: -1.1, eF: 2.6, aB: -0.4, eB: 2.0, head: 0.05 });
+const CHAMBER_PUNCH = P({ lean: -0.24, drop: 5, aF: -1.2, eF: 2.7, aB: -0.4, eB: 2.0, head: 0.06 });
 const STRIKE_PUNCH = P({ lean: 0.22, aF: 0, eF: 0, aB: -1.2, eB: 2.4, hF: -HALF + 0.65, kF: -0.4, hB: -HALF - 0.7, kB: 0.1 });
-const CHAMBER_KICK = P({ lean: -0.25, hF: 0.0, kF: -2.4, aF: 0.2, eF: 1.6, aB: 0.5, eB: 1.4 });
+const CHAMBER_KICK = P({ lean: -0.3, drop: 2, hF: 0.0, kF: -2.4, aF: 0.25, eF: 1.6, aB: 0.55, eB: 1.4 });
 const STRIKE_KICK = P({ lean: -0.38, hF: 0, kF: 0, aF: 0.5, eF: 1.2, aB: 0.9, eB: 1.0, hB: -HALF - 0.15, kB: 0 });
 
 function movePose(p, s) {
@@ -152,7 +166,7 @@ function movePose(p, s) {
     const spinLeg = P({ hF: 0, kF: 0, hB: -HALF - 0.4, kB: -0.6, aF: 1.0, eF: 0.6, aB: 1.2, eB: 0.6, lean: -0.2 });
     if (t < mv.S) return keyed([[0, GUARD], [mv.S - 1, P({ ...CHAMBER_KICK, drop: 4 })]], t);
     if (t < mv.S + mv.A) return { ...spinLeg, spin: (t - mv.S) * 0.55 };
-    return mix(spinLeg, GUARD, Math.min(1, (t - mv.S - mv.A) / 8));
+    return mix({ ...spinLeg, spin: (mv.A * 0.55) % (2 * PI) }, GUARD, Math.min(1, (t - mv.S - mv.A) / 8));
   }
   if (id === 'CA') {
     if (t < mv.S) return keyed([[0, GUARD], [mv.S - 1, P({ ...CHAMBER_KICK, puff: 0.4 })]], t);
@@ -286,7 +300,12 @@ class Chick {
     this.legF = leg(10); this.legB = leg(-10);
     this.particles = [];
     this.pGeo = SPH;
+    this.combBase = this.comb.map((m) => m.rotation.z);
+    // 次級動作彈簧（只影響畫面）：頭慢半拍、雞冠／頭巾尾巴甩、肚子落地壓扁、拳套晃
+    this.spr = { head: new Spring(300, 14, 0.25), comb: new Spring(260, 7, 0.45), tail: new Spring(200, 6, 0.6), belly: new Spring(420, 12, 0.12), fistF: new Spring(380, 12, 0.35), fistB: new Spring(380, 12, 0.35) };
+    this.drv = null; // 上一畫面的位置／速度（算加速度用）
   }
+  resetSprings() { for (const k in this.spr) this.spr[k].reset(); this.drv = null; }
   /** 換臉：chick = 原本的雞臉；其他 = FACES 裡的照片 */
   setFace(id) {
     if (id === this.faceId) return;
@@ -355,28 +374,56 @@ export function createFight3D(canvas) {
   const floorTint = new THREE.Color(), wallTint = new THREE.Color(), sideTint = new THREE.Color(), bgTmp = new THREE.Color();
   const chicks = [0, 1].map((i) => new Chick(scene, i, grad));
   const hsPrev = [0, 0], hpPrev = [SFV.HP_MAX, SFV.HP_MAX];
-  let lastTick = -1;
+  let lastTick = -1, lastRnd = -1, lastNow = 0;
+  const strikeAt = (p) => p.st === SFV.ST.MOVE && p.mt === SFV.MOVE_LIST[p.mv].S;
+  const anims = [0, 1].map(() => new FighterAnim(poseFor, strikeAt));
   const tmp = new THREE.Vector3();
 
-  function place(c, p, s, i, freeze) {
-    const pose = poseFor(p, s), f = p.f;
+  function place(c, p, pose, px, py, s, i, freeze, dt) {
+    const f = p.f;
     // 純畫面位移：不改引擎 hs／blockstun／推擠；只在既有 hs 幀抖。
     let jx = 0;
     if (p.hs > 0 && p.st === SFV.ST.BLOCK) jx = (s.tick & 1) ? 5 : -5;
     else if (p.hs > 0 && (p.st === SFV.ST.HIT || p.st === SFV.ST.AIRHIT)) jx = (s.tick & 1) ? 3 : -3;
-    c.root.position.set(p.x - W / 2 + jx, -p.y, 0);
+    c.root.position.set(px - W / 2 + jx, -py, 0);
     c.root.scale.set(f, 1, 1);
-    c.yaw.rotation.set(0, -YAW + pose.spin, 0);
+    // 轉身：引擎直接換面向；畫面從舊方向經過面對鏡頭轉過來（pose.turn 0→1）
+    c.yaw.rotation.set(0, -YAW + pose.spin + (1 - pose.turn) * (-PI + 2 * YAW), 0);
+    // ---- 彈簧：用畫面上的位置（不含受擊抖動）算速度變化 ----
+    const S = c.spr, d = c.drv;
+    let dvx = 0, dvy = 0, daF = 0, daB = 0, dHead = 0;
+    if (d && dt > 0) {
+      const vx = (px - d.x) / dt, vy = (py - d.y) / dt;
+      dvx = (vx - d.vx) * f; dvy = vy - d.vy; daF = pose.aF - d.aF; daB = pose.aB - d.aB; dHead = pose.head - d.head;
+      d.x = px; d.y = py; d.vx = vx; d.vy = vy;
+    } else c.drv = { x: px, y: py, vx: 0, vy: 0 };
+    Object.assign(c.drv, { aF: pose.aF, aB: pose.aB, head: pose.head });
+    dvx = clamp(dvx, -1500, 1500); dvy = clamp(dvy, -1500, 1500);
+    const hd = S.head.step(dvx * 0.0016 + dHead * -3, dt), cb = S.comb.step(dvx * 0.006 - dvy * 0.0012 + dHead * -8, dt), tl = S.tail.step(dvx * 0.008 + dvy * 0.002, dt);
+    const bl = S.belly.step(dvy * 0.0016, dt);
+    const fF = pose.ik > 0 ? (S.fistF.reset(), 0) : S.fistF.step(-daF * 5, dt), fB = S.fistB.step(-daB * 5, dt);
     c.hips.position.y = c.hipBaseY - pose.drop * 0.6;
     c.hips.rotation.z = pose.roll;
     c.body.position.y = -pose.drop * 0.4;
     c.body.rotation.z = pose.lean;
     const pf = 1 + pose.puff * 0.25;
-    c.body.scale.set(pose.sx * pf, pose.sy * pf, pf);
-    c.head.rotation.z = pose.head;
-    c.shadow.position.x = p.x - W / 2; const air = Math.max(0, -p.y); c.shadow.scale.set(26 * (1 - Math.min(0.6, air / 200)), 9, 1);
+    c.body.scale.set(pose.sx * pf * (1 - bl * 0.5), pose.sy * pf * (1 + bl), pf);
+    c.head.rotation.z = pose.head + hd;
+    c.comb.forEach((m, k) => m.rotation.z = c.combBase[k] + cb * (0.7 + 0.15 * k));
+    c.shadow.position.x = px - W / 2; const air = Math.max(0, -py); c.shadow.scale.set(26 * (1 - Math.min(0.6, air / 200)), 9, 1);
     c.limb(c.armF, pose.aF, pose.eF); c.limb(c.armB, pose.aB, pose.eB);
-    c.limb(c.legF, pose.hF, pose.kF); c.limb(c.legB, pose.hB, pose.kB);
+    // 腳：plant 2 = 踩地、1 = 只防穿地（髖上下彈、蹲時腳底都貼地板）
+    const hipY = c.hipBaseY - pose.drop * 0.6 - py; // 髖離地多高（py 往上是負）
+    for (const [L, a, e, key] of [[c.legF, pose.hF, pose.kF, 'hF'], [c.legB, pose.hB, pose.kB, 'hB']]) {
+      let A = a, E = e;
+      if (pose.plant && p.y === 0 && py === 0 && Math.abs(pose.roll) < 0.3 && !(pose.ik > 0 && pose.ikLimb === key)) {
+        const [fx, fy] = footOf(L.L1, L.L2, a, e);
+        if (pose.plant === 2 ? Math.abs(fy + hipY) > 0.3 : fy < -hipY) [A, E] = solveLeg(L.L1, L.L2, fx, -hipY, e);
+      }
+      c.limb(L, A, E);
+    }
+    if (c.armF.fist) c.armF.fist.rotation.z += fF;
+    if (c.armB.fist) c.armB.fist.rotation.z += fB;
     // 打擊判定在哪，拳頭／腳就伸到哪（橡皮手）：目標 = 招式判定框的前 3/4 處
     const mv = p.st === SFV.ST.MOVE ? SFV.MOVE_LIST[p.mv] : null;
     if (pose.ik > 0 && pose.ikLimb && mv?.hitbox) {
@@ -392,7 +439,7 @@ export function createFight3D(canvas) {
     const flash = p.hs > 0 && (p.st === SFV.ST.HIT || p.st === SFV.ST.AIRHIT) ? (p.hs > 8 ? 0.8 : 0.35) : 0;
     const glowOwner = freeze === i ? 0.25 : 0;
     for (const m of c.mats) if (m.emissive) m.emissive.setRGB(flash + glowOwner, (flash + glowOwner) * 0.75, (flash + glowOwner) * 0.6);
-    c.tails.forEach((t, k) => t.rotation.z = (k ? -0.15 : 0.4) + 0.15 * Math.sin(s.tick * 0.2 + k) - pose.lean * 0.5);
+    c.tails.forEach((t, k) => t.rotation.z = (k ? -0.15 : 0.4) + 0.12 * Math.sin(s.tick * 0.2 + k) - pose.lean * 0.5 + tl * (1 + 0.3 * k));
   }
 
   function face(c, p, s, i) {
@@ -470,7 +517,7 @@ export function createFight3D(canvas) {
   }
 
   return {
-    render(s, opt: { shake?: [number, number]; freezeOwner?: number; faces?: string[] } = {}) {
+    render(s, opt: { shake?: [number, number]; freezeOwner?: number; faces?: string[]; prev?: any; alpha?: number; posInterp?: boolean; now?: number } = {}) {
       for (let i = 0; i < 2; i++) chicks[i].setFace(opt.faces?.[i] ?? 'chick');
       const [shx, shy] = opt.shake ?? [0, 0], fo = opt.freezeOwner ?? -1;
       cam.position.set(-shx, CY + shy, CAM_D); cam.lookAt(-shx, CY + shy, 0);
@@ -492,7 +539,23 @@ export function createFight3D(canvas) {
         for (const m of sideWalls) m.material.color.copy(sideBase);
       }
       const superOwner = tint.active ? tint.owner : fo;
-      for (let i = 0; i < 2; i++) { place(chicks[i], s.p[i], s, i, superOwner); if (s.tick !== lastTick) blood(chicks[i], s.p[i], i, s); }
+      // 畫面時間：opt.prev（上一 tick 的 state）＋ opt.alpha（0～1）→ 在兩個 tick 之間內插，60Hz 螢幕偶爾一幀 0 或 2 tick 也看起來連續
+      const now = opt.now ?? performance.now(), dt = lastNow ? clamp((now - lastNow) / 1000, 0, 0.05) : 1 / 60; lastNow = now;
+      const rewind = s.tick < lastTick || s.rnd !== lastRnd; lastRnd = s.rnd;
+      const prev = opt.prev && opt.prev.tick === s.tick - 1 && opt.prev.rnd === s.rnd ? opt.prev : null, alpha = clamp(opt.alpha ?? 1, 0, 1);
+      for (let i = 0; i < 2; i++) {
+        const c = chicks[i], p = s.p[i];
+        if (rewind) c.resetSprings();
+        const A = prev ? anims[i].at(prev, i) : null, B = anims[i].at(s, i), pose = interpPose(A, B, alpha);
+        let px = p.x, py = p.y;
+        if (A && opt.posInterp && !B.snap && alpha < 1) {
+          const q = prev.p[i];
+          if (Math.abs(q.x - p.x) < 60 && Math.abs(q.y - p.y) < 60) { px = q.x + (p.x - q.x) * alpha; py = q.y + (p.y - q.y) * alpha; }
+        }
+        if (c.drv && (Math.abs(px - c.drv.x) > 60 || Math.abs(py - c.drv.y) > 60)) c.resetSprings();
+        place(c, p, pose, px, py, s, i, superOwner, dt);
+        if (s.tick !== lastTick) blood(c, p, i, s);
+      }
       lastTick = s.tick;
       outline.render(scene, cam);
     },
@@ -501,4 +564,4 @@ export function createFight3D(canvas) {
 }
 
 // 測試用：每個狀態／招式都算得出有限的姿勢
-export const __test = { poseFor, LEG: { L1: 13, L2: 12, hipY: 23.5, thigh: [4.4, 3.5], shin: [3.2, 2.7] } };
+export const __test = { poseFor, groupOf, makeAnim: () => new FighterAnim(poseFor, (p) => p.st === SFV.ST.MOVE && p.mt === SFV.MOVE_LIST[p.mv].S), LEG: { L1: 13, L2: 12, hipY: 23.5, thigh: [4.4, 3.5], shin: [3.2, 2.7] } };
