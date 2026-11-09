@@ -120,7 +120,7 @@ export class FightView {
   private onLive(m: any) {
     if (m.home_id && this.home && m.home_id !== this.home && m.fight_id !== this.current?.id) return;
     if (m.type === 'time.pong' && this.current?.player)
-      this.current.player.onMessage({ type: 'pong', c: m.t0, tick: m.fight_tick ?? this.current.spectator.tick }, Date.now());
+      this.current.player.onMessage({ type: 'pong', c: m.t0, tick: m.fight_tick ?? this.current.spectator.tick }, performance.now());
     if (m.type === 'fight.notice') return this.toast(NOTICE[m.code] ?? m.code);
     if (m.type === 'fight.event') return this.onEvent(m);
     if (!this.current || m.fight_id !== this.current.id) return;
@@ -183,7 +183,7 @@ export class FightView {
     this.openView(); this.live.inFight = true;
   }
   private feed(msg: any) {
-    const now = Date.now(); this.current.spectator.onMessage(msg);
+    const now = performance.now(); this.current.spectator.onMessage(msg);
     this.current.player?.onMessage(msg, now);
   }
   private result(m: any) {
@@ -266,7 +266,7 @@ export class FightView {
   private blur = () => this.held.clear();
   private draw = () => {
     if (!this.root.hidden && this.current) {
-      const now = Date.now(); this.current.player?.frame(now);
+      const now = performance.now(); this.current.player?.frame(now);
       const state = this.current.player?.predicted ?? this.current.spectator.state;
       const elapsed = this.lastDrawAt ? Math.min(50, now - this.lastDrawAt) : 0;
       this.lastDrawAt = now;
@@ -278,7 +278,7 @@ export class FightView {
         cv3.hidden = true;
         loading.then((create) => { this.three = create ? create(cv3) : null; cv3.hidden = !this.three; });
       }
-      drawFight(this.ctx, shown, { three: this.three || null, noWebGL: this.three === null, faces: this.current.players.map((p: any) => p.face ?? 'chick'), showBoxes: false, me: this.current.pid ? this.current.pid - 1 : -1, names: this.current.players.map((p: any) => p.name), ended });
+      drawFight(this.ctx, shown, { prev: this.current.player?.prevShown, alpha: this.current.player ? this.current.player.renderAlpha(now) : 1, now, three: this.three || null, noWebGL: this.three === null, faces: this.current.players.map((p: any) => p.face ?? 'chick'), showBoxes: false, me: this.current.pid ? this.current.pid - 1 : -1, names: this.current.players.map((p: any) => p.name), ended });
       const debug = this.root.querySelector('.sfv-debug') as HTMLElement;
       debug.hidden = new URLSearchParams(location.search).get('debug') !== '1';
       if (!debug.hidden) debug.textContent = this.current.player ? `確認 ${this.current.player.C}・預測 ${this.current.player.L}・rollback ${this.current.player.stats.rollbacks}` : `觀戰確認 ${this.current.spectator.tick}`;

@@ -96,7 +96,7 @@ export const SFVClient = ((SFV, SFVServer) => {
       const from = this.C;
       this.predicted = SFV.cloneState(this.confirmed);
       let t = from;
-      while (t < this.L) { t++; const pair = this.pairFor(t); this.used.set(t, pair); SFV.simulateSFVTick(this.predicted, pair[0], pair[1]); }
+      while (t < this.L) { t++; const pair = this.pairFor(t); this.used.set(t, pair); if (t === this.L) this.prevShown = SFV.cloneState(this.predicted); SFV.simulateSFVTick(this.predicted, pair[0], pair[1]); }
       this.mispredict = false; this.stats.rollbacks++; this.stats.lastResim = this.L - from; this.stats.resim += this.L - from;
     }
     flush(now, t) {
@@ -116,8 +116,15 @@ export const SFVClient = ((SFV, SFVServer) => {
       this.flush(now, t);
       const pair = this.pairFor(t);
       this.used.set(t, pair);
+      this.prevShown = SFV.cloneState(this.predicted); // 只給畫面在 tick 之間內插用，不影響模擬
       SFV.simulateSFVTick(this.predicted, pair[0], pair[1]);
       this.L = t;
+    }
+    /** 畫面時間落在 (L-1, L] 之間的比例：配合 prevShown 內插。時鐘還沒同步就回 1（直接畫最新 tick） */
+    renderAlpha(now) {
+      if (!this.clock.length) return 1;
+      const a = this.serverTick(now) + this.lead() - this.L;
+      return Number.isFinite(a) ? Math.max(0, Math.min(1, a)) : 1;
     }
     frame(now) {
       if (this.ended || !this.clock.length) return;
@@ -412,7 +419,7 @@ export const SFVClient = ((SFV, SFVServer) => {
   function drawFight(ctx, s, opt) {
     const [shx, shy] = fightShake(s);
     const freezeOwner = s.frz > 0 ? s.fo - 1 : -1;
-    if (opt.three) { ctx.clearRect(0, 0, W, H); opt.three.render(s, { shake: [shx, shy], freezeOwner, faces: opt.faces }); }
+    if (opt.three) { ctx.clearRect(0, 0, W, H); opt.three.render(s, { shake: [shx, shy], freezeOwner, faces: opt.faces, prev: opt.prev, alpha: opt.alpha, posInterp: opt.posInterp, now: opt.now }); }
     ctx.save(); ctx.translate(shx, shy);
     if (!opt.three) { // 3D 還在載入或裝置不支援 WebGL：只留舞台底色和提示（不再有 2D 雞）
       drawStage(ctx);

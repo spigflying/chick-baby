@@ -89,7 +89,8 @@ import { createFight3D } from './sfv-3d';
       if (ui.sel.lockedAt >= 0 && ui.frame - ui.sel.lockedAt > 72) startMatch();
     } else if (ui.world) {
       const c = ui.world.clients[0];
-      SFVClient.drawFight(ctx, c.predicted, { three: ui.three, noWebGL: !ui.three, faces: ui.faces, showBoxes: ui.showBoxes, me: 0, names: ['MY_CHICK_BABY（你）', `MY_CHICK_BABY（${ui.opp === 'ai' ? 'CPU' : '木樁'}）`], ended: c.ended, settleText: settleText(ui.world.room) });
+      const now = performance.now();
+      SFVClient.drawFight(ctx, c.predicted, { prev: c.prevShown, alpha: c.renderAlpha(now), posInterp: true, now, three: ui.three, noWebGL: !ui.three, faces: ui.faces, showBoxes: ui.showBoxes, me: 0, names: ['MY_CHICK_BABY（你）', `MY_CHICK_BABY（${ui.opp === 'ai' ? 'CPU' : '木樁'}）`], ended: c.ended, settleText: settleText(ui.world.room) });
       SFVClient.drawFrameMeter(fmCtx, meter, ['你', ui.opp === 'ai' ? 'CPU' : '木樁']);
     }
     requestAnimationFrame(render);
