@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { SFV } from '@chick/engine';
-import { FightView, fightCandidates, smoothFightState, tally } from '../src/fight-view';
+import { FightView, MOVE_LIST_HTML, fightCandidates, smoothFightState, tally } from '../src/fight-view';
 
 const pet = (extra: Record<string, unknown> = {}) => ({ status: 'alive', sleeping: false, sick: false, ...extra });
 
@@ -26,16 +26,28 @@ describe('fight record text', () => {
 });
 
 describe('fight rendering', () => {
-  it('sends each player’s chosen mode with the invitation and acceptance', () => {
+  it('no mode choice: invitation and acceptance carry only the opponent / invite and face', () => {
     const view = Object.create(FightView.prototype) as any;
     const send = vi.fn(() => true);
     view.live = { send };
     view.dialog = { hidden: false };
-    view.pendingMode = 'beginner';
+    view.face = 'a';
     view.dialogClick({ target: { closest: () => ({ dataset: { to: 'friend' } }) } });
-    expect(send).toHaveBeenLastCalledWith({ type: 'fight.invite', to: 'friend', mode: 'beginner' });
-    view.dialogClick({ target: { closest: () => ({ dataset: { accept: '1', invite: 'round-1', mode: 'classic' } }) } });
-    expect(send).toHaveBeenLastCalledWith({ type: 'fight.reply', invite: 'round-1', accept: true, mode: 'classic' });
+    expect(send).toHaveBeenLastCalledWith({ type: 'fight.invite', to: 'friend', face: 'a' });
+    view.dialogClick({ target: { closest: () => ({ dataset: { accept: '1', invite: 'round-1' } }) } });
+    expect(send).toHaveBeenLastCalledWith({ type: 'fight.reply', invite: 'round-1', accept: true, face: 'a' });
+  });
+
+  it('the opponent picker goes straight to the list (no classic/beginner step)', () => {
+    const view = Object.create(FightView.prototype) as any;
+    view.live = { touch: false };
+    view.me = { id: 'me' };
+    view.presence = [{ id: 'me', pet: pet({ name: 'A' }) }, { id: 'f', display_name: 'F', pet: pet({ name: 'B' }) }];
+    view.dialog = { hidden: true, innerHTML: '', querySelector: () => null };
+    view.fillPickerRecords = vi.fn();
+    view.chooseOpponent();
+    expect(view.dialog.innerHTML).toContain('data-to="f"');
+    expect(view.dialog.innerHTML).not.toMatch(/data-mode|經典|初心/);
   });
 
   it('players get a rematch button that re-invites the same opponent with their own mode; spectators auto-close', () => {
@@ -53,7 +65,7 @@ describe('fight rendering', () => {
       vi.advanceTimersByTime(10_000);
       expect(view.finishView).not.toHaveBeenCalled();
       view.rematch();
-      expect(send).toHaveBeenLastCalledWith({ type: 'fight.invite', to: 'a', mode: 'beginner' });
+      expect(send).toHaveBeenLastCalledWith({ type: 'fight.invite', to: 'a' });
       view.showResult('a 獲勝', '比賽結束');
       expect(el.innerHTML).not.toContain('再打一場');
       vi.advanceTimersByTime(6000);
@@ -63,21 +75,30 @@ describe('fight rendering', () => {
     }
   });
 
-  it('shows the chosen mode’s own move list', () => {
-    const help = { innerHTML: '', textContent: '' };
+  it('players see the one-key move list beside the stage; every key works for everyone', () => {
+    expect(MOVE_LIST_HTML).toMatch(/<kbd>R<\/kbd>蛋波/);
+    expect(MOVE_LIST_HTML).toMatch(/<kbd>N<\/kbd>真空蛋波/);
+    expect(MOVE_LIST_HTML).toMatch(/<kbd>V<\/kbd>摔/);
+    expect(MOVE_LIST_HTML).toContain('↓↘→＋拳');
+    const help = { textContent: '' }, keys = { hidden: true };
     const view = Object.create(FightView.prototype) as any;
-    view.root = { querySelector: () => help };
+    view.root = { querySelector: (q: string) => (q === '.sfv-keys' ? keys : help), classList: { toggle: vi.fn() } };
     view.current = { pid: 1, players: [{ mode: 'classic' }, { mode: 'beginner' }] };
+    view.updateHelp();
+    expect(keys.hidden).toBe(false);
+    expect(view.root.classList.toggle).toHaveBeenLastCalledWith('with-keys', true);
     view.held = new Set(['KeyR']);
-    view.updateHelp();
-    expect(help.innerHTML).toContain('↓↘→＋拳');
-    expect(view.mask()).toBe(0);
-    view.current.pid = 2;
-    view.updateHelp();
-    expect(help.innerHTML).toContain('R 蛋波');
-    expect(help.innerHTML).toContain('N 真空蛋波');
-    expect(help.innerHTML).not.toContain('↓↘→＋拳');
     expect(view.mask()).toBe(SFV.EASY_HADO);
+    view.held = new Set(['KeyS', 'KeyU']);
+    expect(view.mask()).toBe(SFV.DOWN | SFV.LP);
+    view.held = new Set(['KeyH']);
+    expect(view.mask()).toBe(SFV.EASY_TATSU_EX);
+    view.held = new Set(['KeyV']);
+    expect(view.mask()).toBe(SFV.LP | SFV.LK);
+    view.current.pid = 0;
+    view.updateHelp();
+    expect(keys.hidden).toBe(true);
+    expect(help.textContent).toContain('觀戰中');
   });
 
   it('clears the previous result and its timer when a new fight starts', () => {
@@ -85,7 +106,7 @@ describe('fight rendering', () => {
     try {
       const result = { hidden: false };
       const view = Object.create(FightView.prototype) as any;
-      view.root = { querySelector: () => result };
+      view.root = { querySelector: () => result, classList: { toggle: () => {} } };
       view.banner = { hidden: true, innerHTML: '' };
       view.dialog = { hidden: true };
       view.live = { inFight: false };

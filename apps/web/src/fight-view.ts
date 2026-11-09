@@ -7,14 +7,27 @@ import type { Live } from './ws';
 import { api } from './api';
 import { art } from './art';
 
-const KEY_BITS = { KeyW: SFV.UP, KeyS: SFV.DOWN, KeyA: SFV.LEFT, KeyD: SFV.RIGHT, KeyU: SFV.LP, KeyI: SFV.HP, KeyJ: SFV.LK, KeyK: SFV.HK, KeyH: SFV.LP | SFV.LK, KeyL: SFV.HP | SFV.HK };
-// 初心 3x3：RTY / FGH / VBN（H＝EX 旋風翅，不再當摔；摔改 V）。經典模式仍用 KEY_BITS（H＝摔）。
-const BEGINNER_BITS = {
+// 不分模式：所有按鍵都能用，搓招與一鍵必殺（3×3：RTY / FGH / VBN）自己選。摔是 V（或 U＋J 同時按），H 是 EX 旋風翅。
+// 伺服器一律開 mode 1（引擎先看一鍵必殺，沒按就照搓招解析）。
+const KEY_BITS = {
+  KeyW: SFV.UP, KeyS: SFV.DOWN, KeyA: SFV.LEFT, KeyD: SFV.RIGHT, KeyU: SFV.LP, KeyI: SFV.HP, KeyJ: SFV.LK, KeyK: SFV.HK, KeyL: SFV.HP | SFV.HK,
   KeyR: SFV.EASY_HADO, KeyT: SFV.EASY_DP, KeyY: SFV.EASY_TATSU,
   KeyF: SFV.EASY_HADO_EX, KeyG: SFV.EASY_DP_EX, KeyH: SFV.EASY_TATSU_EX,
   KeyV: SFV.LP | SFV.LK, KeyB: SFV.EASY_CA, KeyN: SFV.EASY_SHINKU,
 };
-const MODE_NAME = { classic: '經典模式', beginner: '初心模式' };
+/** 旁邊的招式表：一鍵必殺照鍵盤位置排成 3×3，下面是基本操作與搓招。 */
+export const MOVE_LIST_HTML = `<b>一鍵必殺</b>
+  <div class="sfv-grid">
+    <span><kbd>R</kbd>蛋波</span><span><kbd>T</kbd>衝天啄</span><span><kbd>Y</kbd>旋風翅</span>
+    <span class="ex"><kbd>F</kbd>EX蛋波</span><span class="ex"><kbd>G</kbd>EX衝天啄</span><span class="ex"><kbd>H</kbd>EX旋風翅</span>
+    <span><kbd>V</kbd>摔</span><span class="sa"><kbd>B</kbd>火雞連環踢</span><span class="sa"><kbd>N</kbd>真空蛋波</span>
+  </div>
+  <small><i class="ex"></i>F G H 要 1 格 EX，不夠就出一般版<br><i class="sa"></i>B N 要 3 格 EX</small>
+  <b>基本操作</b>
+  <ul><li><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> 移動／後退防禦</li><li><kbd>U</kbd><kbd>I</kbd> 輕／重拳</li><li><kbd>J</kbd><kbd>K</kbd> 輕／重腳</li><li><kbd>L</kbd> 炸毛</li></ul>
+  <b>搓招也可以</b>
+  <ul><li>↓↘→＋拳 蛋波</li><li>→↓↘＋拳 衝天啄</li><li>↓↙←＋腳 旋風翅</li><li>↓↘→↓↘→＋腳／拳 火雞連環踢／真空蛋波</li></ul>
+  <small>面向左時左右相反</small>`;
 const FACE_NAME: Record<string, string> = { chick: '雞臉', a: '臉 A', b: '臉 B', c: '臉 C' };
 const FACE_KEY = 'sfv-face';
 const loadFace = () => { try { return fightFace(localStorage.getItem(FACE_KEY)); } catch { return 'chick'; } };
@@ -39,7 +52,6 @@ export class FightView {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private held = new Set<string>();
-  private pendingMode: 'classic' | 'beginner' = 'classic';
   private face: string = loadFace(); // 格鬥時用哪張臉；記在這台電腦（綁定照片臉的帳號固定用自己的）
   private current: any = null;
   private raf = 0;
@@ -56,7 +68,7 @@ export class FightView {
     this.load3d = import('./sfv-3d').then((m) => m.createFight3D, () => null);
     this.root = document.createElement('div'); this.root.className = 'sfv-live'; this.root.hidden = true;
     this.root.innerHTML = `<div class="sfv-top"><b class="sfv-title">1v1 格鬥</b><button class="sfv-close" aria-label="關閉">✕</button></div>
-      <div class="sfv-stage"><canvas class="sfv-3d" width="960" height="540"></canvas><canvas class="sfv-2d" width="960" height="540"></canvas></div><div class="sfv-help"></div><div class="sfv-result" hidden></div><div class="sfv-debug" hidden></div>`;
+      <div class="sfv-main"><div class="sfv-stage"><canvas class="sfv-3d" width="960" height="540"></canvas><canvas class="sfv-2d" width="960" height="540"></canvas></div><aside class="sfv-keys" hidden>${MOVE_LIST_HTML}</aside></div><div class="sfv-help"></div><div class="sfv-result" hidden></div><div class="sfv-debug" hidden></div>`;
     document.body.append(this.root);
     this.canvas = this.root.querySelector('canvas.sfv-2d')!; this.ctx = this.canvas.getContext('2d')!; this.ctx.imageSmoothingEnabled = false;
     this.banner = document.createElement('div'); this.banner.className = 'sfv-banner'; this.banner.hidden = true; document.body.append(this.banner);
@@ -88,7 +100,8 @@ export class FightView {
     const candidates = fightCandidates(this.presence, this.me.id);
     if (!candidates.length) return this.toast(NOTICE.NO_OPPONENT);
     this.dialog.hidden = false;
-    this.dialog.innerHTML = `<div class="sfv-card"><h3>選擇戰鬥模式</h3>${this.facePicker()}<button data-mode="classic">經典模式・搓招出必殺</button><button data-mode="beginner">初心模式・一鍵出必殺</button><button data-cancel class="alt">取消</button></div>`;
+    this.dialog.innerHTML = `<div class="sfv-card"><h3>挑戰誰？</h3>${this.facePicker()}<p class="sfv-rec" data-rec-total></p>${candidates.map((u) => `<button data-to="${u.id}">${esc(u.display_name)}・${esc(u.pet.name)}<small class="sfv-rec" data-rec="${u.id}"></small></button>`).join('')}<button data-cancel class="alt">取消</button></div>`;
+    void this.fillPickerRecords(candidates.map((u) => u.id));
   }
   /** 選臉：雞臉或照片臉；點了只換選擇，不關對話框 */
   private facePicker() {
@@ -102,15 +115,8 @@ export class FightView {
       this.dialog.querySelectorAll('[data-face]').forEach((x) => x.classList.toggle('on', (x as HTMLElement).dataset.face === this.face));
       return;
     }
-    if (b.dataset.mode && !b.dataset.accept) {
-      this.pendingMode = b.dataset.mode;
-      const candidates = fightCandidates(this.presence, this.me.id);
-      this.dialog.innerHTML = `<div class="sfv-card"><h3>${MODE_NAME[this.pendingMode]}：挑戰誰？</h3><p class="sfv-rec" data-rec-total></p>${candidates.map((u) => `<button data-to="${u.id}">${esc(u.display_name)}・${esc(u.pet.name)}<small class="sfv-rec" data-rec="${u.id}"></small></button>`).join('')}<button data-cancel class="alt">取消</button></div>`;
-      void this.fillPickerRecords(candidates.map((u) => u.id));
-      return;
-    }
-    if (b.dataset.to) { if (!this.live.send({ type: 'fight.invite', to: b.dataset.to, mode: this.pendingMode, face: this.face })) this.toast('連線中斷，稍後再試'); }
-    else if (b.dataset.accept) this.live.send({ type: 'fight.reply', invite: b.dataset.invite, accept: b.dataset.accept === '1', mode: b.dataset.mode ?? 'classic', face: this.face });
+    if (b.dataset.to) { if (!this.live.send({ type: 'fight.invite', to: b.dataset.to, face: this.face })) this.toast('連線中斷，稍後再試'); }
+    else if (b.dataset.accept) this.live.send({ type: 'fight.reply', invite: b.dataset.invite, accept: b.dataset.accept === '1', face: this.face });
     this.dialog.hidden = true;
   }
   private onLive(m: any) {
@@ -130,7 +136,7 @@ export class FightView {
       if (m.to === this.me.id && !this.live.touch) {
         this.live.inFight = true;
         this.dialog.hidden = false;
-        this.dialog.innerHTML = `<div class="sfv-card"><h3>${esc(m.from_name)} 向你挑戰！</h3><p>對方選了${MODE_NAME[m.from_mode] ?? '經典模式'}。你要用哪種模式？</p>${this.facePicker()}<button data-accept="1" data-mode="classic" data-invite="${m.invite}">經典模式接受</button><button data-accept="1" data-mode="beginner" data-invite="${m.invite}">初心模式接受</button><button data-accept="0" data-invite="${m.invite}" class="alt">拒絕</button><p>10 秒後自動拒絕</p></div>`;
+        this.dialog.innerHTML = `<div class="sfv-card"><h3>${esc(m.from_name)} 向你挑戰！</h3>${this.facePicker()}<button data-accept="1" data-invite="${m.invite}">接受挑戰</button><button data-accept="0" data-invite="${m.invite}" class="alt">拒絕</button><p>10 秒後自動拒絕</p></div>`;
       }
       return;
     }
@@ -223,39 +229,26 @@ export class FightView {
     el.innerHTML = `<b>${esc(title)}</b><span>${esc(detail)}</span><small>按 Enter 關閉，或 6 秒後自動返回</small>`;
     this.closeTimer = setTimeout(() => this.finishView(), 6000) as any;
   }
-  /** 用上一場自己的模式再邀請同一個對手；對方照一般邀請流程選模式接受。 */
+  /** 再邀請同一個對手；對方照一般邀請流程接受。 */
   rematch() {
     const c = this.current; if (!c?.pid) return;
     const opp = c.players.find((p: any) => p.pid !== c.pid);
     if (!opp) return;
-    this.pendingMode = c.players[c.pid - 1]?.mode ?? 'classic';
-    if (!this.live.send({ type: 'fight.invite', to: opp.user_id, mode: this.pendingMode, face: this.face })) this.toast('連線中斷，稍後再試');
+    if (!this.live.send({ type: 'fight.invite', to: opp.user_id, face: this.face })) this.toast('連線中斷，稍後再試');
   }
   private finishView() { clearTimeout(this.closeTimer); this.closeView(); this.banner.hidden = true; this.current = null; this.visual = null; this.held.clear(); }
   private openView() { if (!this.current) return; if (this.root.hidden) { this.visual = null; this.lastDrawAt = 0; } this.root.hidden = false; }
   private closeView() { if (!this.current || (!this.current.result && !this.current.aborted && this.current.pid)) return; this.root.hidden = true; }
   private updateHelp() {
     const help = this.root.querySelector('.sfv-help') as HTMLElement;
-    if (!this.current?.pid) { help.textContent = '觀戰中・按 Esc 返回家裡'; return; }
-    const mode = this.current.players[this.current.pid - 1].mode;
-    help.innerHTML = mode === 'beginner'
-      ? '<b>初心模式出招表</b>　WASD 移動／後退防禦　U/I 拳　J/K 腳　L 炸毛<br>'
-        + '一鍵必殺（3×3）：<br>'
-        + 'R 蛋波　T 衝天啄　Y 旋風翅<br>'
-        + 'F EX蛋波　G EX衝天啄　H EX旋風翅（各需 1 格 EX，不足則出通常版）<br>'
-        + 'V 摔　B 火雞連環踢　N 真空蛋波（B／N 需 3 格 EX）'
-      : '<b>經典模式出招表</b>　WASD 移動／後退防禦　U/I 拳　J/K 腳（面向左時左右相反）<br>↓↘→＋拳 蛋波　→↓↘＋拳 衝天啄（昇龍）　↓↙←＋腳 旋風翅　↓↘→↓↘→＋腳 火雞連環踢／＋拳 真空蛋波（3 格 EX）　H 摔　L 炸毛';
+    const playing = !!this.current?.pid;
+    (this.root.querySelector('.sfv-keys') as HTMLElement).hidden = !playing;
+    this.root.classList.toggle('with-keys', playing);
+    help.textContent = playing ? '' : '觀戰中・按 Esc 返回家裡';
   }
   private mask() {
-    const beginner = this.current?.players[this.current.pid - 1]?.mode === 'beginner';
     let m = 0;
-    for (const code of this.held) {
-      if (beginner) {
-        // KeyH 在初心只走 BEGINNER_BITS（EX 旋風翅），不要套到經典的摔
-        if (BEGINNER_BITS[code] !== undefined) m |= BEGINNER_BITS[code];
-        else if (code !== 'KeyH' && KEY_BITS[code] !== undefined) m |= KEY_BITS[code];
-      } else if (KEY_BITS[code] !== undefined) m |= KEY_BITS[code];
-    }
+    for (const code of this.held) if (KEY_BITS[code] !== undefined) m |= KEY_BITS[code];
     return m;
   }
   private keyDown = (e: KeyboardEvent) => {
@@ -267,14 +260,10 @@ export class FightView {
       return;
     }
     if (!this.current?.pid) { if (e.code === 'Escape') { e.preventDefault(); this.closeView(); } return; }
-    const beginner = this.current.players[this.current.pid - 1]?.mode === 'beginner';
-    const known = beginner
-      ? (BEGINNER_BITS[e.code] !== undefined || (e.code !== 'KeyH' && KEY_BITS[e.code] !== undefined))
-      : KEY_BITS[e.code] !== undefined;
-    if (known) { e.preventDefault(); this.held.add(e.code); }
+    if (KEY_BITS[e.code] !== undefined) { e.preventDefault(); this.held.add(e.code); }
   };
   private keyUp = (e: KeyboardEvent) => {
-    if (KEY_BITS[e.code] !== undefined || BEGINNER_BITS[e.code] !== undefined) this.held.delete(e.code);
+    if (KEY_BITS[e.code] !== undefined) this.held.delete(e.code);
   };
   private blur = () => this.held.clear();
   private draw = () => {

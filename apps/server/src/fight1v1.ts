@@ -52,7 +52,8 @@ function output(m: any) {
   void deps.bus.publish(msg).catch(() => {});
 }
 function notice(home: string, user: string, code: string) { output({ t: 'fight.notice', home, user, code }); }
-function validMode(mode: unknown): mode is FightMode { return mode === 'classic' || mode === 'beginner'; }
+// 不再讓玩家選模式：所有人一律用 mode 1（一鍵必殺＋搓招都能出）。舊版頁面送來的 mode 直接忽略。
+const UNIFIED: FightMode = 'beginner';
 /** 綁定照片臉的帳號一律用自己的臉（不管送來什麼）；其他人用自己選的 */
 const playerFace = (user: string, choice: unknown): FightFace => (env.fightFaceUsers.get(user) as FightFace | undefined) ?? fightFace(choice);
 function user(home: string, id: string): PresenceUser | undefined { return deps!.presence.users(home).find((u) => u.id === id); }
@@ -98,8 +99,8 @@ function handleIntent(m: any) {
   else if (m.t === 'fight.in') input(m.home, m.user, m);
 }
 
-export function invite(home: string, from: string, to: string, now = Date.now(), fromKey = deps?.presence.desktopKey(home, from) ?? '', mode: FightMode = 'classic', face?: unknown) {
-  if (!validMode(mode)) return notice(home, from, 'BAD_MODE');
+export function invite(home: string, from: string, to: string, now = Date.now(), fromKey = deps?.presence.desktopKey(home, from) ?? '', _mode?: unknown, face?: unknown) {
+  const mode = UNIFIED;
   if (typeof to !== 'string' || to === from) return notice(home, from, 'NO_OPPONENT');
   if (fightBusy(home)) return notice(home, from, 'FIGHT_BUSY');
   const why = startBlock(home, from, to, now); if (why) return notice(home, from, why);
@@ -107,10 +108,10 @@ export function invite(home: string, from: string, to: string, now = Date.now(),
   invites.set(home, inv);
   output({ t: 'fight.event', home, kind: 'invite', invite: inv.id, from, from_name: user(home, from)?.display_name ?? '?', from_mode: mode, to, left_ms: INVITE_MS });
 }
-export function reply(home: string, who: string, id: string, accept: boolean, key?: string, mode: FightMode = 'classic', face?: unknown) {
+export function reply(home: string, who: string, id: string, accept: boolean, key?: string, _mode?: unknown, face?: unknown) {
+  const mode = UNIFIED;
   const inv = invites.get(home);
   if (!inv || inv.id !== id || inv.to !== who) return notice(home, who, 'INVITE_GONE');
-  if (accept && !validMode(mode)) return notice(home, who, 'BAD_MODE');
   invites.delete(home);
   if (!accept) return output({ t: 'fight.event', home, kind: 'invite_cancel', invite: id, from: inv.from, to: inv.to, code: 'DECLINED' });
   const why = startBlock(home, inv.from, inv.to); if (why) return output({ t: 'fight.event', home, kind: 'invite_cancel', invite: id, from: inv.from, to: inv.to, code: why });
