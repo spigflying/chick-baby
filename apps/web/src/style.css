@@ -529,5 +529,28 @@ button.ftile{font:inherit;color:inherit;cursor:pointer}button.ftile:hover{border
 .bk-slot.done{background:#eff5d9;border-color:#6c914d;cursor:pointer}.bk-slot.done small{color:#4f772e;font-weight:800}
 .bk-slot.empty,.bk-slot.locked{border-style:dashed;color:#ad8d65}.bk-slot.empty{font-size:28px}.bk-slot.empty small{font-size:10px}
 .bakery-panel .bk-collect,.bakery-panel .bk-upgrade{width:100%;margin-top:10px;font-size:12px}
+/* 雞舍沿用加工屋的暖色面板，兩隻母雞各自顯示餵食、產蛋與採收狀態。 */
+.farm.storybook .farm-panel.coop-panel{width:min(700px,92%);top:10%;bottom:10%;border-color:#9f7347;background:#f7ebd2}
+.farm.storybook .coop-panel .bakery-head{background:linear-gradient(#bb875b,#835532);border-bottom:2px solid #684222}
+.farm.storybook .coop-panel .bakery-head img.fic{object-fit:contain;background:#fff0cd;border:1px solid #d0a96d;filter:none}
+.farm.storybook .coop-panel .cp-body{background:linear-gradient(#fbf4df,#ead7b4);color:#54391f}
+.farm.storybook .coop-panel .fbtn.go{background:#a4b477;color:#314527}
+.cp-note{margin:2px 0 4px;font-size:13px;color:#775638}
+.cp-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.cp-card{display:flex;flex-direction:column;gap:12px;padding:13px;border:2px solid #c5a06a;border-radius:15px;background:#fff8e9;box-shadow:0 3px 0 #bca07466}
+.cp-hen,.cp-product,.cp-feed{display:flex;align-items:center;gap:10px}
+.cp-hen{padding-bottom:10px;border-bottom:1px dashed #c8a977}
+.cp-hen .cp-icon{width:100px;height:100px;flex:none}
+.cp-hen span,.cp-product span,.cp-feed span{display:flex;flex-direction:column;gap:3px}
+.cp-hen b{font-size:18px}.cp-hen small,.cp-product small,.cp-feed small{font-size:12px;color:#806448}
+.cp-product,.cp-feed{min-height:95px;padding:7px;border:2px solid #dfc596;border-radius:12px;background:#fffdf2}
+.cp-product .cp-icon,.cp-feed .cp-icon{width:80px;height:80px;flex:none}
+.cp-product b,.cp-feed b{font-size:15px}
+.cp-product.growing .cp-icon{opacity:.55}
+.cp-feed strong{margin-left:auto;font-size:16px;color:#486a2c;white-space:nowrap}
+.cp-feed.short{border-color:#d98873;background:#fff0e9}.cp-feed.short strong{color:#c73d30}
+.cp-action{width:100%;margin-top:auto;padding:9px;font-size:15px;font-weight:900}
+.cp-wait{margin:0;padding:30px 8px;color:#806448;text-align:center}
+@media(max-width:650px){.cp-cards{grid-template-columns:1fr}.cp-hen .cp-icon{width:75px;height:75px}}
 @media(max-width:850px){.bk-layout{grid-template-columns:170px minmax(0,1fr)}.bk-queue{grid-column:1/-1;border-left:0;border-top:2px solid #c5a06a}.bk-slots{grid-template-columns:repeat(4,1fr)}.bk-queue .fbtn{max-width:220px}.bk-product .bk-icon{width:48px;height:48px}}
 @media (prefers-reduced-motion: reduce){.farm{transition:none}.ftool:hover{transform:none}}
