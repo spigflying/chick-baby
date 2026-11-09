@@ -77,7 +77,7 @@ export const SFV = (() => {
     defineMove({ id: '2HK', limb: 'leg', name: '掃堂腿', ...HEAVY, posture: 'crouch', guard: 'low', kd: true, startup: 8, active: 3, recovery: 26, dmg: 90, stun: 150, blockstun: 16, hitbox: [14, -14, 74, 14], hurtExt: [14, -18, 66, 18] }),
     defineMove({ id: '8HP', limb: 'arm', name: '跳重拳', ...HEAVY, air: true, guard: 'overhead', startup: 7, active: 5, recovery: 8, dmg: 80, stun: 150, hitstun: 18, blockstun: 15, hitbox: [10, -44, 44, 26], hurtExt: [10, -48, 36, 30] }),
     defineMove({ id: '8HK', limb: 'leg', name: '跳重腳', ...HEAVY, air: true, guard: 'overhead', startup: 8, active: 6, recovery: 8, dmg: 90, stun: 150, hitstun: 18, blockstun: 15, hitbox: [6, -60, 60, 20], hurtExt: [6, -64, 52, 24] }),
-    defineMove({ id: 'THROW', limb: 'arm', both: true, name: '摔技', kind: 'throw', startup: 5, active: 2, recovery: 20, dmg: 120, stun: 150, throwBox: [12, -84, 40, 64], hurtExt: [12, -80, 30, 40] }),
+    defineMove({ id: 'THROW', limb: 'arm', both: true, name: '摔技', kind: 'throw', startup: 5, active: 2, recovery: 20, dmg: 120, stun: 150, throwBox: [12, -84, 65, 64], hurtExt: [12, -80, 30, 40] }),
     // 快按兩下：後退步前 2 tick 不會被摔、3～9 tick 小跳離地（地面摔抓不到，但打得到），之後是破綻；前衝沒有無敵
     defineMove({ id: 'BDASH', name: '後退步', kind: 'system', startup: 1, recovery: 22, invuln: [[1, 2, 'throw']], vel: [[1, 2, -7, null], [3, 3, -7, -4], [4, 10, -7, null], [11, 14, -3, null]] }),
     defineMove({ id: 'FDASH', name: '前衝', kind: 'system', startup: 1, recovery: 16, vel: [[1, 12, 8, null], [13, 16, 2, null]] }),
