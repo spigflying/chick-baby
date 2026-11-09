@@ -20,7 +20,7 @@
    ```json
    { "notes": ["丟大便可以無限丟了：對戰中只受 0.5 秒冷卻限制", "下樓梯排行榜：開始前先看全部寵物的最佳樓層"] }
    ```
-2. 跟程式一起 commit、push，照平常部署（`gcloud builds submit --tag …` → `gcloud run deploy chick-baby --image …`）。
+2. 跟程式一起 commit、push：非開放時間會自動部署，開放時間要手動執行 workflow（見 §10）。
 3. 驗證：`curl -s https://chick.thesilvertrees.com/api/status` 裡的 `build` 變成新的值、`notes` 是剛寫的內容。
 
 運作方式（給開發者）：
@@ -319,12 +319,42 @@ gcloud scheduler jobs describe chick-db-stop --location=$REGION --format='value(
 
 休息時段打開網頁應顯示「小雞睡覺中」，不會出現錯誤頁。
 
-## 10. 更新版本
+## 10. 更新版本（GitHub Actions 自動部署，2026-11-09 起）
+
+push 到 `main` 就會跑 `.github/workflows/deploy.yml`：用 GitHub 上那個 commit 建置映像（Dockerfile 內跑 typecheck 與測試），**本機沒 commit 的東西不會上線**。
+
+| 觸發 | 時間（台北） | 結果 |
+|---|---|---|
+| push main | 平日 09:00–20:00（開放時間） | 只建置＋測試，**不部署**（換版會中止進行中的對戰／下樓梯） |
+| push main | 其他時間 | 建置＋測試＋部署 |
+| Actions 頁手動執行（`workflow_dispatch`） | 任何時間 | 一定部署 |
+
+只改 `*.md`、`docs/`、`design/` 不觸發。開放時間推的 commit 不會自動補部署：等下一次非開放時間的 push，或手動執行。
+
+手動執行：GitHub → Actions → 「測試與部署」→ Run workflow；或
+`GH_TOKEN=$(gh auth token --user spigflying) gh workflow run deploy.yml -R spigflying/chick-baby --ref main`
+
+**權限（Workload Identity Federation，不用 JSON key）**：pool `github`（與 vote_lab 共用）下的 provider `chick-baby`，條件 `repository_id=='1416379139' && ref=='refs/heads/main'`；只有這個 repo 的 main 換得到 `chick-deployer@silver-greens.iam.gserviceaccount.com`。該 SA 只有：
 
 ```bash
-export TAG=$(git rev-parse --short HEAD)
-gcloud builds submit --tag $IMAGE:$TAG .
-gcloud run deploy $SERVICE --image=$IMAGE:$TAG
+SA=chick-deployer@$PROJECT_ID.iam.gserviceaccount.com
+gcloud iam service-accounts add-iam-policy-binding $SA --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/spigflying/chick-baby"
+gcloud artifacts repositories add-iam-policy-binding $REPO --location=$REGION --role=roles/artifactregistry.writer --member=serviceAccount:$SA
+gcloud run services add-iam-policy-binding $SERVICE --region=$REGION --role=roles/run.developer --member=serviceAccount:$SA
+gcloud iam service-accounts add-iam-policy-binding $RUN_SA --role=roles/iam.serviceAccountUser --member=serviceAccount:$SA
+```
+
+workflow 只換映像（`gcloud run deploy --image`），環境變數、secret、Cloud SQL、資源設定沿用目前的服務；要改那些仍照 §7 手動下指令。
+
+**映像清理**：`chick` repo 設了清理規則，只保留最近 10 個映像（舊的自動刪；回滾只能回到這 10 個以內）。
+
+**緊急手動部署**（Actions 壞掉時）：從 GitHub 上的 commit 建置，不要從本機工作目錄（會把沒 commit 的東西帶上線）：
+
+```bash
+SHA=$(git rev-parse HEAD)   # 要先 push
+gcloud builds submit https://github.com/spigflying/chick-baby --git-source-revision=$SHA --tag $IMAGE:${SHA:0:7}
+gcloud run deploy $SERVICE --image=$IMAGE:${SHA:0:7}
 ```
 
 Cloud Run 換版時會送 SIGTERM：伺服器廣播 `server.draining`、把進行中的下樓梯標記為 `aborted`（不發獎勵、不扣精力），然後關閉連線；客戶端自動重連到新版本。
