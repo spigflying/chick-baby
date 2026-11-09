@@ -127,7 +127,7 @@ describe('hit / block FX v2', () => {
     const t0 = superScreenTint(s);
     expect(t0.active).toBe(true);
     expect(t0.id).toBe('SHINKU');
-    expect(t0.hex).toBe(0x0c0820);
+    expect(t0.hex).toBe(0x221868);
     while (s.frz > 0) run(s, [0], [0]);
     let saw = false;
     for (let k = 0; k < 120; k++) {

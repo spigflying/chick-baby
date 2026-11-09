@@ -241,9 +241,10 @@ export function superScreenTint(s) {
   let alpha = 1;
   if (elapsed < SUPER_FADE) alpha = (elapsed + 1) / SUPER_FADE;
   else if (total - elapsed <= SUPER_FADE) alpha = Math.max(0, (total - elapsed) / SUPER_FADE);
+  // 更飽和：CA 墨紅橘、SHINKU 藍紫（只染舞台，角色亮度另維持）
   const ca = id === 'CA';
-  const color = ca ? 'rgba(90, 18, 8, 1)' : 'rgba(28, 16, 72, 1)';
-  const hex = ca ? 0x1a0806 : 0x0c0820;
+  const color = ca ? 'rgba(200, 48, 12, 1)' : 'rgba(56, 36, 160, 1)';
+  const hex = ca ? 0x6e180a : 0x221868;
   return { active: true, owner, id, alpha, color, hex, elapsed, total };
 }
 /** 大招染色只改 3D 舞台背景／地板／牆，不再蓋全螢幕疊層（避免角色／HUD 一起變色）。 */

@@ -481,9 +481,9 @@ export function createFight3D(canvas) {
       if (a > 0) {
         bgTmp.setHex(tint.hex);
         scene.background.copy(bgTmp);
-        floorTint.setHex(0xffffff).lerp(bgTmp, 0.72 * a); floor.material.color.copy(floorTint);
-        wallTint.copy(wallBase).lerp(bgTmp, 0.85 * a); wall.material.color.copy(wallTint);
-        sideTint.copy(sideBase).lerp(bgTmp, 0.55 * a);
+        floorTint.setHex(0xffffff).lerp(bgTmp, 0.88 * a); floor.material.color.copy(floorTint);
+        wallTint.copy(wallBase).lerp(bgTmp, 0.95 * a); wall.material.color.copy(wallTint);
+        sideTint.copy(sideBase).lerp(bgTmp, 0.7 * a);
         for (const m of sideWalls) m.material.color.copy(sideTint);
       } else {
         scene.background.setHex(fo >= 0 ? 0x0e1018 : 0x1b1f2e);
