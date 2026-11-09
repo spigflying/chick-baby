@@ -46,8 +46,78 @@ function drawLayer(ctx, name, p, off, o) {
 }
 
 // ---------- 受擊／防禦特效（純畫面，從狀態的邊緣推出來：防守方 hs 由 0 變正） ----------
+// HIT＝黃白星爆（貼在受擊框重疊處）；BLOCK＝不畫光（3D 模型純畫面抖動）；大招＝全場變色。
 const FX = { list: [] as any[], prev: null as any };
 const hrng = (seed) => { let s = (seed | 0) || 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
+/** light / special / heavy / super → 命中火花大小（防禦不再畫光圈） */
+const FX_STR = {
+  light: { hitLife: 9, hitR: 22, spikes: 8 },
+  special: { hitLife: 10, hitR: 28, spikes: 10 },
+  heavy: { hitLife: 12, hitR: 34, spikes: 12 },
+  super: { hitLife: 12, hitR: 40, spikes: 14 },
+};
+function fxStr(s, ai, a, d, dmg) {
+  const mv = a.mv >= 0 ? SFV.MOVE_LIST[a.mv] : null;
+  if (mv?.kind === 'super') return 'super';
+  if (mv?.kind === 'special' || (mv && mv.projectile)) return 'special';
+  if (!SFV.hitboxOf(a) && s.pr.some((q) => q.o === ai)) return 'special';
+  // 飛彈命中當幀彈已消耗、攻擊方常已收招（mv=-1）：用 hs／傷害區分（蛋波 hs=8 dmg=60；輕常規 hs=9）
+  if (!mv) {
+    if (d.hs >= 13) return 'heavy';
+    if (d.hs <= 8 || dmg >= 50) return 'special';
+    return 'light';
+  }
+  if (mv.light || d.hs < 13) return 'light';
+  return 'heavy';
+}
+/** AABB 交集；無重疊回 null */
+function aabbOverlap(a, b) {
+  const x0 = Math.max(a[0], b[0]), y0 = Math.max(a[1], b[1]);
+  const x1 = Math.min(a[0] + a[2], b[0] + b[2]), y1 = Math.min(a[1] + a[3], b[1] + b[3]);
+  if (x1 <= x0 || y1 <= y0) return null;
+  return [x0, y0, x1 - x0, y1 - y0];
+}
+/** 命中點＝攻擊框／飛彈 ∩ 防守受擊框的重心，再夾進防守方身體剪影內側 */
+function contactPoint(s, ai, a, d) {
+  const hurts = SFV.hurtboxes(d);
+  let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+  for (const h of hurts) {
+    bx0 = Math.min(bx0, h[0]); by0 = Math.min(by0, h[1]);
+    bx1 = Math.max(bx1, h[0] + h[2]); by1 = Math.max(by1, h[1] + h[3]);
+  }
+  if (!hurts.length || !(bx1 > bx0 && by1 > by0)) {
+    return { wx: d.x + d.f * 10, wy: d.y - (d.cr ? 40 : 55) };
+  }
+  const bodyW = bx1 - bx0, bodyH = by1 - by0;
+  let atk = null;
+  const hb = SFV.hitboxOf(a);
+  if (hb) atk = hb.box;
+  else {
+    const q = s.pr.find((p) => p.o === ai && p.n > 0);
+    if (q) atk = SFV.projBox(q);
+  }
+  let cx, cy;
+  if (atk) {
+    let best = null, bestArea = 0;
+    for (const h of hurts) {
+      const inter = aabbOverlap(atk, h);
+      if (!inter) continue;
+      const area = inter[2] * inter[3];
+      if (area > bestArea) { bestArea = area; best = inter; }
+    }
+    if (best) { cx = best[0] + best[2] / 2; cy = best[1] + best[3] / 2; }
+  }
+  if (cx == null) {
+    // 飛彈已消耗等：取防守方朝向攻擊者的身體前緣
+    const toward = Math.sign(a.x - d.x) || d.f;
+    cx = toward > 0 ? bx1 - bodyW * 0.22 : bx0 + bodyW * 0.22;
+    cy = by0 + bodyH * 0.42;
+  }
+  const m = 0.16; // 夾進剪影內側，避免飄到身外
+  cx = Math.min(Math.max(cx, bx0 + bodyW * m), bx1 - bodyW * m);
+  cy = Math.min(Math.max(cy, by0 + bodyH * m), by1 - bodyH * m);
+  return { wx: cx, wy: cy, body: [bx0, by0, bodyW, bodyH] };
+}
 function trackFx(s) {
   const pv = FX.prev;
   if (pv && s.tick !== pv.tick) {
@@ -56,48 +126,115 @@ function trackFx(s) {
     FX.list = FX.list.filter((f) => f.t < 30);
     if (s.tick < pv.tick) FX.list = [];
     for (let i = 0; i < 2; i++) {
-      const d = s.p[i], a = s.p[1 - i];
+      const d = s.p[i], a = s.p[1 - i], ai = 1 - i;
       const started = d.hs > 0 && (pv.hs[i] === 0 || d.hs > pv.hs[i]);
       const st = SFV.ST_NAME[d.st];
       if (!started || !(st === 'HIT' || st === 'BLOCK' || st === 'AIRHIT' || st === 'KD' || st === 'DIZZY' || st === 'KO')) continue;
       const kind = st === 'BLOCK' ? 'block' : 'hit';
-      const hb = SFV.hitboxOf(a), wy = hb ? hb.box[1] + hb.box[3] / 2 : d.y - (d.cr ? 45 : 70);
-      FX.list.push({ kind, t: 0, wx: d.x + d.f * 16, wy, f: d.f, heavy: d.hs >= 13, dmg: Math.max(0, pv.hp[i] - d.hp), counter: kind === 'hit' && d.ch > 0 && pv.ch[i] === 0, def: i, seed: s.tick * 31 + i });
+      const { wx, wy } = contactPoint(s, ai, a, d);
+      const dmg = Math.max(0, pv.hp[i] - d.hp);
+      const str = fxStr(s, ai, a, d, dmg);
+      FX.list.push({
+        kind, t: 0, wx, wy, f: d.f, str, heavy: str === 'heavy' || str === 'super' || d.hs >= 13,
+        dmg,
+        counter: kind === 'hit' && d.ch > 0 && pv.ch[i] === 0,
+        def: i, seed: s.tick * 31 + i,
+      });
     }
   }
   FX.prev = { tick: s.tick, hs: s.p.map((p) => p.hs), hp: s.p.map((p) => p.hp), ch: s.p.map((p) => p.ch) };
 }
-function blockFx(ctx, f) {
-  const life = f.heavy ? 4 : 3; if (f.t >= life) return;
-  const x = f.wx, y = GROUND + f.wy, sc = 0.75, r = hrng(f.seed * 13 + 3), face = -f.f;
-  ctx.save(); ctx.globalAlpha = 1 - f.t / life; ctx.lineCap = 'round'; ctx.strokeStyle = 'rgba(120,200,240,0.9)'; ctx.lineWidth = 2 * sc;
-  for (let i = 0; i < 3; i++) { const an = (face > 0 ? Math.PI : 0) + (r() - 0.5) * 1.6, L = (8 + r() * 6) * sc; ctx.beginPath(); ctx.moveTo(x + Math.cos(an) * 3 * sc, y + Math.sin(an) * 3 * sc); ctx.lineTo(x + Math.cos(an) * L, y + Math.sin(an) * L); ctx.stroke(); }
-  ctx.fillStyle = 'rgba(235,250,255,1)'; ctx.beginPath(); ctx.arc(x, y, 3 * sc, 0, 7); ctx.fill(); ctx.restore();
-}
 function hitFx(ctx, f) {
-  const life = f.heavy ? 7 : 5, x = f.wx, y = GROUND + f.wy, sc = f.heavy ? 1.2 : 0.85, t = f.t, r = hrng(f.seed * 7 + 1);
+  if (f.kind !== 'hit') return;
+  const cfg = FX_STR[f.str] || FX_STR.light, life = cfg.hitLife;
+  const x = f.wx, y = GROUND + f.wy, t = f.t, r = hrng(f.seed * 7 + 1);
   if (t < life) {
-    const R = (f.heavy ? 15 : 14) * sc * (t < 2 ? 1 : 1 - (t - 2) / life);
-    ctx.save(); ctx.globalAlpha = 1 - t / life;
-    const g = ctx.createRadialGradient(x, y, 1, x, y, Math.max(2, R)); g.addColorStop(0, 'rgba(255,250,235,1)'); g.addColorStop(0.45, 'rgba(255,140,40,0.9)'); g.addColorStop(1, 'rgba(230,60,20,0)');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, Math.max(2, R), 0, 7); ctx.fill();
-    ctx.strokeStyle = '#140604'; ctx.lineCap = 'round'; ctx.lineWidth = 2.5 * sc;
-    for (let i = 0; i < (f.heavy ? 6 : 4); i++) { const an = r() * 6.283, L0 = R * 0.6, L = R * (1.1 + r() * 0.5); ctx.beginPath(); ctx.moveTo(x + Math.cos(an) * L0, y + Math.sin(an) * L0); ctx.lineTo(x + Math.cos(an) * L, y + Math.sin(an) * L); ctx.stroke(); }
+    const u = t / life;
+    const pop = t < 2 ? 0.7 + t * 0.2 : 1 - (t - 2) / Math.max(1, life - 2) * 0.85;
+    const R = cfg.hitR * Math.max(0.2, pop);
+    ctx.save(); ctx.globalAlpha = Math.max(0, 1 - u * 0.95);
+    const g = ctx.createRadialGradient(x, y, 1, x, y, Math.max(2, R));
+    g.addColorStop(0, 'rgba(255,255,255,1)');
+    g.addColorStop(0.35, 'rgba(255,240,120,0.95)');
+    g.addColorStop(0.7, 'rgba(255,190,40,0.55)');
+    g.addColorStop(1, 'rgba(255,140,20,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, Math.max(2, R * 0.72), 0, 7); ctx.fill();
+    ctx.lineCap = 'round';
+    for (let i = 0; i < cfg.spikes; i++) {
+      const an = (i / cfg.spikes) * Math.PI * 2 + r() * 0.35;
+      const L0 = R * 0.25, L1 = R * (1.05 + r() * 0.45);
+      ctx.strokeStyle = i % 2 ? 'rgba(255,255,230,0.95)' : 'rgba(255,210,60,0.9)';
+      ctx.lineWidth = (i % 2 ? 2.8 : 2) * (1 - u * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(an) * L0, y + Math.sin(an) * L0);
+      ctx.lineTo(x + Math.cos(an) * L1, y + Math.sin(an) * L1);
+      ctx.stroke();
+    }
     ctx.restore();
   }
   if (f.dmg > 0 && t < 12) {
+    const sc = cfg.hitR / 28;
     ctx.save(); ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'; ctx.lineWidth = 3; ctx.strokeStyle = '#140604'; ctx.fillStyle = '#ffd9a0'; ctx.globalAlpha = 1 - t / 12;
     const ty = y - 26 * sc - t; ctx.strokeText(String(f.dmg), x + 10, ty); ctx.fillText(String(f.dmg), x + 10, ty); ctx.restore();
   }
 }
-/** 畫面晃動（4 tick，不綁 hit-stop 長度）：回傳位移，呼叫端 translate */
+/** 畫面晃動（命中用，短）：回傳位移。防禦抖動改由 3D 模型純畫面 offset，不經這裡。 */
 export function fightShake(s) {
   trackFx(s);
   const ev = FX.list[FX.list.length - 1]; if (!ev || ev.kind !== 'hit') return [0, 0];
   const amp = (ev.heavy ? 2.5 : 1.5) * Math.max(0, 1 - ev.t / 4); if (amp <= 0.3) return [0, 0];
   return [(s.tick % 2 ? 1 : -1) * amp, (s.tick % 3 - 1) * amp * 0.5];
 }
-export function drawFightFx(ctx) { if (!ART.ready) return; for (const f of FX.list) (f.kind === 'block' ? blockFx : hitFx)(ctx, f); }
+/** 只畫命中火花；防禦不再畫藍白圈 */
+export function drawFightFx(ctx) { for (const f of FX.list) if (f.kind === 'hit') hitFx(ctx, f); }
+
+/** 大招全場變色：從暗場／起動到招式完全結束（含 SHINKU 光束段）。純畫面，由狀態推導。 */
+const SUPER_FADE = 6;
+export function superScreenTint(s) {
+  let owner = -1, mv = null;
+  if (s.frz > 0 && s.fo) {
+    owner = s.fo - 1;
+    const p = s.p[owner];
+    mv = p.mv >= 0 ? SFV.MOVE_LIST[p.mv] : null;
+    if (mv?.kind !== 'super') mv = null;
+  }
+  if (!mv) {
+    owner = -1;
+    for (let i = 0; i < 2; i++) {
+      const p = s.p[i];
+      if (p.st !== SFV.ST.MOVE) continue;
+      const m = SFV.MOVE_LIST[p.mv];
+      if (m?.kind !== 'super') continue;
+      owner = i; mv = m; break;
+    }
+  }
+  if (owner < 0 || !mv) return { active: false, owner: -1, id: '', alpha: 0, color: 'rgba(0,0,0,0)', hex: 0x000000 };
+  const id = mv.id;
+  const freezeTotal = 30; // SFV.SUPER_FREEZE
+  const moveLen = mv.S + mv.A + mv.R;
+  const total = freezeTotal + moveLen;
+  // 凍結段＋招式段串成一條時間軸，避免凍結結束又淡入一次
+  const elapsed = (s.frz > 0 && s.fo === owner + 1)
+    ? (freezeTotal - s.frz)
+    : (freezeTotal + Math.max(0, s.p[owner].mt));
+  let alpha = 1;
+  if (elapsed < SUPER_FADE) alpha = (elapsed + 1) / SUPER_FADE;
+  else if (total - elapsed <= SUPER_FADE) alpha = Math.max(0, (total - elapsed) / SUPER_FADE);
+  const ca = id === 'CA';
+  const color = ca ? 'rgba(90, 18, 8, 1)' : 'rgba(28, 16, 72, 1)';
+  const hex = ca ? 0x1a0806 : 0x0c0820;
+  return { active: true, owner, id, alpha, color, hex, elapsed, total };
+}
+/** 大招染色只改 3D 舞台背景／地板／牆（見 sfv-3d），不蓋全螢幕疊層。 */
+
+export const __fxTest = {
+  reset() { FX.list = []; FX.prev = null; },
+  list: () => FX.list,
+  str: FX_STR,
+  track: trackFx,
+  contactPoint,
+  superScreenTint,
+};
 
 /** 用水墨圖畫一隻雞；沒圖（還沒畫的招式）回 false，呼叫端改畫舊的火柴雞 */
 export function drawArtChick(ctx, s, i) {

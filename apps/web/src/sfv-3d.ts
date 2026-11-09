@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { OutlineEffect } from 'three/examples/jsm/effects/OutlineEffect.js';
 import { SFV } from '@chick/engine';
 import { art } from './art';
+import { superScreenTint } from './sfv-art';
 
 const W = 960, H = 540, GROUND = 470, FOV = 30;
 
@@ -344,11 +345,14 @@ export function createFight3D(canvas) {
     const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(8, 6); t.colorSpace = THREE.SRGBColorSpace; return t; })();
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(3000, 1600), new THREE.MeshLambertMaterial({ map: tex })); floor.rotation.x = -HALF; floor.position.z = -300; scene.add(floor);
   const wall = new THREE.Mesh(new THREE.PlaneGeometry(4000, 1200), new THREE.MeshLambertMaterial({ color: 0x232838 })); wall.position.set(0, 400, -1100); scene.add(wall);
+  const sideWalls = [];
   for (const sx of [-1, 1]) {
     const x = sx * (W / 2 - SFV.WALL / 2);
     const m = new THREE.Mesh(new THREE.BoxGeometry(SFV.WALL, GROUND - 90, 30), new THREE.MeshBasicMaterial({ color: 0xff3b3b, transparent: true, opacity: 0.22, depthWrite: false }));
-    m.position.set(x, (GROUND - 90) / 2, -20); scene.add(m);
+    m.position.set(x, (GROUND - 90) / 2, -20); scene.add(m); sideWalls.push(m);
   }
+  const floorBase = new THREE.Color(0xffffff), wallBase = new THREE.Color(0x232838), sideBase = new THREE.Color(0xff3b3b);
+  const floorTint = new THREE.Color(), wallTint = new THREE.Color(), sideTint = new THREE.Color(), bgTmp = new THREE.Color();
   const chicks = [0, 1].map((i) => new Chick(scene, i, grad));
   const hsPrev = [0, 0], hpPrev = [SFV.HP_MAX, SFV.HP_MAX];
   let lastTick = -1;
@@ -356,8 +360,11 @@ export function createFight3D(canvas) {
 
   function place(c, p, s, i, freeze) {
     const pose = poseFor(p, s), f = p.f;
-    const shaking = p.hs > 0 && (p.st === SFV.ST.HIT || p.st === SFV.ST.BLOCK || p.st === SFV.ST.AIRHIT);
-    c.root.position.set(p.x - W / 2 + (shaking ? (s.tick & 1 ? 3 : -3) : 0), -p.y, 0);
+    // 純畫面位移：不改引擎 hs／blockstun／推擠；只在既有 hs 幀抖。
+    let jx = 0;
+    if (p.hs > 0 && p.st === SFV.ST.BLOCK) jx = (s.tick & 1) ? 5 : -5;
+    else if (p.hs > 0 && (p.st === SFV.ST.HIT || p.st === SFV.ST.AIRHIT)) jx = (s.tick & 1) ? 3 : -3;
+    c.root.position.set(p.x - W / 2 + jx, -p.y, 0);
     c.root.scale.set(f, 1, 1);
     c.yaw.rotation.set(0, -YAW + pose.spin, 0);
     c.hips.position.y = c.hipBaseY - pose.drop * 0.6;
@@ -467,10 +474,25 @@ export function createFight3D(canvas) {
       for (let i = 0; i < 2; i++) chicks[i].setFace(opt.faces?.[i] ?? 'chick');
       const [shx, shy] = opt.shake ?? [0, 0], fo = opt.freezeOwner ?? -1;
       cam.position.set(-shx, CY + shy, CAM_D); cam.lookAt(-shx, CY + shy, 0);
-      const dark = fo >= 0;
-      hemi.intensity = dark ? 0.35 : 1.5; sun.intensity = dark ? 0.5 : 2.0;
-      scene.background.setHex(dark ? 0x07080c : 0x1b1f2e);
-      for (let i = 0; i < 2; i++) { place(chicks[i], s.p[i], s, i, fo); if (s.tick !== lastTick) blood(chicks[i], s.p[i], i, s); }
+      // 大招：只染背景／地板／牆；燈光維持，角色／特效／HUD 不變色
+      const tint = superScreenTint(s);
+      hemi.intensity = 1.5; sun.intensity = 2.0;
+      const a = tint.active ? tint.alpha : 0;
+      if (a > 0) {
+        bgTmp.setHex(tint.hex);
+        scene.background.copy(bgTmp);
+        floorTint.setHex(0xffffff).lerp(bgTmp, 0.72 * a); floor.material.color.copy(floorTint);
+        wallTint.copy(wallBase).lerp(bgTmp, 0.85 * a); wall.material.color.copy(wallTint);
+        sideTint.copy(sideBase).lerp(bgTmp, 0.55 * a);
+        for (const m of sideWalls) m.material.color.copy(sideTint);
+      } else {
+        scene.background.setHex(fo >= 0 ? 0x0e1018 : 0x1b1f2e);
+        floor.material.color.copy(floorBase);
+        wall.material.color.copy(wallBase);
+        for (const m of sideWalls) m.material.color.copy(sideBase);
+      }
+      const superOwner = tint.active ? tint.owner : fo;
+      for (let i = 0; i < 2; i++) { place(chicks[i], s.p[i], s, i, superOwner); if (s.tick !== lastTick) blood(chicks[i], s.p[i], i, s); }
       lastTick = s.tick;
       outline.render(scene, cam);
     },
