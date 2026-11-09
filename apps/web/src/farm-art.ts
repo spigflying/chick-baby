@@ -1,13 +1,14 @@
 // 農場場景的寫實 3D 素材與 SVG 互動層。物件依 farm-layout 的 Box 放置，狀態標示仍由程式疊加。
 import type { Crate, CropId, DecoId, Stage, StallSlot } from '@chick/engine';
 import { EAST, LAYOUT, SCENE, type Box } from './farm-layout';
+import { art } from './art';
 
 const INK = '#4b3a33';
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 // 透明底：整個框都點得到（小攤、熱氣球這種中間有空隙的圖也一樣）
 const fit = (b: Box, nw: number, nh: number, inner: string) => `<g transform="translate(${b.x} ${b.y}) scale(${(b.w / nw).toFixed(4)} ${(b.h / nh).toFixed(4)})"><rect class="hitbg" width="${nw}" height="${nh}" fill="transparent"/>${inner}</g>`;
 const shadow = (cx: number, cy: number, rx: number, ry: number, o = 0.08) => `<ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}" fill="#000" opacity="${o}"/>`;
-const farmImage = (name: string, x: number, y: number, w: number, h: number, aspect = 'xMidYMax meet') => `<image href="${import.meta.env.BASE_URL}farm/${name}${name.endsWith('.jpg') ? '' : '.png'}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="${aspect}"/>`;
+const farmImage = (name: string, x: number, y: number, w: number, h: number, aspect = 'xMidYMax meet') => `<image href="${art(`farm/${name}${name.endsWith('.jpg') ? '' : '.png'}`)}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="${aspect}"/>`;
 const farmProp = (b: Box, name: string, nw: number, nh: number) => fit(b, nw, nh, farmImage(name, 0, 0, nw, nh));
 const use = (id: string, x: number, y: number, s: number) => `<use href="#fi-${id}" x="${x}" y="${y}" width="${s}" height="${s}"/>`;
 function farmBuilding(b: Box, name: string, nw: number, nh: number, locked: boolean, unlockLevel: number, label: string, overlay = ''): string {
@@ -90,7 +91,7 @@ export function field(b: Box, crop: CropId | null, stage: Stage | null, locked: 
   const name = locked ? 'locked' : !crop || stage === null ? 'empty'
     : stage === 0 ? 'seed' : stage === 1 ? 'sprout' : stage === 2 ? 'grow' : `${crop}-ready`;
   // 圖片含上方作物與下方土層；固定同一畫布，切換生長階段時位置不跳動。
-  let o = `<image href="${import.meta.env.BASE_URL}farm/field-${name}.png" x="0" y="-37.5" width="120" height="120"/>`;
+  let o = `<image href="${art(`farm/field-${name}.png`)}" x="0" y="-37.5" width="120" height="120"/>`;
   if (locked) o += `<text x="60" y="0" text-anchor="middle" font-size="14" font-weight="800" fill="#554338">Lv ${unlockLevel || ''} 解鎖</text>`;
   return fit(b, 120, 84, o);
 }

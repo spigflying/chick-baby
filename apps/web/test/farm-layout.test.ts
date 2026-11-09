@@ -69,7 +69,7 @@ describe('仙境手繪主畫面', () => {
     const names = ['background', 'background-east', 'field-empty', 'construction', 'tree-growing', 'tree-ready', 'tree-withered',
       'board', 'barn', 'balloon', 'stall', ...Object.keys(CROPS).map((id) => `crop-${id}`),
       ...Object.keys(ANIMALS), ...Object.keys(CRAFT_STATIONS), ...Object.keys(DECOS).map((id) => `deco-${id}`)];
-    for (const name of names) expect(existsSync(new URL(`../public/farm/storybook-ro-a/${name}.webp`, import.meta.url)), name).toBe(true);
+    for (const name of names) expect(existsSync(new URL(`../src/art/farm/storybook-ro-a/${name}.webp`, import.meta.url)), name).toBe(true);
   });
 });
 

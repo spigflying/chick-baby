@@ -47,7 +47,7 @@ describe('poc4 art port', () => {
     expect(SFV_FIT.pose(P({ st: ST.TECH, t: 5, y: 0 })).img).toBe('n_th_tech');
   });
   it('every preloaded image exists with a manifest entry', () => {
-    const dir = fileURLToPath(new URL('../public/fight/', import.meta.url));
+    const dir = fileURLToPath(new URL('../src/art/fight/', import.meta.url));
     const man = JSON.parse(readFileSync(dir + 'manifest.json', 'utf8'));
     const need = FIT_IMAGES.filter((n: string) => !/^fx[bf]_/.test(n) || existsSync(dir + n + '.webp'));
     for (const n of need) { expect(man[n], n).toBeTruthy(); expect(existsSync(dir + n + '.webp'), n).toBe(true); }

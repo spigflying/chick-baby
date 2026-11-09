@@ -35,7 +35,10 @@ export async function buildApp(db: Db, bus: Bus, opts: { logger?: boolean; gate?
   // trustProxy: true 會取最左邊（客戶端自己填的）→ 可偽造 IP 繞過限流、汙染稽核紀錄。
   const app = Fastify({ logger: opts.logger ?? true, trustProxy: (_addr: string, hop: number) => hop === 0, bodyLimit: 64 * 1024 });
   await app.register(cookie);
-  await app.register(rateLimitPlugin, { global: true, max: 300, timeWindow: '1 minute', errorResponseBuilder: () => ({ statusCode: 429, error: 'RATE_LIMITED' }) });
+  // 每 IP 每分鐘 300 次只算 /api 與 /ws：頁面、圖檔、JS 不吃額度——否則同一個辦公室 IP 多人開農場就會把額度用完，
+  // 重新整理時瀏覽器拿到的是 {"error":"RATE_LIMITED"} JSON 而不是遊戲頁面。
+  const limited = (url: string) => url.startsWith('/api') || url.startsWith('/ws');
+  await app.register(rateLimitPlugin, { global: true, max: 300, timeWindow: '1 minute', allowList: (req) => !limited(req.url), errorResponseBuilder: () => ({ statusCode: 429, error: 'RATE_LIMITED' }) });
   await app.register(websocket, { options: { maxPayload: 16 * 1024 } });
   // 安全標頭：禁止被 iframe 嵌入（點擊劫持騙買道具）、禁止 MIME 猜測；正式環境（HTTPS）加 HSTS
   app.addHook('onSend', async (_req, reply, payload) => {

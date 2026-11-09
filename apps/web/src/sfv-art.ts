@@ -1,20 +1,23 @@
 // @ts-nocheck
-// 格鬥水墨美術（poc3 移植）：圖檔在 /fight/*.webp（已裁到透明邊界、縮成 0.5 倍），manifest 記原圖尺寸與裁切位移。
+// 格鬥水墨美術（poc3 移植）：圖檔在 src/art/fight/*.webp（已裁到透明邊界、縮成 0.5 倍），manifest 記原圖尺寸與裁切位移。
+// 圖與 manifest 都經 Vite 打包（網址帶 hash、長快取），不用再另外 fetch manifest.json。
 // 只管畫面：受擊判定在引擎（SFV_FIT），這裡讀同一個 pose 決定畫哪張圖，畫面和判定一定對得上。
 import { SFV, SFV_FIT, FIT_IMAGES } from '@chick/engine';
+import { art } from './art';
+import manifest from './art/fight/manifest.json';
 
 const ART = { ready: false, loading: null as Promise<void> | null, img: {} as Record<string, any>, man: {} as Record<string, number[]> };
 const GROUND = 470;
 
 /** 進格鬥畫面前預載；失敗或沒有 DOM（測試）就維持舊的火柴雞 */
-export function preloadFightArt(base = '/fight/') {
+export function preloadFightArt() {
   if (ART.loading || typeof Image === 'undefined') return ART.loading;
   ART.loading = (async () => {
     try {
-      ART.man = await (await fetch(base + 'manifest.json')).json();
+      ART.man = manifest;
       await Promise.all(FIT_IMAGES.filter((n) => ART.man[n]).map((n) => new Promise<void>((ok) => {
         const im = new Image(); im.decoding = 'async';
-        im.onload = () => { ART.img[n] = im; ok(); }; im.onerror = () => ok(); im.src = base + n + '.webp';
+        im.onload = () => { ART.img[n] = im; ok(); }; im.onerror = () => ok(); im.src = art(`fight/${n}.webp`);
       })));
       ART.ready = !!ART.img.body_1;
     } catch { ART.ready = false; }

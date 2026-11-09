@@ -1,6 +1,7 @@
 // 仙境手繪主畫面：背景只含環境，可互動物件與田地狀態由獨立素材疊加。
 import type { Crate, CropId, DecoId, Stage, StallSlot } from '@chick/engine';
 import { SCENE, type Box } from './farm-layout';
+import { art } from './art';
 import * as classicArt from './farm-art-classic';
 
 export * from './farm-art';
@@ -32,8 +33,7 @@ export function bakeryIcons(): string {
   </svg>`;
 }
 
-const base = `${import.meta.env.BASE_URL}farm/storybook-ro-a/`;
-const image = (name: string, x: number, y: number, w: number, h: number) => `<image href="${base}${name}.webp" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="none"/>`;
+const image = (name: string, x: number, y: number, w: number, h: number) => `<image href="${art(`farm/storybook-ro-a/${name}.webp`)}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="none"/>`;
 const hitBox = (b: Box, inner: string) => `<g transform="translate(${b.x} ${b.y})"><rect class="hitbg" width="${b.w}" height="${b.h}" fill="transparent"/>${inner}</g>`;
 
 export function background(): string { return image('background', 0, 0, SCENE.w, SCENE.h); }

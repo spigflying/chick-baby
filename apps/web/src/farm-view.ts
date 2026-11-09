@@ -1,6 +1,7 @@
 // 小雞農場全頁畫面（蓋在蛋殼頁上，掛法同 fight-view.ts）。只限電腦；規則與數值都在伺服器（@chick/engine farm.ts）。
 import { ANIMALS, CRAFT_STATIONS, CROPS, DECOS, FARM, FARM_ITEMS, RECIPES, type AnimalStation, type CraftStation, type CropId, type DecoId, type FarmAction, type FarmItemId, type RecipeId, type VisitCollectAction } from '@chick/engine';
 import { act, api, ApiError, errText } from './api';
+import { art } from './art';
 import type { Live } from './ws';
 import { EAST, LAYOUT, SCENE, STORYBOOK_LAYOUT, type Box } from './farm-layout';
 import * as realisticArt from './farm-art';
@@ -347,7 +348,7 @@ export class FarmView {
       const station = pn.st, meta = CRAFT_STATIONS[station], j = d.jobs[station], slots = s.queueSlots[station];
       const ids = (Object.keys(RECIPES) as RecipeId[]).filter((id) => RECIPES[id].station === station);
       const selectedId = this.selectedCraftRecipe[station], selected = RECIPES[selectedId], ready = (ms: number) => this.remain(ms) === 0;
-      const picture = (item: FarmItemId, cls = 'bk-icon') => `<img class="${cls}" src="${import.meta.env.BASE_URL}farm/${station}/${item}.webp" alt="">`;
+      const picture = (item: FarmItemId, cls = 'bk-icon') => `<img class="${cls}" src="${art(`farm/${station}/${item}.webp`)}" alt="">`;
       const hasMaterials = selected.in.every((x) => (s.inv[x.item] ?? 0) >= x.qty);
       const canCraft = s.level >= selected.level && hasMaterials && j.items.length < slots;
       html = `<header class="fph bakery-head">${station === 'bakery' ? ic('ro-oven', 'fic hic') : picture('jam', 'fic hic')}<b>${meta.name}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header><div class="fpb bk-body" data-live>${j.locked ? `<p class="fnote">Lv ${meta.level} 解鎖</p>` : `

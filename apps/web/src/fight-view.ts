@@ -5,6 +5,7 @@ import { drawFight } from './sfv-draw';
 import { preloadFightArt } from './sfv-art';
 import type { Live } from './ws';
 import { api } from './api';
+import { art } from './art';
 
 const KEY_BITS = { KeyW: SFV.UP, KeyS: SFV.DOWN, KeyA: SFV.LEFT, KeyD: SFV.RIGHT, KeyU: SFV.LP, KeyI: SFV.HP, KeyJ: SFV.LK, KeyK: SFV.HK, KeyH: SFV.LP | SFV.LK, KeyL: SFV.HP | SFV.HK };
 const EASY_BITS = { KeyO: SFV.EASY_HADO, KeyP: SFV.EASY_DP, KeyN: SFV.EASY_TATSU, KeyM: SFV.EASY_CA };
@@ -87,7 +88,7 @@ export class FightView {
   /** 選臉：雞臉或照片臉；點了只換選擇，不關對話框 */
   private facePicker() {
     if (this.me.fight_face) return ''; // 有自己的臉：跳過選臉
-    return `<div class="sfv-faces"><span>用哪張臉打？</span>${FIGHT_FACES.map((id) => `<button data-face="${id}" class="${id === this.face ? 'on' : ''}">${id === 'chick' ? '<i>🐔</i>' : `<img src="/fight/face_${id}.webp" alt="">`}<small>${FACE_NAME[id] ?? id}</small></button>`).join('')}</div>`;
+    return `<div class="sfv-faces"><span>用哪張臉打？</span>${FIGHT_FACES.map((id) => `<button data-face="${id}" class="${id === this.face ? 'on' : ''}">${id === 'chick' ? '<i>🐔</i>' : `<img src="${art(`fight/face_${id}.webp`)}" alt="">`}<small>${FACE_NAME[id] ?? id}</small></button>`).join('')}</div>`;
   }
   private dialogClick(e: Event) {
     const b = (e.target as HTMLElement).closest('button') as HTMLButtonElement | null; if (!b) return;

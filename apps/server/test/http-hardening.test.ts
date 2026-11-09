@@ -84,6 +84,23 @@ describe('client IP behind Cloud Run', () => {
     expect(last).toBe(429);
     expect((await hit('10.9.9.9', '198.51.100.7')).statusCode).toBe(200);
   });
+  it('only /api and /ws count toward the per-IP limit: pages and images never come back as a RATE_LIMITED JSON body', async () => {
+    const ip = '203.0.113.77';
+    for (let i = 0; i < 320; i++) expect((await app.inject({ url: '/assets/index-abc123.js', remoteAddress: ip })).statusCode).toBe(200);
+    for (const url of ['/', '/index.html', '/race-demo', '/home/abc']) {
+      const r = await app.inject({ url, remoteAddress: ip });
+      expect(r.statusCode, url).toBe(200);
+      expect(r.headers['content-type'], url).toMatch(/text\/html/);
+    }
+    // 靜態檔不吃額度：同一個 IP 的 API 額度仍是完整的 300 次
+    let last = 0;
+    for (let i = 0; i < 300; i++) last = (await app.inject({ url: '/api/status', remoteAddress: ip })).statusCode;
+    expect(last).toBe(200);
+    const over = await app.inject({ url: '/api/status', remoteAddress: ip });
+    expect(over.statusCode).toBe(429);
+    expect(over.json()).toEqual({ error: 'RATE_LIMITED' });
+    expect((await app.inject({ url: '/ws', remoteAddress: ip })).statusCode).toBe(429);
+  });
 });
 
 describe('path id validation', () => {
