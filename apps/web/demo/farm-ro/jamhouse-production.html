@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>仙境手繪農場・果醬工坊預覽</title>
+<script type="module">
+  import '../../src/style.css';
+  import { ALWAYS_OPEN, describeFarm, newFarm } from '@chick/engine';
+  import { FarmView } from '../../src/farm-view.ts';
+
+  const now = Date.now();
+  const state = newFarm(42, now, ALWAYS_OPEN);
+  state.level = 6;
+  state.queueSlots.jamhouse = 4;
+  state.inv.strawberry = 2;
+  state.jobs.jamhouse = [
+    { recipe: 'jam', ready: now - 60_000 },
+    { recipe: 'jam', ready: now + 42 * 60_000 },
+  ];
+  const view = new FarmView({ touch: false }, { id: 'demo', display_name: 'Demo' }, () => {}, () => {}, () => 1200);
+  view.data = { owner: { id: 'demo', display_name: 'Demo' }, is_owner: true, state, derived: describeFarm(state, now, ALWAYS_OPEN), server_time: now };
+  view.ownerId = 'demo';
+  view.loadedAt = now;
+  view.panel = { k: 'craft', st: 'jamhouse' };
+  view.root.hidden = false;
+  view.root.classList.add('on');
+  view.render();
+</script>
+</html>

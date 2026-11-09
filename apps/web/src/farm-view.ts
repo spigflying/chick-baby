@@ -43,7 +43,7 @@ export class FarmView {
   private loadedAt = 0;
   private timer = 0;
   private panel: Panel = null;
-  private selectedBakeryRecipe: RecipeId = 'bread';
+  private selectedCraftRecipe: Record<CraftStation, RecipeId> = { bakery: 'bread', jamhouse: 'jam', dairy: 'cheese' };
   private busy = false;
   /** 背景重讀失敗後暫停（避免每秒一直重試），下一次成功的操作或重新打開時恢復 */
   private paused = false;
@@ -321,7 +321,7 @@ export class FarmView {
     const el = this.root.querySelector('.farm-panel') as HTMLElement | null; if (!el) return;
     if (this.panel && this.data && !panelValid(this.panel, this.data)) this.panel = null;
     const pn = this.panel, p = this.data;
-    el.classList.toggle('bakery-panel', pn?.k === 'craft' && pn.st === 'bakery' && this.theme === 'storybook');
+    el.classList.toggle('bakery-panel', pn?.k === 'craft' && (pn.st === 'bakery' || pn.st === 'jamhouse') && this.theme === 'storybook');
     if (!pn || !p) { el.hidden = true; el.innerHTML = ''; return; }
     const head = (title: string, icon: string, tone: string) => `<header class="fph ${tone}">${ic(icon, 'fic hic')}<b>${title}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header>`;
     let html = '';
@@ -343,17 +343,17 @@ export class FarmView {
         <div class="frow static">${ic(def.out.item, 'fic mid')}<span class="fname">${def.animal} ${i + 1}<small>${x.state === 'hungry' ? `要吃 ${def.feed.map((f) => `${FARM_ITEMS[f.item].name} ×${f.qty}`).join('、')}` : x.state === 'ready' ? `${FARM_ITEMS[def.out.item].name}好了！` : `還要 ${remainText(this.remain(x.remainMs))}`}</small></span>
           ${x.state === 'hungry' ? `<button type="button" class="fbtn go" data-act="feed" data-i="${i}">餵</button>` : x.state === 'ready' ? `<button type="button" class="fbtn go" data-act="collect" data-i="${i}">收</button>` : ''}</div>`).join('')}
         <p class="fnote">你有 ${def.feed.map((f) => `${FARM_ITEMS[f.item].name} ${s.inv[f.item] ?? 0}`).join('、')}</p></div>`;
-    } else if (pn.k === 'craft' && pn.st === 'bakery' && this.theme === 'storybook') {
-      const meta = CRAFT_STATIONS.bakery, j = d.jobs.bakery, slots = s.queueSlots.bakery;
-      const ids = (Object.keys(RECIPES) as RecipeId[]).filter((id) => RECIPES[id].station === 'bakery');
-      const selected = RECIPES[this.selectedBakeryRecipe], ready = (ms: number) => this.remain(ms) === 0;
-      const picture = (item: FarmItemId, cls = 'bk-icon') => `<img class="${cls}" src="${import.meta.env.BASE_URL}farm/bakery/${item}.webp" alt="">`;
+    } else if (pn.k === 'craft' && (pn.st === 'bakery' || pn.st === 'jamhouse') && this.theme === 'storybook') {
+      const station = pn.st, meta = CRAFT_STATIONS[station], j = d.jobs[station], slots = s.queueSlots[station];
+      const ids = (Object.keys(RECIPES) as RecipeId[]).filter((id) => RECIPES[id].station === station);
+      const selectedId = this.selectedCraftRecipe[station], selected = RECIPES[selectedId], ready = (ms: number) => this.remain(ms) === 0;
+      const picture = (item: FarmItemId, cls = 'bk-icon') => `<img class="${cls}" src="${import.meta.env.BASE_URL}farm/${station}/${item}.webp" alt="">`;
       const hasMaterials = selected.in.every((x) => (s.inv[x.item] ?? 0) >= x.qty);
       const canCraft = s.level >= selected.level && hasMaterials && j.items.length < slots;
-      html = `<header class="fph bakery-head">${ic('ro-oven', 'fic hic')}<b>${meta.name}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header><div class="fpb bk-body" data-live>${j.locked ? `<p class="fnote">Lv ${meta.level} 解鎖</p>` : `
+      html = `<header class="fph bakery-head">${station === 'bakery' ? ic('ro-oven', 'fic hic') : picture('jam', 'fic hic')}<b>${meta.name}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header><div class="fpb bk-body" data-live>${j.locked ? `<p class="fnote">Lv ${meta.level} 解鎖</p>` : `
         <div class="bk-layout"><section class="bk-products"><h4>選擇產品</h4>${ids.map((id) => { const r = RECIPES[id], unlocked = s.level >= r.level, enough = r.in.every((x) => (s.inv[x.item] ?? 0) >= x.qty);
-          return `<button type="button" class="bk-product${id === this.selectedBakeryRecipe ? ' active' : ''}" data-act="selectBakeryRecipe" data-recipe="${id}" aria-pressed="${id === this.selectedBakeryRecipe}">${picture(r.out.item)}<span><b>${r.name}</b><small>${remainText(r.ms)}</small><em class="${unlocked && enough ? 'ok' : 'short'}">${unlocked ? enough ? '材料充足' : '缺少原料' : `Lv ${r.level} 解鎖`}</em></span></button>`; }).join('')}</section>
-        <section class="bk-details"><div class="bk-selection">${picture(selected.out.item)}<span><small>目前選擇</small><b>${selected.name}</b><small>生產時間 ${remainText(selected.ms)}</small></span></div><h4>需要的原料 <small>需要 / 現有</small></h4><div class="bk-ingredients">${selected.in.map((x) => `<div class="bk-ingredient${(s.inv[x.item] ?? 0) < x.qty ? ' short' : ''}">${picture(x.item)}<b>${FARM_ITEMS[x.item].name}</b><strong>${x.qty} / ${s.inv[x.item] ?? 0}</strong></div>`).join('')}</div><button type="button" class="fbtn go bk-reserve" data-act="craft" data-recipe="${this.selectedBakeryRecipe}" ${canCraft ? '' : 'disabled'}>＋ 預約生產</button><p class="bk-hint">${s.level < selected.level ? `Lv ${selected.level} 解鎖` : !hasMaterials ? '原料不足，補足後才能預約' : j.items.length >= slots ? '佇列已滿，請先收取完成品' : '預約後扣除材料，依序加入佇列'}</p></section>
+          return `<button type="button" class="bk-product${id === selectedId ? ' active' : ''}" data-act="selectCraftRecipe" data-recipe="${id}" aria-pressed="${id === selectedId}">${picture(r.out.item)}<span><b>${r.name}</b><small>${remainText(r.ms)}</small><em class="${unlocked && enough ? 'ok' : 'short'}">${unlocked ? enough ? '材料充足' : '缺少原料' : `Lv ${r.level} 解鎖`}</em></span></button>`; }).join('')}</section>
+        <section class="bk-details"><div class="bk-selection">${picture(selected.out.item)}<span><small>目前選擇</small><b>${selected.name}</b><small>生產時間 ${remainText(selected.ms)}</small></span></div><h4>需要的原料 <small>需要 / 現有</small></h4><div class="bk-ingredients">${selected.in.map((x) => `<div class="bk-ingredient${(s.inv[x.item] ?? 0) < x.qty ? ' short' : ''}">${picture(x.item)}<b>${FARM_ITEMS[x.item].name}</b><strong>${x.qty} / ${s.inv[x.item] ?? 0}</strong></div>`).join('')}</div><button type="button" class="fbtn go bk-reserve" data-act="craft" data-recipe="${selectedId}" ${canCraft ? '' : 'disabled'}>＋ 預約生產</button><p class="bk-hint">${s.level < selected.level ? `Lv ${selected.level} 解鎖` : !hasMaterials ? '原料不足，補足後才能預約' : j.items.length >= slots ? '佇列已滿，請先收取完成品' : '預約後扣除材料，依序加入佇列'}</p></section>
         <section class="bk-queue"><h4>生產佇列 <small>${j.items.length} / ${slots} 格</small></h4><div class="bk-slots">${Array.from({ length: FARM.queue.max }, (_, i) => { const it = j.items[i]; if (i >= slots) return '<div class="bk-slot locked">未解鎖</div>'; if (!it) return '<div class="bk-slot empty">＋<small>空位</small></div>'; const item = RECIPES[it.recipe].out.item, done = ready(it.remainMs); return done ? `<button type="button" class="bk-slot done" data-act="collectJob" data-i="${i}" aria-label="收取${FARM_ITEMS[item].name}">${picture(item)}<b>${FARM_ITEMS[item].name}</b><small>完成・點擊收取</small></button>` : `<div class="bk-slot">${picture(item)}<b>${FARM_ITEMS[item].name}</b><small>${remainText(this.remain(it.remainMs))}</small></div>`; }).join('')}</div><button type="button" class="fbtn go bk-collect" data-act="collectJobs" ${j.items.some((x) => ready(x.remainMs)) ? '' : 'disabled'}>全收完成品</button><button type="button" class="fbtn up bk-upgrade" data-act="upgradeQueue" ${slots >= FARM.queue.max ? 'disabled' : ''}>${slots >= FARM.queue.max ? '佇列已滿級' : `加一格 ◎${FARM.queue.costs[slots - FARM.queue.base]}`}</button></section></div>`}</div>`;
     } else if (pn.k === 'craft') {
       const meta = CRAFT_STATIONS[pn.st], j = d.jobs[pn.st];
@@ -509,9 +509,9 @@ export class FarmView {
     if (a === 'plant' && pn?.k === 'plant') { const crop = b.dataset.crop as CropId; this.panel = null; return void this.doAct({ type: 'plant', idx: pn.idx, crop }); }
     if (a === 'feed' && pn?.k === 'animal') return void this.doAct({ type: 'feed', station: pn.st, i: +b.dataset.i! });
     if (a === 'collect' && pn?.k === 'animal') return void this.doAct({ type: 'collect', station: pn.st, i: +b.dataset.i! });
-    if (a === 'selectBakeryRecipe' && pn?.k === 'craft' && pn.st === 'bakery') {
+    if (a === 'selectCraftRecipe' && pn?.k === 'craft' && (pn.st === 'bakery' || pn.st === 'jamhouse')) {
       const recipe = b.dataset.recipe as RecipeId;
-      if (RECIPES[recipe]?.station === 'bakery') { this.selectedBakeryRecipe = recipe; this.renderPanel(); }
+      if (RECIPES[recipe]?.station === pn.st) { this.selectedCraftRecipe[pn.st] = recipe; this.renderPanel(); }
       return;
     }
     if (a === 'craft') return void this.doAct({ type: 'craft', recipe: b.dataset.recipe as RecipeId });

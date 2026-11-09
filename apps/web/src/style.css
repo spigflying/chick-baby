@@ -477,6 +477,7 @@ button.ftile{font:inherit;color:inherit;cursor:pointer}button.ftile:hover{border
 .farm.storybook .farm-panel.bakery-panel{width:min(430px,47%);border-color:#9f7347;background:#f7ebd2}
 .farm.storybook .bakery-panel .bakery-head{background:linear-gradient(#bb875b,#835532);border-bottom:2px solid #684222}
 .farm.storybook .bakery-panel .bakery-head .fic{background:#fff0cd;border:1px solid #d0a96d}
+.farm.storybook .bakery-panel .bakery-head img.fic{object-fit:contain;filter:none}
 .farm.storybook .bakery-panel .fpb{background:linear-gradient(#fbf4df,#ead7b4);gap:8px}
 .farm.storybook .bakery-panel .bakery-note{font-size:13px}
 .farm.storybook .bakery-recipe{display:block;padding:9px 10px;border-color:#bd9661;background:#fff8e8;box-shadow:0 3px 0 #bca07466}
