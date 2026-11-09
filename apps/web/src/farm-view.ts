@@ -22,6 +22,9 @@ const ANIMAL_ART = {
   beehive: { animal: 'bee', feedDir: 'jamhouse', outDir: 'bakery' },
   cowshed: { animal: 'cow', feedDir: 'bakery', outDir: 'dairy' },
 } as const;
+const CROP_ART: Record<CropId, string> = {
+  wheat: 'bakery/wheat', carrot: 'hutch/carrot', strawberry: 'jamhouse/strawberry', pumpkin: 'crops/pumpkin',
+};
 type Panel = null | { k: 'plant'; idx: number } | { k: 'animal'; st: AnimalStation } | { k: 'craft'; st: CraftStation } | { k: 'tree' } | { k: 'orders' } | { k: 'store' } | { k: 'shop' } | { k: 'friends'; list?: any[] }
   // 第二階段
   | { k: 'grow'; idx: number } | { k: 'expand'; idx: number } | { k: 'balloon' } | { k: 'stall' } | { k: 'stallNew'; slot: number; item?: FarmItemId } | { k: 'deco'; slot: number } | { k: 'feed' };
@@ -331,6 +334,7 @@ export class FarmView {
     el.classList.toggle('bakery-panel', pn?.k === 'craft' && this.theme === 'storybook');
     el.classList.toggle('animal-card-panel', pn?.k === 'animal' && pn.st in ANIMAL_ART && this.theme === 'storybook');
     el.classList.toggle('tree-panel', pn?.k === 'tree' && this.theme === 'storybook');
+    el.classList.toggle('plant-panel', pn?.k === 'plant' && this.theme === 'storybook');
     if (!pn || !p) { el.hidden = true; el.innerHTML = ''; return; }
     const head = (title: string, icon: string, tone: string) => `<header class="fph ${tone}">${ic(icon, 'fic hic')}<b>${title}</b><button type="button" class="fpx" data-act="panelClose" aria-label="關閉">✕</button></header>`;
     let html = '';
@@ -360,7 +364,7 @@ export class FarmView {
       html = head(CRAFT_STATIONS[pn.st].name, 'oven', 'pink') + `<div class="fpb"><p class="fnote">${j.items.length ? j.items.map((x) => `${RECIPES[x.recipe].name}：${this.remain(x.remainMs) ? remainText(this.remain(x.remainMs)) : '做好了'}`).join('、') : '沒有成品'}</p>${j.items.length && this.remain(j.items[0].remainMs) === 0 ? '<button type="button" class="fbtn go wide" data-act="visitJob">收一份成品</button>' : ''}</div>`;
     } else if (pn.k === 'plant') {
       html = head(`種什麼？（田 ${pn.idx + 1}）`, 'wheat', 'mint') + `<div class="fpb"><div class="flist">${plantChoices(p, this.wallet()).map((c) => `
-        <button type="button" class="frow" data-act="plant" data-crop="${c.crop}" ${c.enabled ? '' : 'disabled'}>${ic(CROPS[c.crop].out.item, 'fic mid')}
+        <button type="button" class="frow" data-act="plant" data-crop="${c.crop}" ${c.enabled ? '' : 'disabled'}>${this.theme === 'storybook' ? `<img class="fic mid" src="${art(`farm/${CROP_ART[c.crop]}.webp`)}" alt="">` : ic(CROPS[c.crop].out.item, 'fic mid')}
           <span class="fname">${esc(c.name)}<small>${remainText(CROPS[c.crop].growMs)}・收 ${CROPS[c.crop].out.qty} 個</small></span>
           <span class="fcost">${c.reason ? esc(c.reason) : esc(c.cost)}</span></button>`).join('')}</div></div>`;
     } else if (pn.k === 'animal') {

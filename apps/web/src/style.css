@@ -424,6 +424,10 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .farm.storybook .ftool{color:#fff0cb}.farm.storybook .ftool:hover{background:#936c3d}
 .farm.storybook .ftool[data-act="collectAll"]{background:linear-gradient(#9c783e,#70502c);box-shadow:inset 0 0 0 1px #e5c27e}
 .farm.storybook .farm-panel{border:2px solid #9d7849;box-shadow:0 12px 32px #2b2018a8}
+.farm.storybook .farm-panel.plant-panel{background:#f7ebd2;border-color:#9f7347}
+.farm.storybook .plant-panel .frow{background:#fff8e9;border-color:#d8b887;color:#513822}
+.farm.storybook .plant-panel .frow:hover:not([disabled]){border-color:#af7941}
+.farm.storybook .plant-panel img.fic{width:48px;height:48px;object-fit:contain;filter:drop-shadow(0 2px 2px #78533455)}
 .farm.storybook .fph.mint,.farm.storybook .fph.pink,.farm.storybook .fph.orange,.farm.storybook .fph.blue,.farm.storybook .fph.purple{background:linear-gradient(#9d794d,#6b4c2f)}
 /* 子畫面 */
 .farm-panel{position:absolute;right:2%;top:12%;bottom:4%;width:min(380px,46%);display:flex;flex-direction:column;background:var(--f-card);border-radius:22px;box-shadow:0 10px 30px rgba(120,70,50,.28);overflow:hidden}

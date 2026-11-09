@@ -11,6 +11,10 @@ describe('圖檔經 Vite 打包（網址帶 hash、長快取）', () => {
     const p = artPaths();
     expect(p).toContain('farm/barn.png');
     expect(p).toContain('farm/storybook-ro-a/background.webp');
+    for (const crop of ['wheat', 'carrot', 'strawberry', 'pumpkin']) {
+      for (const phase of ['seed', 'sprout', 'growing']) expect(p).toContain(`farm/storybook-ro-a/crop-${crop}-${phase}.webp`);
+    }
+    expect(p).toContain('farm/crops/pumpkin.webp');
     expect(p).toContain('farm/coop/hen.webp');
     for (const item of ['rabbit', 'carrot', 'wool']) expect(p).toContain(`farm/hutch/${item}.webp`);
     expect(p).toContain('farm/beehive/bee.webp');

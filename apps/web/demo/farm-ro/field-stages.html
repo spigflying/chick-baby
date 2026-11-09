@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>小雞農場・田地生長圖預覽</title>
+  <style>
+    body{margin:0;background:#e9dfc8;color:#513822;font-family:system-ui,sans-serif}
+    main{max-width:1100px;margin:0 auto;padding:32px 24px 56px}
+    h1{margin:0 0 8px;font-size:28px}p{margin:0 0 28px;color:#795b3c}
+    .table{display:grid;grid-template-columns:110px repeat(4,minmax(0,1fr));gap:12px;align-items:center}
+    .label{font-size:18px;font-weight:800}.phase{text-align:center;font-weight:800;color:#795b3c}
+    .tile{display:grid;place-items:center;min-width:0;background:#f8efd9;border:2px solid #c4a573;border-radius:18px;padding:12px 4px}
+    .tile svg{width:100%;max-width:210px;height:auto;overflow:visible;aspect-ratio:3/2}
+    @media(max-width:700px){.table{grid-template-columns:70px repeat(4,minmax(105px,1fr));gap:5px;overflow:auto}.label{font-size:14px}.tile{padding:5px 2px}}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>田地生長圖預覽</h1>
+    <p>使用遊戲中的田格繪製函式，依序顯示播種、發芽、生長及成熟。</p>
+    <div id="table" class="table"></div>
+  </main>
+  <script type="module">
+    import { field } from '../../src/farm-art-storybook.ts';
+    const crops = [['wheat','小麥'],['carrot','胡蘿蔔'],['strawberry','草莓'],['pumpkin','愛心南瓜']];
+    const table = document.querySelector('#table');
+    table.innerHTML = `<span></span>${['播種','發芽','生長','成熟'].map(x=>`<span class="phase">${x}</span>`).join('')}` +
+      crops.map(([id,name])=>`<span class="label">${name}</span>${[0,1,2,3].map(stage=>`<div class="tile"><svg viewBox="0 0 96 64" role="img" aria-label="${name} ${['播種','發芽','生長','成熟'][stage]}">${field({x:0,y:0,w:96,h:64},id,stage,false)}</svg></div>`).join('')}`).join('');
+  </script>
+</body>
+</html>

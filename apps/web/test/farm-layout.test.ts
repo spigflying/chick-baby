@@ -43,7 +43,11 @@ describe('仙境手繪主畫面', () => {
     expect(storybook.field(b, 'wheat', 3, false)).toContain('storybook-ro-a/crop-wheat.webp');
     expect(storybook.field(b, 'wheat', 3, false)).not.toContain('field-empty.webp');
     expect(storybook.field(b, null, null, true, 8)).toContain('Lv 8 解鎖');
-    expect(storybook.field(b, 'carrot', 1, false)).toContain('field-empty.webp');
+    for (const crop of ['wheat', 'carrot', 'strawberry', 'pumpkin'] as const) {
+      for (const [stage, phase] of ['seed', 'sprout', 'growing'].entries()) {
+        expect(storybook.field(b, crop, stage as 0 | 1 | 2, false)).toContain(`storybook-ro-a/crop-${crop}-${phase}.webp`);
+      }
+    }
     expect(storybook.field(EAST.fields[0], 'carrot', 3, false)).toContain('storybook-ro-a/crop-carrot.webp');
     expect(storybook.hutch(STORYBOOK_LAYOUT.hutch, [true, false], false, 2)).toContain('fi-wool');
     expect(storybook.hutch(STORYBOOK_LAYOUT.hutch, [false, false], true, 2)).toContain('storybook-ro-a/construction.webp');

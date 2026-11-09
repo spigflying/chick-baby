@@ -39,17 +39,14 @@ const hitBox = (b: Box, inner: string) => `<g transform="translate(${b.x} ${b.y}
 export function background(): string { return image('background', 0, 0, SCENE.w, SCENE.h); }
 export function eastBackground(): string { return image('background-east', 0, 0, SCENE.w, SCENE.h); }
 
-/** 成熟作物與土壤同一張圖，土壟才會遮住根部；所有田格共用尺寸避免切換時跳動。 */
+/** 各生長期的作物與土壤同一張圖，所有田格共用尺寸避免切換時跳動。 */
 export function field(b: Box, crop: CropId | null, stage: Stage | null, locked: boolean, unlockLevel = 0): string {
-  // 新素材的透明邊較少；田土限制在田格內，放大的作物才不會蓋住隔壁田。
-  let o = image(crop && stage === 3 && !locked ? `crop-${crop}` : 'field-empty', -5, -8, b.w + 10, b.h + 16);
+  const phase = stage === 0 ? 'seed' : stage === 1 ? 'sprout' : 'growing';
+  const tile = crop && stage !== null && !locked ? `crop-${crop}${stage === 3 ? '' : `-${phase}`}` : 'field-empty';
+  // 田土與作物共用素材，才能讓不同階段在同一田格位置對齊。
+  let o = image(tile, -5, -8, b.w + 10, b.h + 16);
   if (locked) {
     o += `<rect x="3" y="8" width="${b.w - 6}" height="${b.h - 16}" rx="12" fill="#282018" opacity=".42"/><text x="${b.w / 2}" y="${b.h / 2 + 4}" text-anchor="middle" font-size="12" font-weight="900" fill="#fff0c9" stroke="#49351e" stroke-width="2" paint-order="stroke">Lv ${unlockLevel} 解鎖</text>`;
-  } else if (crop && stage !== null && stage !== 3) {
-    // 初期作物用少量芽葉，成熟時才展示作物種類，讓狀態在小尺寸下仍清楚。
-    o += [21, 48, 75].map((x) => stage === 0
-      ? `<ellipse cx="${x}" cy="35" rx="4" ry="2.5" fill="#e9c88b" stroke="#704321" stroke-width="1.5"/>`
-      : `<path d="M${x} 43 v-${stage === 1 ? 12 : 23}" stroke="#3b6728" stroke-width="3" stroke-linecap="round"/><path d="M${x} ${stage === 1 ? 34 : 27} q-12 -11 -12 1 q8 6 12 -1 q12 -11 12 1 q-8 6 -12 -1" fill="${stage === 1 ? '#78b844' : '#5fa139'}" stroke="#3b6728" stroke-width="1.4"/>`).join('');
   }
   return hitBox(b, o);
 }
