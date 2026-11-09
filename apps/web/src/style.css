@@ -496,4 +496,37 @@ button.ftile{font:inherit;color:inherit;cursor:pointer}button.ftile:hover{border
 .farm.storybook .bakery-queue .fic{width:38px;height:38px;filter:drop-shadow(0 1px 1px #78533455)}
 .farm.storybook .bakery-panel .fbtn.go{background:#a4b477;color:#314527}
 .farm.storybook .bakery-panel .fbtn.up{background:#eac67b;color:#5b401f}
+.farm.storybook .farm-panel.bakery-panel{width:min(900px,96%);top:5%;bottom:5%}
+.farm.storybook .bakery-panel .bk-body{padding:0;display:block}
+.bk-layout{display:grid;grid-template-columns:205px minmax(0,1fr) 235px;min-height:100%;color:#54391f}
+.bk-layout section{min-width:0;padding:15px 12px}
+.bk-layout h4{display:flex;justify-content:space-between;align-items:center;gap:5px;margin:0 0 12px;font-size:14px}
+.bk-layout h4 small{font-size:10px;color:#806448}
+.bk-products{background:#ebd3a3;border-right:2px solid #c5a06a}
+.bk-product{display:flex;align-items:center;gap:7px;width:100%;padding:7px 5px;margin-bottom:9px;text-align:left;background:#fff8e7;border:2px solid #cbaa72;border-radius:13px;color:#503720;font:inherit;cursor:pointer}
+.bk-product.active{border-color:#86572e;background:#fff1c9;box-shadow:0 0 0 2px #e8c76e}
+.bk-product .bk-icon{width:63px;height:63px;flex:none}
+.bk-product span,.bk-selection span{display:flex;flex-direction:column;gap:2px}
+.bk-product b{font-size:13px}.bk-product small,.bk-selection small{font-size:10px;color:#806448}
+.bk-product em{width:max-content;padding:2px 5px;border-radius:12px;font-size:10px;font-style:normal;font-weight:800}
+.bk-product em.ok{background:#e3eccd;color:#4e702c}.bk-product em.short{background:#f8dfd5;color:#b74435}
+.bk-details{background:#fff8e9}
+.bk-selection{display:flex;align-items:center;gap:11px;padding-bottom:12px;margin-bottom:12px;border-bottom:1px dashed #c8a977}
+.bk-selection .bk-icon{width:80px;height:80px}.bk-selection b{font-size:20px}
+.bk-ingredients{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+.bk-ingredient{display:flex;flex-direction:column;align-items:center;min-width:0;padding:8px 2px;border:2px solid #dfc596;border-radius:12px;background:#fffdf2;text-align:center}
+.bk-ingredient .bk-icon{width:81px;height:81px;max-width:100%}
+.bk-ingredient b{font-size:11px}.bk-ingredient strong{font-size:15px;color:#486a2c;white-space:nowrap}
+.bk-ingredient.short{border-color:#d98873;background:#fff0e9}.bk-ingredient.short strong{color:#c73d30}
+.bk-icon{display:block;object-fit:contain}
+.bakery-panel .bk-reserve{display:block;width:100%;margin-top:16px;padding:10px;font-size:15px;font-weight:900}
+.bk-hint{margin:9px 0 0;text-align:center;font-size:11px;color:#8a6645}
+.bk-queue{background:#ead1a4;border-left:2px solid #c5a06a}
+.bk-slots{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.bk-slot{height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:3px;background:#fff6dc;border:2px solid #b9955d;border-radius:11px;color:#553b22;font:inherit;text-align:center}
+.bk-slot .bk-icon{width:52px;height:52px}.bk-slot b{font-size:11px}.bk-slot small{font-size:9px;color:#806448}
+.bk-slot.done{background:#eff5d9;border-color:#6c914d;cursor:pointer}.bk-slot.done small{color:#4f772e;font-weight:800}
+.bk-slot.empty,.bk-slot.locked{border-style:dashed;color:#ad8d65}.bk-slot.empty{font-size:28px}.bk-slot.empty small{font-size:10px}
+.bakery-panel .bk-collect,.bakery-panel .bk-upgrade{width:100%;margin-top:10px;font-size:12px}
+@media(max-width:850px){.bk-layout{grid-template-columns:170px minmax(0,1fr)}.bk-queue{grid-column:1/-1;border-left:0;border-top:2px solid #c5a06a}.bk-slots{grid-template-columns:repeat(4,1fr)}.bk-queue .fbtn{max-width:220px}.bk-product .bk-icon{width:48px;height:48px}}
 @media (prefers-reduced-motion: reduce){.farm{transition:none}.ftool:hover{transform:none}}
