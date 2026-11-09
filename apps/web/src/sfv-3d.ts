@@ -203,7 +203,8 @@ class Chick {
     this.shadow = mesh(new THREE.CircleGeometry(1, 28), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }), [0, 0.6, 0], [26, 9, 1], [-HALF, 0, 0]);
     scene.add(this.shadow);
     this.yaw = grp([0, 0, 0], this.root);
-    this.hips = grp([0, 20, 0], this.yaw);
+    this.hipBaseY = 23.5; // 配合腿長 L1+L2=25，站立腳底貼地
+    this.hips = grp([0, this.hipBaseY, 0], this.yaw);
     this.body = grp([0, 0, 0], this.hips);
     // 身體：一顆大蛋，前面淡色肚子，屁股翹尾毛
     this.belly = mesh(SPH, M.body, [0, 27, 0], [27, 31, 24]); this.body.add(this.belly);
@@ -267,17 +268,21 @@ class Chick {
       return { base: sh, up, upW, el, fo, foW, fist, L1: 14, L2: 12 };
     };
     this.armF = arm(19, true); this.armB = arm(-19, false);
-    // 腳：又細又短，大腳掌
+    // 腳：結實正常比例（大腿／小腿漸細、膝踝關節球、略粗腳趾）；L1/L2 給踢擊 IK
     const leg = (z) => {
       const hp = grp([0, 0, z], this.hips);
-      const th = mesh(CYL, M.leg, [0, 0, 0], [1.8, 1, 1.8]); const thW = grp([0, 0, 0], hp); thW.add(th);
+      const th = mesh(new THREE.CylinderGeometry(4.4, 3.5, 1, 14), M.leg, [0, 0, 0], [1, 1, 1]);
+      const thW = grp([0, 0, 0], hp); thW.add(th);
       const kn = grp([0, 0, 0], hp);
-      const sh = mesh(CYL, M.leg, [0, 0, 0], [1.6, 1, 1.6]); const shW = grp([0, 0, 0], kn); shW.add(sh);
+      kn.add(mesh(SPH, M.leg, [0, 0, 0], [3.5, 3.3, 3.3]));
+      const sh = mesh(new THREE.CylinderGeometry(3.2, 2.7, 1, 14), M.leg, [0, 0, 0], [1, 1, 1]);
+      const shW = grp([0, 0, 0], kn); shW.add(sh);
       const ft = grp([0, 0, 0], kn);
-      for (const a of [-0.5, 0, 0.5]) ft.add(mesh(CONE, M.leg, [6 * Math.cos(a), 0, 6 * Math.sin(a)], [1.8, 13, 1.8], [0, -a, -HALF]));
-      return { base: hp, th, thW, kn, sh, shW, ft, L1: 11, L2: 11 };
+      ft.add(mesh(SPH, M.leg, [0, 0, 0], [2.7, 2.3, 2.7]));
+      for (const a of [-0.48, 0, 0.48]) ft.add(mesh(CONE, M.leg, [5.5 * Math.cos(a), 0, 5.5 * Math.sin(a)], [2.6, 12, 2.6], [0, -a, -HALF]));
+      return { base: hp, th, thW, kn, sh, shW, ft, L1: 13, L2: 12 };
     };
-    this.legF = leg(9); this.legB = leg(-9);
+    this.legF = leg(10); this.legB = leg(-10);
     this.particles = [];
     this.pGeo = SPH;
   }
@@ -355,7 +360,7 @@ export function createFight3D(canvas) {
     c.root.position.set(p.x - W / 2 + (shaking ? (s.tick & 1 ? 3 : -3) : 0), -p.y, 0);
     c.root.scale.set(f, 1, 1);
     c.yaw.rotation.set(0, -YAW + pose.spin, 0);
-    c.hips.position.y = 20 - pose.drop * 0.6;
+    c.hips.position.y = c.hipBaseY - pose.drop * 0.6;
     c.hips.rotation.z = pose.roll;
     c.body.position.y = -pose.drop * 0.4;
     c.body.rotation.z = pose.lean;
@@ -474,4 +479,4 @@ export function createFight3D(canvas) {
 }
 
 // 測試用：每個狀態／招式都算得出有限的姿勢
-export const __test = { poseFor };
+export const __test = { poseFor, LEG: { L1: 13, L2: 12, hipY: 23.5, thigh: [4.4, 3.5], shin: [3.2, 2.7] } };

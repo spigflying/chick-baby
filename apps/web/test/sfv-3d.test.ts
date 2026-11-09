@@ -86,3 +86,8 @@ describe('3D 格鬥姿勢', () => {
     expect(land4.drop).toBeGreaterThan(land1.drop);
     expect(land4.sy).toBeLessThan(land1.sy);
   });
+
+  it('3D 腿是結實正常比例（L1/L2／粗細），不是細棍', () => {
+    expect(__test.LEG).toMatchObject({ L1: 13, L2: 12, hipY: 23.5, thigh: [4.4, 3.5], shin: [3.2, 2.7] });
+  });
+
