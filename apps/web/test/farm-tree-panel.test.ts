@@ -42,7 +42,7 @@ describe('仙境手繪蘋果樹', () => {
     const now = Date.now();
     const { view, html } = treeView(true, now - 9 * 60 * 60_000, now);
     expect(html).toContain('farm/storybook-ro-a/tree-withered.webp');
-    expect(html).toContain('花 ◎30 救樹');
+    expect(html).toMatch(/花 <img[^>]*farm\/coin\.webp[^>]*>30 救樹/);
     const actions: unknown[] = [];
     view.doAct = (action: unknown) => { actions.push(action); };
     view.onAct({ dataset: { act: 'rescue' } });

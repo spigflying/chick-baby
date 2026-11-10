@@ -375,12 +375,14 @@ canvas.screen.shake{animation:shake .15s steps(3)}
 .farm-hud{flex:1;min-width:0;display:flex;justify-content:flex-end;gap:6px;align-items:center;font-size:13px;color:var(--f-ink)}
 .farm-hud .fpill{padding:.2em .8em .2em .3em}
 .farm-hud .fpill .fic{width:1.5em;height:1.5em}
+.farm-hud .farm-coin{width:1.5em;height:1.5em}
 .farm-hud .flv{width:1.8em;height:1.8em}
 .farm-hud .fxp{width:4.5em}
 .farm-hud .fpill.visit{display:block;min-width:0;padding:.35em .9em;overflow:hidden;text-overflow:ellipsis}
 .fpill{display:flex;align-items:center;gap:.45em;background:rgba(249,243,222,.96);border:1px solid #c6b582;border-radius:999px;padding:.3em .9em .3em .35em;box-shadow:0 3px 0 rgba(49,57,34,.28);font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
 .fpill.visit{padding:.35em .9em;color:var(--f-pink-d)}
 .fpill .fic{width:1.7em;height:1.7em}
+.farm-coin{display:inline-block;width:1.15em;height:1.15em;vertical-align:-.2em;object-fit:contain}
 .flv{display:grid;place-items:center;width:2.1em;height:2.1em;border-radius:50%;background:linear-gradient(#9cae56,#54763f);color:#fff;font-weight:800;box-shadow:inset 0 -3px 0 rgba(0,0,0,.12)}
 .farm.classic .flv{background:linear-gradient(#ffa6bd,#ff7d9f)}
 .fxp{width:7em;height:.7em;border-radius:99px;background:#d6ddad;overflow:hidden}
@@ -490,6 +492,7 @@ button.fslot.ready:hover{filter:brightness(.96);transform:translateY(-2px)}
 .freward small{display:block;color:var(--f-muted);font-weight:400;font-size:12px}
 .fgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 .ftile{background:#fff;border-radius:14px;padding:6px 4px;display:flex;flex-direction:column;align-items:center;gap:1px;border:2px solid #e5f1fb;font-variant-numeric:tabular-nums}
+.ftile img.store-item{width:72px;height:72px;max-width:100%;object-fit:contain}
 .ftile b{font-size:15px}.ftile small{font-size:11.5px;color:var(--f-muted)}
 .ftile.zero{opacity:.5}
 .fsell{display:flex;gap:4px;margin-top:3px}

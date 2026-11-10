@@ -94,7 +94,7 @@ export function stall(b: Box, slots: (StallSlot | null)[], locked: boolean, leve
   slots.slice(0, 4).forEach((item, i) => {
     if (!item) return;
     const x = 18 + i * 37;
-    o += `<use href="#fi-${item.item}" x="${x}" y="44" width="26" height="26"/><rect x="${x - 2}" y="73" width="31" height="14" rx="6" fill="#fff1cf" stroke="#8c6344" stroke-width="1"/><text x="${x + 13}" y="84" text-anchor="middle" font-size="10" font-weight="800" fill="#4a321d">◎${item.price}</text>`;
+    o += `<use href="#fi-${item.item}" x="${x}" y="44" width="26" height="26"/><rect x="${x - 2}" y="73" width="31" height="14" rx="6" fill="#fff1cf" stroke="#8c6344" stroke-width="1"/><image href="${art('farm/coin.webp')}" x="${x}" y="76" width="9" height="9"/><text x="${x + 10}" y="84" font-size="10" font-weight="800" fill="#4a321d">${item.price}</text>`;
   });
   return hitBox(b, o);
 }

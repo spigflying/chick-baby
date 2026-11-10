@@ -11,6 +11,7 @@ import { expandOffer, FARM_ERR, feedChoices, fieldBadge, helpTargets, hudModel, 
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
 const ic = (id: string, cls = 'fic') => `<svg class="${cls}" aria-hidden="true"><use href="#fi-${id}"/></svg>`;
+const coinIcon = `<img class="farm-coin" src="${art('farm/coin.webp')}" alt="◎">`;
 /** 小雞的顏色：依農場主人目前寵物的物種。 */
 const LOOK: Record<string, { body: string; belly: string }> = {
   chicken: { body: '#ffd84d', belly: '#fff6c4' }, duck: { body: '#fff4d6', belly: '#ffffff' },
@@ -227,7 +228,7 @@ export class FarmView {
       <div class="farm-top"><b class="farm-title">${owner ? '我的農場' : `${esc(p.owner.display_name)} 的農場`}</b><span class="farm-place">${this.area === 'east' ? '東邊新地' : '陽光農場'}</span>
         <div class="farm-hud">
           <div class="fpill"><span class="flv">${hud.level}</span><span class="fxp"><i style="width:${hud.xpPct}%"></i></span><span>Lv${hud.level}</span></div>
-          ${owner ? `<div class="fpill">${ic('coin')}${hud.coins.toLocaleString()}</div><div class="fpill" title="倉庫">${ic('box')}${hud.barn}</div><div class="fpill" title="友情點數">${ic('heart')}${hud.friendPts}</div>` : `<div class="fpill visit" title="成熟資源可以採收・成長中的田可澆水・枯樹可救">成熟資源可以採收・成長中的田可澆水・枯樹可救</div>`}
+          ${owner ? `<div class="fpill">${coinIcon}${hud.coins.toLocaleString()}</div><div class="fpill" title="倉庫">${ic('box')}${hud.barn}</div><div class="fpill" title="友情點數">${ic('heart')}${hud.friendPts}</div>` : `<div class="fpill visit" title="成熟資源可以採收・成長中的田可澆水・枯樹可救">成熟資源可以採收・成長中的田可澆水・枯樹可救</div>`}
         </div>
         <button type="button" class="farm-theme" data-act="theme" aria-label="切換農場畫風，目前為${THEME_LABEL[this.theme]}">畫風：${THEME_LABEL[this.theme]}</button>
         <button type="button" class="farm-x" data-act="close" aria-label="關閉農場（Esc）">✕</button></div>
@@ -387,7 +388,7 @@ export class FarmView {
         <div class="bk-layout"><section class="bk-products"><h4>選擇產品</h4>${ids.map((id) => { const r = RECIPES[id], unlocked = s.level >= r.level, enough = r.in.every((x) => (s.inv[x.item] ?? 0) >= x.qty);
           return `<button type="button" class="bk-product${id === selectedId ? ' active' : ''}" data-act="selectCraftRecipe" data-recipe="${id}" aria-pressed="${id === selectedId}">${picture(r.out.item)}<span><b>${r.name}</b><small>${remainText(r.ms)}</small><em class="${unlocked && enough ? 'ok' : 'short'}">${unlocked ? enough ? '材料充足' : '缺少原料' : `Lv ${r.level} 解鎖`}</em></span></button>`; }).join('')}</section>
         <section class="bk-details"><div class="bk-selection">${picture(selected.out.item)}<span><small>目前選擇</small><b>${selected.name}</b><small>生產時間 ${remainText(selected.ms)}</small></span></div><h4>需要的原料 <small>需要 / 現有</small></h4><div class="bk-ingredients">${selected.in.map((x) => `<div class="bk-ingredient${(s.inv[x.item] ?? 0) < x.qty ? ' short' : ''}">${picture(x.item)}<b>${FARM_ITEMS[x.item].name}</b><strong>${x.qty} / ${s.inv[x.item] ?? 0}</strong></div>`).join('')}</div><button type="button" class="fbtn go bk-reserve" data-act="craft" data-recipe="${selectedId}" ${canCraft ? '' : 'disabled'}>＋ 預約生產</button><p class="bk-hint">${s.level < selected.level ? `Lv ${selected.level} 解鎖` : !hasMaterials ? '原料不足，補足後才能預約' : j.items.length >= slots ? '佇列已滿，請先收取完成品' : '預約後扣除材料，依序加入佇列'}</p></section>
-        <section class="bk-queue"><h4>生產佇列 <small>${j.items.length} / ${slots} 格</small></h4><div class="bk-slots">${Array.from({ length: FARM.queue.max }, (_, i) => { const it = j.items[i]; if (i >= slots) return '<div class="bk-slot locked">未解鎖</div>'; if (!it) return '<div class="bk-slot empty">＋<small>空位</small></div>'; const item = RECIPES[it.recipe].out.item, done = ready(it.remainMs); return done ? `<button type="button" class="bk-slot done" data-act="collectJob" data-i="${i}" aria-label="收取${FARM_ITEMS[item].name}">${picture(item)}<b>${FARM_ITEMS[item].name}</b><small>完成・點擊收取</small></button>` : `<div class="bk-slot">${picture(item)}<b>${FARM_ITEMS[item].name}</b><small>${remainText(this.remain(it.remainMs))}</small></div>`; }).join('')}</div><button type="button" class="fbtn go bk-collect" data-act="collectJobs" ${j.items.some((x) => ready(x.remainMs)) ? '' : 'disabled'}>全收完成品</button><button type="button" class="fbtn up bk-upgrade" data-act="upgradeQueue" ${slots >= FARM.queue.max ? 'disabled' : ''}>${slots >= FARM.queue.max ? '佇列已滿級' : `加一格 ◎${FARM.queue.costs[slots - FARM.queue.base]}`}</button></section></div>`}</div>`;
+        <section class="bk-queue"><h4>生產佇列 <small>${j.items.length} / ${slots} 格</small></h4><div class="bk-slots">${Array.from({ length: FARM.queue.max }, (_, i) => { const it = j.items[i]; if (i >= slots) return '<div class="bk-slot locked">未解鎖</div>'; if (!it) return '<div class="bk-slot empty">＋<small>空位</small></div>'; const item = RECIPES[it.recipe].out.item, done = ready(it.remainMs); return done ? `<button type="button" class="bk-slot done" data-act="collectJob" data-i="${i}" aria-label="收取${FARM_ITEMS[item].name}">${picture(item)}<b>${FARM_ITEMS[item].name}</b><small>完成・點擊收取</small></button>` : `<div class="bk-slot">${picture(item)}<b>${FARM_ITEMS[item].name}</b><small>${remainText(this.remain(it.remainMs))}</small></div>`; }).join('')}</div><button type="button" class="fbtn go bk-collect" data-act="collectJobs" ${j.items.some((x) => ready(x.remainMs)) ? '' : 'disabled'}>全收完成品</button><button type="button" class="fbtn up bk-upgrade" data-act="upgradeQueue" ${slots >= FARM.queue.max ? 'disabled' : ''}>${slots >= FARM.queue.max ? '佇列已滿級' : `加一格 ${coinIcon}${FARM.queue.costs[slots - FARM.queue.base]}`}</button></section></div>`}</div>`;
     } else if (pn.k === 'craft') {
       const meta = CRAFT_STATIONS[pn.st], j = d.jobs[pn.st];
       const recipes = (Object.keys(RECIPES) as RecipeId[]).filter((r) => RECIPES[r].station === pn.st);
@@ -408,7 +409,7 @@ export class FarmView {
           return ready ? `<button type="button" class="fslot full ready" data-act="collectJob" data-i="${i}" aria-label="收取${FARM_ITEMS[item].name}">${itemIcon(item)}<small>點擊收取</small></button>`
             : `<div class="fslot full">${itemIcon(item)}<small>${remainText(this.remain(it.remainMs))}</small></div>`; }).join('')}</div>
         <div class="fbtns"><button type="button" class="fbtn go" data-act="collectJobs" ${j.items.some((x) => this.remain(x.remainMs) === 0) ? '' : 'disabled'}>${bakery ? '全收' : '收成品'}</button>
-          <button type="button" class="fbtn up" data-act="upgradeQueue" ${slots >= FARM.queue.max ? 'disabled' : ''}>${slots >= FARM.queue.max ? '佇列已滿級' : `加一格 ◎${FARM.queue.costs[slots - FARM.queue.base]}`}</button></div>`}</div>`;
+          <button type="button" class="fbtn up" data-act="upgradeQueue" ${slots >= FARM.queue.max ? 'disabled' : ''}>${slots >= FARM.queue.max ? '佇列已滿級' : `加一格 ${coinIcon}${FARM.queue.costs[slots - FARM.queue.base]}`}</button></div>`}</div>`;
     } else if (pn.k === 'tree') {
       if (this.theme === 'storybook') {
         const state = d.tree.state === 'growing' && this.remain(d.tree.remainMs) === 0 ? 'ready' : d.tree.state;
@@ -419,30 +420,30 @@ export class FarmView {
           ${state === 'ready' ? `<div class="tp-fruit"><img src="${fruit}" alt=""><span><b>蘋果 ×${FARM.tree.out.qty}</b><small>已成熟，可以採收</small></span></div><button type="button" class="fbtn go tp-action" data-act="${p.is_owner ? 'harvestTree' : 'visitTree'}">收取蘋果</button>`
             : state === 'growing' ? `<div class="tp-fruit growing"><img src="${fruit}" alt=""><span><b>蘋果生長中</b><small>還要 ${remainText(this.remain(d.tree.remainMs))}</small></span></div>`
               : `<p class="tp-note">果樹太久沒收，已經枯萎。${p.is_owner ? '可以請朋友幫忙，或自己花金幣救樹。' : canHelp ? '你可以幫朋友免費救樹。' : '目前無法幫忙救樹。'}</p>
-                ${p.is_owner ? `<button type="button" class="fbtn up tp-action" data-act="rescue">花 ◎${FARM.tree.rescueCoins} 救樹</button>` : canHelp ? '<button type="button" class="fbtn go tp-action" data-act="visitRescue">幫忙救樹</button>' : ''}`}</div>`;
+                ${p.is_owner ? `<button type="button" class="fbtn up tp-action" data-act="rescue">花 ${coinIcon}${FARM.tree.rescueCoins} 救樹</button>` : canHelp ? '<button type="button" class="fbtn go tp-action" data-act="visitRescue">幫忙救樹</button>' : ''}`}</div>`;
       } else html = head('蘋果樹', 'apple', 'mint') + `<div class="fpb"><p class="fnote">${d.tree.state === 'withered' ? '果樹太久沒收，枯掉了。請朋友來救（免費），或自己花金幣救。' : '果樹好好的。'}</p>
-        ${d.tree.state === 'withered' ? `<button type="button" class="fbtn up wide" data-act="rescue">花 ◎${FARM.tree.rescueCoins} 自己救</button>` : ''}</div>`;
+        ${d.tree.state === 'withered' ? `<button type="button" class="fbtn up wide" data-act="rescue">花 ${coinIcon}${FARM.tree.rescueCoins} 自己救</button>` : ''}</div>`;
     } else if (pn.k === 'orders' && this.theme === 'storybook') {
       html = head('訂單看板', 'board', 'orange') + `<div class="fpb orders-body" data-live><p class="orders-note">確認訂單需要的貨物，備齊後就能交貨。</p><div class="orders-list">${d.orders.map((o, i) => 'order' in o ? `
         <section class="orders-card"><div class="orders-card-head"><b>訂單 ${i + 1}</b><span class="${o.canDeliver ? 'ready' : 'short'}">${o.canDeliver ? '可以交貨' : '準備貨物中'}</span></div>
           <div class="orders-items">${o.order.items.map((it) => { const have = s.inv[it.item] ?? 0; return `<div class="orders-item${have < it.qty ? ' short' : ''}"><img src="${art(`farm/${ITEM_ART[it.item]}.webp`)}" alt=""><b>${esc(FARM_ITEMS[it.item].name)}</b><strong>${it.qty} / ${have}</strong></div>`; }).join('')}</div>
-          <div class="orders-foot"><span>獎勵 <b>◎ ${o.order.coins}</b><small>經驗 +${o.order.xp}</small></span><button type="button" class="fbtn go" data-act="deliver" data-slot="${i}" ${o.canDeliver ? '' : 'disabled'}>交貨</button><button type="button" class="fbtn no" data-act="discard" data-slot="${i}">丟掉</button></div></section>`
+          <div class="orders-foot"><span>獎勵 <b>${coinIcon}${o.order.coins}</b><small>經驗 +${o.order.xp}</small></span><button type="button" class="fbtn go" data-act="deliver" data-slot="${i}" ${o.canDeliver ? '' : 'disabled'}>交貨</button><button type="button" class="fbtn no" data-act="discard" data-slot="${i}">丟掉</button></div></section>`
         : `<div class="orders-card orders-wait"><b>訂單 ${i + 1}</b><span>${this.remain(o.waitMs) ? `${remainText(this.remain(o.waitMs))}後有新訂單` : '新訂單來了'}</span></div>`).join('')}</div></div>`;
     } else if (pn.k === 'orders') {
       html = head('訂單看板', 'board', 'orange') + `<div class="fpb" data-live><div class="forders">${d.orders.map((o, i) => 'order' in o ? `
         <div class="forder ${o.canDeliver ? 'ok' : ''}">${o.order.items.map((it) => `<span class="fneed">${ic(it.item, 'fic mid')}<b>${s.inv[it.item] ?? 0}/${it.qty}</b></span>`).join('')}
-          <span class="freward">◎ ${o.order.coins}<small>+${o.order.xp} 經驗</small></span>
+          <span class="freward">${coinIcon}${o.order.coins}<small>+${o.order.xp} 經驗</small></span>
           <span class="fbtns"><button type="button" class="fbtn go" data-act="deliver" data-slot="${i}" ${o.canDeliver ? '' : 'disabled'}>交貨</button><button type="button" class="fbtn no" data-act="discard" data-slot="${i}">丟掉</button></span></div>`
         : `<div class="forder wait"><span>${this.remain(o.waitMs) ? `${remainText(this.remain(o.waitMs))}後有新訂單` : '新訂單來了'}</span></div>`).join('')}</div></div>`;
     } else if (pn.k === 'store') {
       const items = (Object.keys(FARM_ITEMS) as FarmItemId[]);
       const lvl = s.barnLevel, maxed = lvl >= FARM.barn.maxLevel;
       html = head('倉庫', 'box', 'blue') + `<div class="fpb"><div class="fgrid">${items.map((it) => { const n = s.inv[it] ?? 0; return `
-        <div class="ftile ${n ? '' : 'zero'}">${ic(it, 'fic mid')}<b>${n}</b><small>${esc(FARM_ITEMS[it].name)} ◎${FARM_ITEMS[it].sell}</small>
+        <div class="ftile ${n ? '' : 'zero'}">${this.theme === 'storybook' ? `<img class="store-item" src="${art(`farm/${ITEM_ART[it]}.webp`)}" alt="">` : ic(it, 'fic mid')}<b>${n}</b><small>${esc(FARM_ITEMS[it].name)} ${coinIcon}${FARM_ITEMS[it].sell}</small>
           <span class="fsell"><button type="button" class="fbtn tiny" data-act="sell" data-item="${it}" data-qty="1" ${n ? '' : 'disabled'}>賣 1</button><button type="button" class="fbtn tiny" data-act="sell" data-item="${it}" data-qty="${n}" ${n > 1 ? '' : 'disabled'}>全賣</button></span></div>`; }).join('')}</div>
         <p class="fnote">能吃的東西可以按下面的「餵寵物」給自己的寵物吃（不花金幣）。</p>
         <div class="frowtext"><span>容量</span><span>${d.barn.used} / ${d.barn.cap}</span></div><div class="fbar"><i style="width:${Math.min(100, Math.round((d.barn.used / d.barn.cap) * 100))}%"></i></div>
-        <button type="button" class="fbtn up wide" data-act="upgradeBarn" ${maxed ? 'disabled' : ''}>${maxed ? '倉庫已滿級' : `升級倉庫 +${FARM.barn.step} 格　◎${FARM.barn.costBase * 2 ** lvl}`}</button></div>`;
+        <button type="button" class="fbtn up wide" data-act="upgradeBarn" ${maxed ? 'disabled' : ''}>${maxed ? '倉庫已滿級' : `升級倉庫 +${FARM.barn.step} 格　${coinIcon}${FARM.barn.costBase * 2 ** lvl}`}</button></div>`;
     } else if (pn.k === 'shop') {
       const cost = FARM.barn.bonusCostStep * (s.barnBonusBought + 1);
       html = head('商店・友情', 'heart', 'pink') + `<div class="fpb"><p class="fnote">去朋友的農場幫忙澆水、救樹就能拿友情點數（現在 ${s.friendPts} 點）。</p>
@@ -452,7 +453,7 @@ export class FarmView {
         <h4 class="fsub">裝飾（擺在東邊新地）${s.decoBag.length ? `<small>收納裡有 ${s.decoBag.length} 個</small>` : ''}</h4>
         ${s.level < FARM.eastLevel ? `<p class="fnote">Lv ${FARM.eastLevel} 開放東邊新地後就能買裝飾。</p>` : `<div class="fdecos">${(Object.keys(DECOS) as DecoId[]).map((id) => { const D = DECOS[id], ok = D.coins ? this.wallet() >= D.coins : s.friendPts >= D.friendPts;
           return `<div class="fdeco"><svg viewBox="0 0 120 110" class="fdeco-art">${this.art.deco({ x: 0, y: 0, w: 120, h: 110 }, id, true)}</svg><small>${esc(D.name)}</small>
-            <button type="button" class="fbtn tiny up" data-act="buyDeco" data-deco="${id}" ${ok ? '' : 'disabled'}>${D.coins ? `◎${D.coins}` : `友情 ${D.friendPts}`}</button></div>`; }).join('')}</div>`}</div>`;
+            <button type="button" class="fbtn tiny up" data-act="buyDeco" data-deco="${id}" ${ok ? '' : 'disabled'}>${D.coins ? `${coinIcon}${D.coins}` : `友情 ${D.friendPts}`}</button></div>`; }).join('')}</div>`}</div>`;
     } else if (pn.k === 'friends') {
       const list = pn.list;
       html = head('好友農場', 'friend', 'purple') + `<div class="fpb">${!list ? '<p class="fnote">讀取中…</p>' : !list.length ? '<p class="fnote">還沒有朋友的農場。先用分享碼去朋友家拜訪，之後就會出現在這裡。</p>'
@@ -475,25 +476,25 @@ export class FarmView {
     if (pn.k === 'expand') {
       const o = expandOffer(p, pn.idx);
       return head('買一塊新田', 'wheat', 'orange') + `<div class="fpb">${o.kind === 'buy' ? `<p class="fnote">東邊新地的田要一格一格買，買了就跟其他田一樣種。</p>
-        <button type="button" class="fbtn up wide" data-act="expand" ${this.wallet() >= o.cost ? '' : 'disabled'}>花 ◎${o.cost} 買下這塊田</button>` : `<p class="fnote">${o.kind === 'later' ? esc(o.text) : '這塊田已經是你的了'}</p>`}</div>`;
+        <button type="button" class="fbtn up wide" data-act="expand" ${this.wallet() >= o.cost ? '' : 'disabled'}>花 ${coinIcon}${o.cost} 買下這塊田</button>` : `<p class="fnote">${o.kind === 'later' ? esc(o.text) : '這塊田已經是你的了'}</p>`}</div>`;
     }
     if (pn.k === 'balloon') {
       const bl = d.balloon;
       if (bl.state !== 'here') return head('熱氣球貨運', 'balloon', 'blue') + `<div class="fpb" data-live><p class="fnote">${bl.state === 'away' ? `熱氣球去送貨了，${remainText(this.remain(bl.remainMs))}後回來。` : `Lv ${FARM.balloon.level} 開放`}</p></div>`;
       const all = bl.crates.every((c) => c.filled);
-      return head('熱氣球貨運', 'balloon', 'blue') + `<div class="fpb" data-live><p class="fnote">還會停 ${remainText(this.remain(bl.remainMs))}。每裝好一箱馬上拿錢；4 箱全裝好按「出發」再多 ◎${FARM.balloon.bonusCoins}＋${FARM.balloon.bonusXp} 經驗。</p>
+      return head('熱氣球貨運', 'balloon', 'blue') + `<div class="fpb" data-live><p class="fnote">還會停 ${remainText(this.remain(bl.remainMs))}。每裝好一箱馬上拿錢；4 箱全裝好按「出發」再多 ${coinIcon}${FARM.balloon.bonusCoins}＋${FARM.balloon.bonusXp} 經驗。</p>
         <div class="forders">${bl.crates.map((c, i) => `<div class="forder ${c.filled ? 'ok' : ''}"><span class="fneed">${ic(c.item, 'fic mid')}<b>${c.filled ? '裝好了' : `${s.inv[c.item] ?? 0}/${c.qty}`}</b></span>
-          <span class="freward">◎ ${Math.round(FARM_ITEMS[c.item].sell * c.qty * FARM.balloon.coinMult)}<small>+${FARM_ITEMS[c.item].xp * c.qty} 經驗</small></span>
+          <span class="freward">${coinIcon}${Math.round(FARM_ITEMS[c.item].sell * c.qty * FARM.balloon.coinMult)}<small>+${FARM_ITEMS[c.item].xp * c.qty} 經驗</small></span>
           <span class="fbtns"><button type="button" class="fbtn go" data-act="fillCrate" data-i="${i}" ${c.canFill ? '' : 'disabled'}>${c.filled ? '✓' : '裝箱'}</button></span></div>`).join('')}</div>
         <button type="button" class="fbtn up wide" data-act="sendBalloon" ${all ? '' : 'disabled'}>出發！</button></div>`;
     }
     if (pn.k === 'stall') {
       if (!p.is_owner) return head(`${esc(p.owner.display_name)} 的小攤`, 'stall', 'pink') + `<div class="fpb">${s.stall.some(Boolean) ? `<div class="flist">${s.stall.map((l, i) => l ? `
-        <div class="frow static">${ic(l.item, 'fic mid')}<span class="fname">${esc(FARM_ITEMS[l.item].name)} ×${l.qty}<small>系統收購價 ◎${FARM_ITEMS[l.item].sell * l.qty}</small></span>
-          <button type="button" class="fbtn go" data-act="buy" data-slot="${i}" ${this.wallet() >= l.price ? '' : 'disabled'}>◎${l.price} 買</button></div>` : '').join('')}</div>
+        <div class="frow static">${ic(l.item, 'fic mid')}<span class="fname">${esc(FARM_ITEMS[l.item].name)} ×${l.qty}<small>系統收購價 ${coinIcon}${FARM_ITEMS[l.item].sell * l.qty}</small></span>
+          <button type="button" class="fbtn go" data-act="buy" data-slot="${i}" ${this.wallet() >= l.price ? '' : 'disabled'}>${coinIcon}${l.price} 買</button></div>` : '').join('')}</div>
         <p class="fnote">金幣直接給主人，東西放進你的倉庫。每天最多買 ${FARM.stall.buysPerDay} 次。</p>` : '<p class="fnote">小攤現在沒有東西。</p>'}</div>`;
       return head('我的小攤', 'stall', 'pink') + `<div class="fpb"><div class="flist">${s.stall.map((l, i) => l ? `
-        <div class="frow static">${ic(l.item, 'fic mid')}<span class="fname">${esc(FARM_ITEMS[l.item].name)} ×${l.qty}<small>賣 ◎${l.price}</small></span>
+        <div class="frow static">${ic(l.item, 'fic mid')}<span class="fname">${esc(FARM_ITEMS[l.item].name)} ×${l.qty}<small>賣 ${coinIcon}${l.price}</small></span>
           <button type="button" class="fbtn no" data-act="stallCancel" data-slot="${i}">下架</button></div>`
         : `<button type="button" class="frow" data-act="stallNew" data-slot="${i}"><span class="fav">＋</span><span class="fname">空格<small>點這裡從倉庫拿東西上架</small></span></button>`).join('')}</div>
         <p class="fnote">朋友來拜訪時可以買，金幣直接進你的錢包。價格可以訂在系統收購價的 1–3 倍。</p></div>`;
@@ -505,8 +506,8 @@ export class FarmView {
       const df = stallDefaults(pn.item, s.inv[pn.item] ?? 0);
       return head(`上架 ${esc(FARM_ITEMS[pn.item].name)}`, pn.item, 'pink') + `<div class="fpb"><div class="fform">
         <label>數量 <input class="finput" type="number" data-f="qty" min="1" max="${df.maxQty}" value="1"></label>
-        <label>每個 ◎ <input class="finput" type="number" data-f="unit" min="${df.unitMin}" max="${df.unitMax}" value="${df.unit}"></label>
-        <p class="fnote">系統收購價每個 ◎${FARM_ITEMS[pn.item].sell}，每個可以訂 ◎${df.unitMin}–${df.unitMax}；總價＝每個 × 數量。</p></div>
+        <label>每個 ${coinIcon} <input class="finput" type="number" data-f="unit" min="${df.unitMin}" max="${df.unitMax}" value="${df.unit}"></label>
+        <p class="fnote">系統收購價每個 ${coinIcon}${FARM_ITEMS[pn.item].sell}，每個可以訂 ${coinIcon}${df.unitMin}–${df.unitMax}；總價＝每個 × 數量。</p></div>
         <button type="button" class="fbtn go wide" data-act="stallList">上架</button></div>`;
     }
     if (pn.k === 'deco') {

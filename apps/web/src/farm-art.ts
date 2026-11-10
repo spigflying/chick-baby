@@ -35,7 +35,6 @@ export function sceneDefs(): string {
     <radialGradient id="fg-glow" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#ffe9a8"/><stop offset="1" stop-color="#ffb347"/></radialGradient>
     <radialGradient id="fg-egg" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#fffdf7"/><stop offset="1" stop-color="#f3dcc0"/></radialGradient>
     <radialGradient id="fg-apple" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#ff8a8a"/><stop offset="1" stop-color="#e4404f"/></radialGradient>
-    <radialGradient id="fg-coin" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="#ffe68a"/><stop offset="1" stop-color="#f4b400"/></radialGradient>
     <radialGradient id="fg-pumpkin" cx=".4" cy=".35" r=".8"><stop offset="0" stop-color="#ffc27a"/><stop offset="1" stop-color="#ff8a2a"/></radialGradient>
     <linearGradient id="fg-bread" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f6b76a"/><stop offset="1" stop-color="#d98a3d"/></linearGradient>
     <pattern id="fg-tiles" width="22" height="14" patternUnits="userSpaceOnUse"><rect width="22" height="14" fill="#ff8fab"/><path d="M0 14 Q11 2 22 14" fill="#ff7799"/></pattern>
@@ -61,7 +60,6 @@ export function iconSymbols(): string {
   <symbol id="fi-bread" viewBox="0 0 40 40"><path d="M5 27 Q4 12 20 11 Q36 12 35 27 Q35 32 30 32 H10 Q5 32 5 27 Z" fill="url(#fg-bread)"/><g stroke="#fff2d6" stroke-width="2.2" stroke-linecap="round"><path d="M13 16 l3 6"/><path d="M19 15 l3 6"/><path d="M25 16 l3 6"/></g></symbol>
   <symbol id="fi-apple" viewBox="0 0 40 40"><path d="M20 11 Q21 5 26 4" stroke="#8a5a32" stroke-width="2.4" fill="none" stroke-linecap="round"/><ellipse cx="26" cy="8" rx="5" ry="2.6" fill="#5fcf6a" transform="rotate(-20 26 8)"/><circle cx="20" cy="23" r="13" fill="url(#fg-apple)"/><ellipse cx="14.5" cy="18" rx="3" ry="4" fill="#fff" opacity=".7"/></symbol>
   <symbol id="fi-jam" viewBox="0 0 40 40"><rect x="9" y="13" width="22" height="23" rx="6" fill="#ff5f6d"/><rect x="8" y="8" width="24" height="7" rx="3" fill="#fff"/><path d="M8 11 h24" stroke="#ff8fab" stroke-width="2" stroke-dasharray="3 3"/><rect x="13" y="20" width="14" height="10" rx="3" fill="#fff4f6"/><path d="M20 22 q-2 -2 -3 0 q-1 2 3 5 q4 -3 3 -5 q-1 -2 -3 0 Z" fill="#ff5f6d"/><ellipse cx="13" cy="30" rx="1.6" ry="3" fill="#fff" opacity=".5"/></symbol>
-  <symbol id="fi-coin" viewBox="0 0 40 40"><circle cx="20" cy="20" r="16" fill="url(#fg-coin)" stroke="#e0a000" stroke-width="1.5"/><circle cx="20" cy="20" r="10" fill="none" stroke="#fff4bf" stroke-width="2.4"/><circle cx="20" cy="20" r="4.5" fill="#fff4bf"/></symbol>
   <symbol id="fi-box" viewBox="0 0 40 40"><path d="M6 14 L20 7 L34 14 V30 L20 37 L6 30 Z" fill="#e8a96b"/><path d="M6 14 L20 21 L34 14" fill="none" stroke="#c9844a" stroke-width="2"/><path d="M20 21 V37" stroke="#c9844a" stroke-width="2"/><path d="M13 10.5 L27 17.5" stroke="#fff1d8" stroke-width="3"/></symbol>
   <symbol id="fi-heart" viewBox="0 0 40 40"><path d="M20 35 Q4 24 5 14 Q7 6 14 6 Q18 6 20 11 Q22 6 26 6 Q33 6 35 14 Q36 24 20 35 Z" fill="#ff7fa0"/><ellipse cx="12" cy="13" rx="3" ry="2" fill="#fff" opacity=".7"/></symbol>
   <symbol id="fi-shop" viewBox="0 0 40 40"><rect x="7" y="17" width="26" height="18" rx="3" fill="#fff1dc" stroke="#e0b48a" stroke-width="1.5"/><path d="M5 17 L9 7 H31 L35 17 Z" fill="#ff8fab"/><path d="M9 7 L11 17 M16 7 L16.5 17 M24 7 L23.5 17 M31 7 L29 17" stroke="#fff" stroke-width="2.2"/><rect x="16" y="24" width="8" height="11" rx="2" fill="#7fd6b4"/></symbol>
@@ -182,7 +180,7 @@ export function stall(b: Box, slots: (StallSlot | null)[], locked: boolean, unlo
   slots.slice(0, 4).forEach((item, i) => {
     if (!item) return;
     const x = 28 + i * 38;
-    o += `${use(item.item, x, 43, 27)}<rect x="${x - 2}" y="73" width="32" height="13" rx="5" fill="#ead8b7"/><text x="${x + 14}" y="83" text-anchor="middle" font-size="10" font-weight="800" fill="#473b30">◎${item.price}</text>`;
+    o += `${use(item.item, x, 43, 27)}<rect x="${x - 2}" y="73" width="32" height="13" rx="5" fill="#ead8b7"/><image href="${art('farm/coin.webp')}" x="${x}" y="75" width="9" height="9"/><text x="${x + 10}" y="83" font-size="10" font-weight="800" fill="#473b30">${item.price}</text>`;
   });
   return fit(b, 200, 96, o);
 }

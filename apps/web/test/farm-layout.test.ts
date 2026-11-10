@@ -63,7 +63,7 @@ describe('仙境手繪主畫面', () => {
     expect(storybook.balloon(EAST.balloon, { state: 'locked' }, 7)).toContain('storybook-ro-a/construction.webp');
     expect(storybook.balloon(EAST.balloon, { state: 'away', remainMs: 1 }, 7)).toContain('opacity=".28"');
     expect(storybook.balloon(EAST.balloon, { state: 'here', remainMs: 1, crates: [{ item: 'wheat', qty: 3, filled: false }] }, 7)).toContain('fi-wheat');
-    expect(storybook.stall(EAST.stall, [{ item: 'jam', qty: 2, price: 50 }, null, null, null], false, 5)).toContain('◎50');
+    expect(storybook.stall(EAST.stall, [{ item: 'jam', qty: 2, price: 50 }, null, null, null], false, 5)).toContain('farm/coin.webp');
     for (const id of Object.keys(DECOS) as DecoId[]) expect(storybook.deco(EAST.decos[0], id, true)).toContain(`storybook-ro-a/deco-${id}.webp`);
   });
   it('目前可解鎖的作物、建築與裝飾都有對應素材', () => {
@@ -81,7 +81,7 @@ describe('farm art', () => {
   it('has an icon symbol for every farm item', () => {
     const s = iconSymbols();
     for (const id of Object.keys(FARM_ITEMS)) expect(s).toContain(`id="fi-${id}"`);
-    for (const id of ['coin', 'box', 'heart', 'shop', 'board', 'friend', 'home', 'oven']) expect(s).toContain(`id="fi-${id}"`);
+    for (const id of ['box', 'heart', 'shop', 'board', 'friend', 'home', 'oven']) expect(s).toContain(`id="fi-${id}"`);
   });
   it('every drawing returns SVG markup and never uses the Game Boy greens', () => {
     const b = LAYOUT.fields[0];

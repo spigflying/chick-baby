@@ -24,6 +24,7 @@ describe('仙境手繪訂單看板', () => {
     expect(el.innerHTML).toContain('1 / 0');
     expect(el.innerHTML).toMatch(/orders-item short[^>]*>.*?farm\/bakery\/egg\.webp/s);
     expect(el.innerHTML).toContain('經驗 +6');
+    expect(el.innerHTML).toContain('farm/coin.webp');
     expect(el.innerHTML).toContain('10 分後有新訂單');
     expect(el.innerHTML).toMatch(/data-act="deliver" data-slot="0" disabled/);
     expect(el.innerHTML).toMatch(/data-act="deliver" data-slot="1" >/);
@@ -32,5 +33,19 @@ describe('仙境手繪訂單看板', () => {
     view.onAct({ dataset: { act: 'deliver', slot: '1' } });
     view.onAct({ dataset: { act: 'discard', slot: '0' } });
     expect(actions).toEqual([{ type: 'deliver', slot: 1 }, { type: 'discard', slot: 0 }]);
+  });
+  it('uses the new item art in the warehouse', () => {
+    const now = Date.now();
+    const state = newFarm(42, now, ALWAYS_OPEN);
+    state.inv = { wool: 2, bread: 1 };
+    const el = { classList: { toggle: () => {} }, hidden: true, innerHTML: '' };
+    const view = Object.create(FarmView.prototype) as any;
+    view.root = { querySelector: () => el };
+    view.theme = 'storybook'; view.loadedAt = now; view.panel = { k: 'store' };
+    view.data = { owner: { id: 'demo', display_name: 'Demo' }, is_owner: true, state, derived: describeFarm(state, now, ALWAYS_OPEN), server_time: now };
+    view.renderPanel();
+    expect(el.innerHTML).toContain('farm/hutch/wool.webp');
+    expect(el.innerHTML).toContain('farm/bakery/bread.webp');
+    expect(el.innerHTML).toContain('farm/coin.webp');
   });
 });
