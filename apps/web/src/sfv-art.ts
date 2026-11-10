@@ -239,7 +239,8 @@ function dizzyStars(ctx, s, p) {
 /** 真空蛋波光束：同能量球風格的加長版（白芯＋青藍暈），貼引擎長判定 */
 function drawBeam(ctx, s, p) {
   const mv = SFV.MOVE_LIST[p.mv], hb = mv.hitbox, f = p.f, k = p.mt - mv.S, per = mv.A / mv.hits, ph = (k % per) / per;
-  const x0 = p.x + f * hb[0], x1 = p.x + f * (hb[0] + hb[2]);
+  // 光束判定全畫面寬：畫到舞台邊（畫面邊緣）為止，前緣脈衝球就在牆邊炸開
+  const x0 = p.x + f * hb[0], x1 = Math.max(0, Math.min(SFV.STAGE_W, p.x + f * (hb[0] + hb[2])));
   const yc = GROUND + p.y + hb[1] + hb[3] / 2, h = hb[3] * (0.62 + 0.28 * (1 - ph));
   const left = Math.min(x0, x1), w = Math.abs(x1 - x0);
   ctx.save();

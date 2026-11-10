@@ -104,10 +104,11 @@ export const SFV = (() => {
       launch: [4, -10], launchLast: true, hitbox: [10, -90, 56, 80], hurtExt: [10, -86, 46, 70], invuln: [[1, 10, 'full']],
       vel: (mt, cn) => [mt < 4 ? 0 : mt < 34 ? (cn ? 3 : 11) : 0, null], hs: [8, 8, 8, 8, 8, 13],
     }),
-    // 真空蛋波：第二個超必殺（↓↘→↓↘→＋拳，3 格 EX）。前方一條長判定（光束）分 5 段，最後一段打飛
+    // 真空蛋波：第二個超必殺（↓↘→↓↘→＋拳，3 格 EX）。前方一條全畫面判定（光束）分 5 段，最後一段打飛
     defineMove({
       id: 'SHINKU', limb: 'arm', both: true, name: '真空蛋波', kind: 'super', startup: 6, active: 25, recovery: 46, hits: 5, dmg: [60, 60, 60, 60, 110], hitstun: 24, blockstun: 20, pb: 2,
-      launch: [4, -10], launchLast: true, hitbox: [20, -84, 380, 56], hurtExt: [10, -84, 50, 34], invuln: [[1, 10, 'full']], hs: [8, 8, 8, 8, 8],
+      launch: [4, -10], launchLast: true, hitbox: [20, -84, STAGE_W, 56], // 光束全畫面：寬度 = 整個舞台，任何位置都打到牆邊
+      hurtExt: [10, -84, 50, 34], invuln: [[1, 10, 'full']], hs: [8, 8, 8, 8, 8],
     }),
   ];
   const M = {}; MOVE_LIST.forEach((m, i) => { M[m.id] = i; });

@@ -87,4 +87,13 @@ describe('超必殺鎖定（SF5 Critical Art）：第一段打中就一定打完
     for (let k = 0; k < 120; k++) { SFV.simulateSFVTick(s, 0, 0); SFV.simulateSFVTick(u, 0, 0); }
     expect(SFV.hashState(u)).toBe(SFV.hashState(s));
   });
+  it('真空蛋波全畫面：從左邊角落打到右邊角落的對手，5 段全中', () => {
+    const s = fight(WALL + 20, STAGE_W - WALL - 20);
+    const r = run(s, [...QCF2, RIGHT | HP], [], 240, 'SHINKU');
+    expect(r.hits).toBe(5);
+    expect(r.dmg).toBe(SK_DMG);
+    const t = fight(STAGE_W - WALL - 20, WALL + 20); t.p[0].f = -1; t.p[1].f = 1;
+    const L = [DOWN, DOWN | LEFT, LEFT, DOWN, DOWN | LEFT, LEFT | HP];
+    expect(run(t, L, [], 240, 'SHINKU').hits).toBe(5);
+  });
 });
