@@ -27,6 +27,7 @@ export const SFV = (() => {
   const KD_SOFT = 40, KD_HARD = 60, DIZZY_T = 120, TECH_WINDOW = 7, TECH_T = 16, THROW_RECOVERY = 14, THROW_ANIM = 24, DASH_WINDOW = 10;
   const WHITE_DELAY = 90, WHITE_REGEN = 3, STUN_DELAY = 120, STUN_DECAY = 3;
   const SUPER_FREEZE = 30, VT_TICKS = 480;
+  const SUPER_CLOSE = 120; // 真空蛋波第一段打中時兩人中心距離 ≤ 這個值 → 近距離演出（攻擊方全身無敵）；更遠只是光束連打，放的人打得到
   const ROUND_TICKS = 99 * TICK_HZ, INTRO_T = 90, KO_T = 150, WINS = 2, JUGGLE_MAX = 3, PROJ_CD = 6;
   const AIR_RESET = [3, -6];
   // Counter Hit：打中正在出招（發生或持續中）的對手 → 傷害 ×1.2、地面受擊硬直 +2F；CH_SHOW = 畫面提示顯示幾幀
@@ -121,7 +122,8 @@ export const SFV = (() => {
 
   // ---------- 狀態 ----------
   const P_FIELDS = ['x', 'y', 'vx', 'vy', 'f', 'st', 't', 'mv', 'mt', 'hm', 'cn', 'hs', 'bf', 'hp', 'wd', 'wdT', 'sg', 'sgT', 'dz', 'ex', 'vg', 'vt', 'cb', 'jg', 'kb', 'air', 'cr', 'lb', 'ch', 'fr', 'wk', 'sl'];
-  // sl：超必殺鎖定（SF5 Critical Art）——攻擊方的大招第一段沒被擋就打中後 = 1，剩下每段在排定的那一 tick 一定打中（不看受擊框、浮空連段上限、距離），招式結束／被打斷／回合結束清掉
+  // sl：超必殺鎖定（SF5 Critical Art）——攻擊方的大招第一段沒被擋就打中後 ≠ 0，剩下每段在排定的那一 tick 一定打中（不看受擊框、浮空連段上限、距離），招式結束／被打斷／回合結束清掉
+  //     2 = 演出鎖定（CA、近距離真空蛋波）：攻擊方全身無敵（打擊、波、摔都打不到），直到鎖定結束；1 = 遠距離真空蛋波：對手照樣被鎖，但放的人被打中就斷
   const Q_FIELDS = ['o', 'x', 'y', 'vx', 'n', 'lv', 'cd'];
   // fx = 正在量硬直差的攻擊方（index+1，0 = 沒在量）、fs = 開始量的 tick、fa = 上次結果的攻擊方（index+1）、fv = 攻擊方的硬直差、ft = 顯示剩幾幀
   const S_FIELDS = ['tick', 'frz', 'fo', 'rs', 'rt', 'rnd', 'tm', 'win', 'to', 'lw', 'fx', 'fs', 'fa', 'fv', 'ft'];
@@ -203,7 +205,7 @@ export const SFV = (() => {
     const fit = FIT && FIT.hurt(p, FRAME);
     if (st === ST.MOVE) {
       const mv = MOVE_LIST[p.mv];
-      if (mv.invulnAt(p.mt, 'full') || (vsAir && mv.invulnAt(p.mt, 'air'))) return [];
+      if (p.sl === 2 || mv.invulnAt(p.mt, 'full') || (vsAir && mv.invulnAt(p.mt, 'air'))) return [];
       if (fit) {
         boxes = mv.invulnAt(p.mt, 'lower') ? fit.slice(0, 1) : fit;
         // 普通技收招：保留原本伸出去的受擊框，揮空被確反的距離不因為收招圖比較短而變小
@@ -223,10 +225,10 @@ export const SFV = (() => {
     return { box: wbox(p, mv.throwBox ?? ((FIT && FIT.hit(p)) || mv.hitbox)), used: (p.hm >> k) & 1, thr: !!mv.throwBox, k };
   }
   const projBox = (q) => { const d = PROJ[q.lv]; return [q.x - d.w / 2, q.y - d.h / 2, d.w, d.h]; };
-  const projInvuln = (p) => p.st === ST.MOVE && MOVE_LIST[p.mv].invulnAt(p.mt, 'proj');
+  const projInvuln = (p) => p.st === ST.MOVE && (p.sl === 2 || MOVE_LIST[p.mv].invulnAt(p.mt, 'proj'));
   function throwable(p) {
     if (p.y !== 0 || p.wk > 0) return false; // wk：起身不能被摔的剩餘 tick
-    if (p.st === ST.MOVE) return !MOVE_LIST[p.mv].invulnAt(p.mt, 'throw');
+    if (p.st === ST.MOVE) return p.sl !== 2 && !MOVE_LIST[p.mv].invulnAt(p.mt, 'throw'); // sl 2：大招演出中摔不到
     return p.st === ST.IDLE || p.st === ST.CROUCH || p.st === ST.LAND || p.st === ST.PREJUMP || p.st === ST.DIZZY;
   }
   /** 後(4) 站防擋中段/上段（overhead）；後下(1) 蹲防擋中段/下段 */
@@ -499,11 +501,12 @@ export const SFV = (() => {
     const dir = h.q ? Math.sign(h.q.vx) : A.f;
     if (h.q) { h.q.n--; h.q.cd = PROJ_CD; if (A.st === ST.MOVE && MOVE_LIST[A.mv].projectile !== undefined) A.cn = 1; }
     else {
-      // 大招第一段（這招還沒有任何一段打中或被擋）沒被擋 → 鎖定，剩下的段一定打完
-      if (!h.blocked && h.mv.kind === 'super' && A.hm === 0) A.sl = 1;
+      // 大招第一段（這招還沒有任何一段打中或被擋）沒被擋 → 鎖定，剩下的段一定打完；
+      // 近身大招（CA）或近距離（≤ SUPER_CLOSE）打中的真空蛋波 = 演出鎖定（sl 2，攻擊方全身無敵），遠距離光束 = sl 1（放的人打得到）
+      if (!h.blocked && h.mv.kind === 'super' && A.hm === 0) A.sl = h.mv.hitbox[2] < 200 || Math.abs(A.x - B.x) <= SUPER_CLOSE ? 2 : 1;
       A.hm |= 1 << h.k; A.cn = 1;
     }
-    B.mv = -1; B.bf = 0; B.vx = 0;
+    B.mv = -1; B.bf = 0; B.vx = 0; B.sl = 0; // 被打中 → 自己的鎖定斷掉（遠距離光束被打斷，剩下的段取消）
     if (h.blocked) {
       B.st = ST.BLOCK; B.t = d.blockstun; B.cr = h.crouch;
       if (d.kind !== 'normal') { // 必殺技被擋：白殘血（不會被白血打死）
@@ -543,7 +546,7 @@ export const SFV = (() => {
     const A = s.p[i], B = s.p[1 - i];
     s.fx = 0;
     A.st = ST.THROWING; A.t = TECH_WINDOW + THROW_ANIM; A.mv = -1; A.vx = 0; A.cn = 0; A.hs = 0;
-    B.st = ST.THROWN; B.t = 0; B.mv = -1; B.bf = 0; B.vx = 0; B.hs = 0;
+    B.st = ST.THROWN; B.t = 0; B.mv = -1; B.bf = 0; B.vx = 0; B.hs = 0; B.sl = 0;
   }
   function techPair(s) { for (const p of s.p) { p.st = ST.TECH; p.t = TECH_T; p.mv = -1; p.vx = 0; p.vy = 0; p.kb = -p.f * 7; } }
   /** 對手正在出招的發生或持續幀（不含收招、衝刺／炸毛這類系統動作） */
@@ -570,10 +573,10 @@ export const SFV = (() => {
       const A = s.pr[a], B = s.pr[b];
       if (A.o !== B.o && A.n > 0 && B.n > 0 && overlap(projBox(A), projBox(B))) { const k = Math.min(A.n, B.n); A.n -= k; B.n -= k; }
     }
+    for (let i = 0; i < 2; i++) if (s.p[i].sl && !superLocked(s.p[i], s.p[1 - i])) s.p[i].sl = 0; // 先清掉結束的鎖定（演出結束的那一 tick 起就打得到）
     const hits = [];
     for (let i = 0; i < 2; i++) {
       const A = s.p[i], B = s.p[1 - i], hb = hitboxOf(A);
-      if (A.sl && !superLocked(A, B)) A.sl = 0;
       if (hb && !hb.used && A.sl) hits.push({ i, mv: MOVE_LIST[A.mv], k: hb.k, blocked: false, crouch: 0, counter: 0 }); // 鎖定：排定的段一定打中
       else if (hb && !hb.used) {
         if (hb.thr) { if (throwable(B) && overlap(hb.box, pushbox(B))) hits.push({ i, thr: true }); }
@@ -619,7 +622,7 @@ export const SFV = (() => {
         const mv = MOVE_LIST[p.mv];
         if (mv.kind === 'system') k = 'move';
         else { const ph = mv.phase(p.mt); k = ph === 0 ? 'startup' : ph === 1 && mv.A ? 'active' : 'recovery'; }
-        inv = mv.invulnAt(p.mt, 'full');
+        inv = p.sl === 2 || mv.invulnAt(p.mt, 'full');
         break;
       }
       case ST.LAND: case ST.THROWING: k = 'recovery'; break;
@@ -691,7 +694,7 @@ export const SFV = (() => {
   }
 
   return {
-    TICK_HZ, TICK_MS, WAKE_THROW_INV, PREJUMP_T, JUMP_VY, JUMP_LAND, JUMP_VX, GRAVITY, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, EASY_HADO_EX, EASY_DP_EX, EASY_TATSU_EX, EASY_SHINKU, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
+    TICK_HZ, TICK_MS, WAKE_THROW_INV, SUPER_CLOSE, PREJUMP_T, JUMP_VY, JUMP_LAND, JUMP_VX, GRAVITY, THROW_ANIM, BUFFER, CH_DMG, CH_HITSTUN, FA_SHOW, UP, DOWN, LEFT, RIGHT, LP, HP, LK, HK, EASY_HADO, EASY_DP, EASY_TATSU, EASY_CA, EASY_HADO_EX, EASY_DP_EX, EASY_TATSU_EX, EASY_SHINKU, INPUT_MASK, PUNCH, KICK, STAGE_W, WALL, HP_MAX, STUN_MAX, EX_BAR, EX_MAX, VG_MAX, VT_TICKS, HIST,
     ST, ST_NAME, RS, MOVE_LIST, M, PROJ, P_FIELDS, defineMove, frameKind, createState, simulateSFVTick, packState, unpackState, cloneState, hashState, hashStr,
     dirOf, maskAt, motion, canBlock, proxGuard, hurtboxes, hitboxOf, setFit, pushbox, projBox, overlap,
   };
