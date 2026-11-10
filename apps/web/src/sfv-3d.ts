@@ -173,8 +173,9 @@ function movePose(p, s) {
     if (t < mv.S) return keyed([[0, GUARD], [mv.S - 1, P({ ...CHAMBER_KICK, puff: 0.4 })]], t);
     const k = mv.hitIndex(t);
     if (k >= 0) {
-      const w = (t - mv.S) % Math.max(2, Math.ceil(mv.A / mv.hits)), up = k % 2;
-      const kick = P({ ...STRIKE_KICK, hF: up ? 0.6 : -0.15, kF: 0, lean: up ? -0.5 : -0.3, ikLimb: 'hF', ik: 1 });
+      // 每段：高／中／低輪流踢（跟判定圖 caKick 同順序），最後一段往上踢飛；段數改了也一路踢到持續結束
+      const w = (t - mv.S) % Math.max(2, Math.ceil(mv.A / mv.hits)), last = k === mv.hits - 1, h = last ? 0.9 : [0.6, 0.2, -0.15][k % 3];
+      const kick = P({ ...STRIKE_KICK, hF: h, kF: 0, lean: last ? -0.6 : h > 0.4 ? -0.5 : -0.3, drop: last ? -4 : 2, ikLimb: 'hF', ik: 1 });
       return w < 2 ? mix(CHAMBER_KICK, kick, w / 2) : kick;
     }
     return mix(STRIKE_KICK, GUARD, Math.min(1, (t - mv.S - mv.A) / 14));

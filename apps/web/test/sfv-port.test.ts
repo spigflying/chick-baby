@@ -34,7 +34,7 @@ describe('SF6 hit-stop values', () => {
   it('lights 9, DP 15/20, CA last hit 13', () => {
     expect(hs('5LP')).toBe(9); expect(hs('2LK')).toBe(9);
     expect(hs('DP_L')).toBe(15); expect(hs('DP_H')).toBe(20); expect(hs('DP_EX')).toEqual([20, 13]);
-    expect(hs('CA')).toEqual([8, 8, 8, 8, 8, 13]);
+    expect(hs('CA')).toEqual([8, 8, 8, 8, 8, 8, 8, 8, 8, 13]);
   });
   it('block hit-stop equals hit hit-stop', () => {
     const s = run(fight(), [LP, LP, LP, LP], hold(RIGHT, 4));

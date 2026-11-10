@@ -23,7 +23,9 @@ const MOVES = {
   HADO: { fireball: true, startup: [['1', 1], ['1_5', 1], ['2', 2], ['3', 3], ['4', 2], ['5', '*']], recovery: [['6', 10], ['7', 10], ['7_5', 6], ['8', '*']] },
 };
 const ALIAS = { HADO_L: 'HADO', HADO_H: 'HADO', HADO_EX: 'HADO' };
-const CA_KICKS = [['n_ca_hi', 'high'], ['n_ca_mid', 'mid'], ['n_ca_lo', 'low'], ['n_ca_hi', 'high'], ['n_ca_mid', 'mid'], ['n_ca_up', 'launch']];
+// CA 每段用哪張踢腿圖：高／中／低輪流，最後一段往上踢飛（段數改了也對得上）
+const CA_KICKS = [['n_ca_hi', 'high'], ['n_ca_mid', 'mid'], ['n_ca_lo', 'low']], CA_LAUNCH = ['n_ca_up', 'launch'];
+const caKick = (k, n) => (k === n - 1 ? CA_LAUNCH : CA_KICKS[k % CA_KICKS.length]);
 /** 用到的所有圖（前端預載用） */
 export const FIT_IMAGES = [
   'body_1', 'body_1_5', 'body_2', 'body_3', 'body_4', 'body_5', 'body_6', 'body_7', 'body_7_5', 'body_8',
@@ -70,7 +72,7 @@ export function createFit(E) {
       const k = mv.hitIndex(t);
       if (k >= 0) {
         const w = t - S - Math.ceil(k * mv.A / mv.hits);
-        return w === 4 && k < mv.hits - 1 && !(p.hs > 0 && (p.hm >> k) & 1) ? mk2('n_ca_ch', 'active', 'chamber' + (k + 1)) : mk2(CA_KICKS[k][0], 'active', CA_KICKS[k][1] + k);
+        return w === 4 && k < mv.hits - 1 && !(p.hs > 0 && (p.hm >> k) & 1) ? mk2('n_ca_ch', 'active', 'chamber' + (k + 1)) : mk2(caKick(k, mv.hits)[0], 'active', caKick(k, mv.hits)[1] + k);
       }
       const r = t - S - mv.A;
       return r < 6 ? mk2('n_ca_up', 'recovery', 'hold', 22) : r < 12 ? mk2('n_ca_ch', 'recovery', 'retract', 22) : mk2('n_ca0', 'recovery', 'settle', 22);

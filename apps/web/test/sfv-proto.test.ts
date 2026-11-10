@@ -26,8 +26,8 @@ describe('defineMove', () => {
   });
   it('multi-hit moves split the active window evenly', () => {
     const ca = SFV.MOVE_LIST[M.CA];
-    expect(ca.dmg.reduce((a: number, b: number) => a + b, 0)).toBe(350);
-    expect([4, 8, 9, 33, 34].map((t) => ca.hitIndex(t))).toEqual([0, 0, 1, 5, -1]);
+    expect(ca.dmg.reduce((a: number, b: number) => a + b, 0)).toBe(400);
+    expect([4, 8, 9, 53, 54].map((t) => ca.hitIndex(t))).toEqual([0, 0, 1, 9, -1]);
   });
   it('heavy 衝天啄 has no hurtbox on ticks 1-4, EX on ticks 1-3 (invuln ends when the hitbox appears)', () => {
     for (const [id, last] of [['DP_H', 4], ['DP_EX', 3]] as const) {

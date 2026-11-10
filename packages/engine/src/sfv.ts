@@ -100,9 +100,10 @@ export const SFV = (() => {
       vel: [[1, 4, 0, -7], [5, 30, spd, 0], [31, 31, 0, null]], cancel: ['super'],
     })),
     defineMove({
-      id: 'CA', limb: 'kicks', name: '火雞連環踢', kind: 'super', startup: 4, active: 30, recovery: 24, hits: 6, dmg: [55, 55, 55, 55, 55, 75], hitstun: 24, blockstun: 12, pb: 2,
+      // 10 段、每 5 tick 一段（持續 50）；總傷害 400。打中後每 tick 前進 2（全段約 100px），揮空前 30 tick 衝 11、之後 3
+      id: 'CA', limb: 'kicks', name: '火雞連環踢', kind: 'super', startup: 4, active: 50, recovery: 24, hits: 10, dmg: [35, 35, 35, 35, 35, 35, 35, 35, 35, 85], hitstun: 24, blockstun: 12, pb: 2,
       launch: [4, -10], launchLast: true, hitbox: [10, -90, 56, 80], hurtExt: [10, -86, 46, 70], invuln: [[1, 10, 'full']],
-      vel: (mt, cn) => [mt < 4 ? 0 : mt < 34 ? (cn ? 3 : 11) : 0, null], hs: [8, 8, 8, 8, 8, 13],
+      vel: (mt, cn) => [mt < 4 ? 0 : mt < 54 ? (cn ? 2 : mt < 34 ? 11 : 3) : 0, null], hs: [8, 8, 8, 8, 8, 8, 8, 8, 8, 13],
     }),
     // 真空蛋波：第二個超必殺（↓↘→↓↘→＋拳，3 格 EX）。前方一條全畫面判定（光束）分 5 段，最後一段打飛
     defineMove({

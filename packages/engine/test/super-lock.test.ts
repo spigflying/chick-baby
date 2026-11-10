@@ -23,11 +23,12 @@ function run(s: any, p1: number[], p2: number[] = [], n = 220, id = 'CA') {
 }
 
 describe('超必殺鎖定（SF5 Critical Art）：第一段打中就一定打完', () => {
-  it('(a) 地面 CA：6 段全中，總傷害 = 每段相加', () => {
+  it('(a) 地面 CA：10 段全中，總傷害 400（每段相加）', () => {
     const s = fight(450, 500);
     const r = run(s, [...QCF2, RIGHT | HK]);
     expect(r.locked).toBe(true);
-    expect(r.hits).toBe(6);
+    expect(r.hits).toBe(10);
+    expect(CA_DMG).toBe(400);
     expect(r.dmg).toBe(CA_DMG);
     expect(s.p[0].sl).toBe(0); // 招式結束後清掉
   });
@@ -36,7 +37,7 @@ describe('超必殺鎖定（SF5 Critical Art）：第一段打中就一定打完
     let maxJg = 0, airborneHits = 0;
     const p1 = [RIGHT, DOWN, DOWN | RIGHT | HP, 0, 0, ...QCF2, RIGHT | HK];
     let hits = 0, hp0 = -1;
-    for (let k = 0; k < 260; k++) {
+    for (let k = 0; k < 320; k++) {
       const before = s.p[1].hp, wasCA = MOVE_LIST[s.p[0].mv]?.id === 'CA';
       SFV.simulateSFVTick(s, p1[k] ?? 0, 0);
       if (!wasCA && MOVE_LIST[s.p[0].mv]?.id === 'CA') hp0 = before;
@@ -44,9 +45,10 @@ describe('超必殺鎖定（SF5 Critical Art）：第一段打中就一定打完
       maxJg = Math.max(maxJg, s.p[1].jg);
     }
     expect(hp0).toBeGreaterThan(0); // 真的取消出了 CA
-    expect(hits).toBe(6);
-    expect(airborneHits).toBe(6);
+    expect(hits).toBe(10);
+    expect(airborneHits).toBe(10);
     expect(hp0 - s.p[1].hp).toBe(CA_DMG);
+    expect(1000 - s.p[1].hp).toBe(MOVE_LIST[M.DP_H].dmg[0] + 400); // 整套：重衝天啄 + CA 400
     expect(maxJg).toBeGreaterThan(JUGGLE_MAX); // 超過上限照樣打中
   });
   it('(c) 真空蛋波打浮空的對手：5 段全中', () => {
