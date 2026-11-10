@@ -112,7 +112,8 @@ function poseRaw(p, s, ctx) {
       const k = Math.min(1, p.t / 12), base = p.cr ? CROUCH : GUARD;
       return mix(base, P({ ...base, lean: -0.45, head: -0.6, aF: -1.6, eF: 0.3, aB: 1.4, eB: 0.6, sx: base.sx + 0.08, sy: base.sy - 0.08 }), k);
     }
-    case 'AIRHIT': return P({ roll: -0.6 - (p.vy > 0 ? 0.4 : 0), aF: 2.2, eF: 0.4, aB: 2.6, eB: 0.2, hF: 0.2, kF: -0.4, hB: -0.5, kB: 0.3, head: -0.5 });
+    case 'AIRHIT': return P({ roll: -0.6 - 0.4 * smooth(Math.max(0, Math.min(1, (p.vy + 2) / 6))), // 往上→往下翻身連續（大招鎖定時每段托一下也不跳）
+      aF: 2.2, eF: 0.4, aB: 2.6, eB: 0.2, hF: 0.2, kF: -0.4, hB: -0.5, kB: 0.3, head: -0.5 });
     case 'KD': {
       // 起身：從躺姿 → 坐起 → 蹲（最後 16 幀），接回待機時再淡入
       if (p.t <= 16 && p.y === 0) return keyed([[0, LYING], [8, SIT_UP], [16, P({ ...CROUCH, drop: 18 })]], 16 - p.t);

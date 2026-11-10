@@ -118,7 +118,8 @@ export const SFV = (() => {
   ];
 
   // ---------- 狀態 ----------
-  const P_FIELDS = ['x', 'y', 'vx', 'vy', 'f', 'st', 't', 'mv', 'mt', 'hm', 'cn', 'hs', 'bf', 'hp', 'wd', 'wdT', 'sg', 'sgT', 'dz', 'ex', 'vg', 'vt', 'cb', 'jg', 'kb', 'air', 'cr', 'lb', 'ch', 'fr', 'wk'];
+  const P_FIELDS = ['x', 'y', 'vx', 'vy', 'f', 'st', 't', 'mv', 'mt', 'hm', 'cn', 'hs', 'bf', 'hp', 'wd', 'wdT', 'sg', 'sgT', 'dz', 'ex', 'vg', 'vt', 'cb', 'jg', 'kb', 'air', 'cr', 'lb', 'ch', 'fr', 'wk', 'sl'];
+  // sl：超必殺鎖定（SF5 Critical Art）——攻擊方的大招第一段沒被擋就打中後 = 1，剩下每段在排定的那一 tick 一定打中（不看受擊框、浮空連段上限、距離），招式結束／被打斷／回合結束清掉
   const Q_FIELDS = ['o', 'x', 'y', 'vx', 'n', 'lv', 'cd'];
   // fx = 正在量硬直差的攻擊方（index+1，0 = 沒在量）、fs = 開始量的 tick、fa = 上次結果的攻擊方（index+1）、fv = 攻擊方的硬直差、ft = 顯示剩幾幀
   const S_FIELDS = ['tick', 'frz', 'fo', 'rs', 'rt', 'rnd', 'tm', 'win', 'to', 'lw', 'fx', 'fs', 'fa', 'fv', 'ft'];
@@ -343,7 +344,7 @@ export const SFV = (() => {
   function startMove(s, i, id) {
     const p = s.p[i], mv = MOVE_LIST[id];
     p.lb = s.tick; // 這一 tick 以前的按鍵都算用掉了，不會被緩衝再出一次
-    p.st = ST.MOVE; p.mv = id; p.mt = 0; p.hm = 0; p.cn = 0; p.bf = 0;
+    p.st = ST.MOVE; p.mv = id; p.mt = 0; p.hm = 0; p.cn = 0; p.bf = 0; p.sl = 0;
     if (mv.air) p.air = 1;
     if (mv.ex) p.ex -= EX_BAR;
     else if (mv.kind === 'special') p.ex = Math.min(EX_MAX, p.ex + 10);
@@ -495,7 +496,11 @@ export const SFV = (() => {
     const A = s.p[h.i], B = s.p[1 - h.i], d = strikeData(h);
     const dir = h.q ? Math.sign(h.q.vx) : A.f;
     if (h.q) { h.q.n--; h.q.cd = PROJ_CD; if (A.st === ST.MOVE && MOVE_LIST[A.mv].projectile !== undefined) A.cn = 1; }
-    else { A.hm |= 1 << h.k; A.cn = 1; }
+    else {
+      // 大招第一段（這招還沒有任何一段打中或被擋）沒被擋 → 鎖定，剩下的段一定打完
+      if (!h.blocked && h.mv.kind === 'super' && A.hm === 0) A.sl = 1;
+      A.hm |= 1 << h.k; A.cn = 1;
+    }
     B.mv = -1; B.bf = 0; B.vx = 0;
     if (h.blocked) {
       B.st = ST.BLOCK; B.t = d.blockstun; B.cr = h.crouch;
@@ -520,6 +525,12 @@ export const SFV = (() => {
       if (d.launch || B.y < 0) { const l = d.launch ?? AIR_RESET; B.st = ST.AIRHIT; B.vx = l[0] * dir; B.vy = l[1]; B.jg++; B.air = 0; }
       else if (d.kd) { B.st = ST.KD; B.t = KD_HARD; B.cr = 0; }
       else { B.st = ST.HIT; B.t = d.hitstun + (h.counter ? CH_HITSTUN : 0); B.cr = h.crouch; pushback(A, B, dir, d.pb, !!h.q); }
+      // 鎖定中的中間段：浮空的對手停在攻擊範圍的高度（每段往攻擊方腳上 30px 的高度靠），不會在下一段之前落地或飛遠；
+      // 近身大招（CA）另外把對手拉回身前約 44px，光束（SHINKU）就留在原地
+      if (!h.q && A.sl && h.k < h.mv.hits - 1 && B.st === ST.AIRHIT) {
+        B.vy = Math.max(-5, Math.min(6, Math.trunc((A.y - 30 - B.y) / 6)));
+        B.vx = h.mv.hitbox[2] < 200 ? A.vx + Math.trunc((A.x + A.f * 44 - B.x) / 5) : 0;
+      }
     }
     B.hs = d.hs;
     if (!h.q) A.hs = Math.max(A.hs, d.hs);
@@ -546,6 +557,12 @@ export const SFV = (() => {
     const crouch = blocked ? dirOf(maskAt(B, s.tick), toward) === 1 : poseOf(B) === 'crouch';
     return { i, ...h, blocked, crouch: crouch ? 1 : 0, counter: !blocked && counterable(B) ? 1 : 0 };
   }
+  /** 超必殺鎖定還成立嗎：攻擊方還在同一個大招的持續段，對手還在被打的狀態（被打斷、招式結束、對手倒地／KO 就解除） */
+  function superLocked(A, B) {
+    if (A.st !== ST.MOVE || A.mv < 0) return false;
+    const mv = MOVE_LIST[A.mv];
+    return mv.kind === 'super' && A.mt < mv.S + mv.A && (B.st === ST.HIT || B.st === ST.AIRHIT);
+  }
   function combat(s) {
     for (let a = 0; a < s.pr.length; a++) for (let b = a + 1; b < s.pr.length; b++) { // 雙方的波互撞抵銷
       const A = s.pr[a], B = s.pr[b];
@@ -554,7 +571,9 @@ export const SFV = (() => {
     const hits = [];
     for (let i = 0; i < 2; i++) {
       const A = s.p[i], B = s.p[1 - i], hb = hitboxOf(A);
-      if (hb && !hb.used) {
+      if (A.sl && !superLocked(A, B)) A.sl = 0;
+      if (hb && !hb.used && A.sl) hits.push({ i, mv: MOVE_LIST[A.mv], k: hb.k, blocked: false, crouch: 0, counter: 0 }); // 鎖定：排定的段一定打中
+      else if (hb && !hb.used) {
         if (hb.thr) { if (throwable(B) && overlap(hb.box, pushbox(B))) hits.push({ i, thr: true }); }
         else if (hurtboxes(B, A.y < 0).some((b) => overlap(hb.box, b))) hits.push(collect(s, i, { mv: MOVE_LIST[A.mv], k: hb.k }, A.x));
       }
@@ -624,6 +643,7 @@ export const SFV = (() => {
     if (ko0 || ko1) {
       w0 = ko1; w1 = ko0;
       for (const [p, k] of [[a, ko0], [b, ko1]]) if (k) { p.hp = 0; p.wd = 0; p.st = ST.KO; p.mv = -1; p.bf = 0; }
+      a.sl = 0; b.sl = 0;
     } else { w0 = a.hp >= b.hp; w1 = b.hp >= a.hp; s.tm = 0; s.to = 1; }
     if (w0) s.w[0]++;
     if (w1) s.w[1]++;
