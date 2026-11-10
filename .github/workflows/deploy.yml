@@ -1,8 +1,8 @@
-name: 測試與部署
+name: 部署結束頁
 
-# push main：一律建置（Dockerfile 內會跑 typecheck 與測試）；非開放時間才自動部署。
-# 開放時間（平日 09:00–20:00 台北）換版會中止進行中的對戰／下樓梯，所以只測試不部署；
-# 要在開放時間上線就到 Actions 手動執行（workflow_dispatch），一定會部署。
+# 2026-11-10 起服務停止營運：chick.thesilvertrees.com 只剩一個靜態結束頁（apps/the-end/）。
+# 遊戲本體（apps/web、apps/server）不再建置與部署；資料庫已匯出到 gs://silver-greens-chick-archive 並刪除。
+# push main 或手動執行都會直接部署結束頁。
 on:
   push:
     branches: [main]
@@ -16,7 +16,7 @@ env:
   PROJECT_ID: silver-greens
   REGION: asia-east1
   SERVICE: chick-baby
-  IMAGE: asia-east1-docker.pkg.dev/silver-greens/chick/server
+  IMAGE: asia-east1-docker.pkg.dev/silver-greens/chick/the-end
   # Workload Identity Federation：只有 spigflying/chick-baby（repo id 1416379139）的 main 分支換得到權限，不用 JSON key。
   # chick-deployer 只有：推 chick 映像、部署 chick-baby 服務、以 chick-run 身分執行。設定見 docs/DEPLOY.md §10。
   WIF_PROVIDER: projects/704427759894/locations/global/workloadIdentityPools/github/providers/chick-baby
@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   build-deploy:
-    name: 建置、測試、部署
+    name: 建置並部署結束頁
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -39,49 +39,33 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: 決定要不要部署
-        id: gate
-        run: |
-          dow=$(TZ=Asia/Taipei date +%u); hm=$((10#$(TZ=Asia/Taipei date +%H%M)))
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then deploy=true; why="手動執行"
-          elif [ "$dow" -le 5 ] && [ "$hm" -ge 900 ] && [ "$hm" -lt 2000 ]; then deploy=false; why="開放時間（平日 09:00–20:00），只測試不部署；要上線請手動執行此 workflow"
-          else deploy=true; why="非開放時間"
-          fi
-          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
-          echo "### 部署：$deploy（$why）" >> "$GITHUB_STEP_SUMMARY"
-          echo "deploy=$deploy ($why)"
-
-      - name: 建置映像（含 typecheck 與測試）
+      - name: 建置映像
         run: |
           TAG=${GITHUB_SHA::7}
           echo "TAG=$TAG" >> "$GITHUB_ENV"
-          docker build -t "$IMAGE:$TAG" .
+          docker build -t "$IMAGE:$TAG" apps/the-end
 
       - uses: google-github-actions/auth@v3
-        if: steps.gate.outputs.deploy == 'true'
         with:
           workload_identity_provider: ${{ env.WIF_PROVIDER }}
           service_account: ${{ env.DEPLOY_SA }}
 
       - uses: google-github-actions/setup-gcloud@v3
-        if: steps.gate.outputs.deploy == 'true'
 
       - name: 推映像並部署 Cloud Run
-        if: steps.gate.outputs.deploy == 'true'
         run: |
           gcloud auth configure-docker asia-east1-docker.pkg.dev --quiet
           docker push "$IMAGE:$TAG"
-          # 只換映像，其餘設定（環境變數、secret、Cloud SQL、資源）沿用目前的服務
+          # 只換映像，其餘設定沿用目前的服務（已清掉 Cloud SQL／環境變數／secret，CPU 只在處理請求時計費）
           gcloud run deploy "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --image "$IMAGE:$TAG" --quiet
 
       - name: 驗證線上版本
-        if: steps.gate.outputs.deploy == 'true'
         run: |
           img=$(gcloud run services describe "$SERVICE" --project "$PROJECT_ID" --region "$REGION" --format='value(spec.template.spec.containers[0].image)')
           echo "serving image: $img"
           [ "$img" = "$IMAGE:$TAG" ]
           for i in 1 2 3 4 5 6; do
-            s=$(curl -fsS https://chick.thesilvertrees.com/api/status) && break; sleep 10
+            curl -fsS https://chick.thesilvertrees.com/ | grep -q '<title>THE END</title>' && ok=1 && break; sleep 10
           done
-          echo "status: $s"
+          [ "${ok:-}" = 1 ]
           echo "- 線上映像：\`$img\`" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>THE END</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #fff; }
+  body { display: grid; place-items: center; overflow: hidden; }
+  canvas { display: block; image-rendering: pixelated; image-rendering: crisp-edges; }
+  noscript { font: 700 48px/1.2 monospace; letter-spacing: .2em; }
+</style>
+</head>
+<body>
+<canvas id="c" width="96" height="78" role="img" aria-label="黑白像素風的烤全雞，下面寫著 THE END"></canvas>
+<noscript>THE END</noscript>
+<script>
+(() => {
+  const W = 96, H = 78;
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+
+  // ---- 形狀（z 越大越前面） ----
+  const ell = (cx, cy, rx, ry, rot = 0) => (x, y) => {
+    const dx = x - cx, dy = y - cy, c = Math.cos(rot), s = Math.sin(rot);
+    const u = (dx * c + dy * s) / rx, v = (-dx * s + dy * c) / ry;
+    const d = u * u + v * v;
+    return d <= 1 ? { u, v, d } : null;
+  };
+  const seg = (x1, y1, x2, y2, r) => (x, y) => {
+    const vx = x2 - x1, vy = y2 - y1, t = Math.max(0, Math.min(1, ((x - x1) * vx + (y - y1) * vy) / (vx * vx + vy * vy)));
+    const dx = x - (x1 + t * vx), dy = y - (y1 + t * vy);
+    return dx * dx + dy * dy <= r * r ? { u: 0, v: 0, d: 0 } : null;
+  };
+  const any = (...fs) => (x, y) => { for (const f of fs) { const h = f(x, y); if (h) return h; } return null; };
+
+  const L = (() => { const l = [-0.55, -0.7, 0.55], n = Math.hypot(...l); return l.map(v => v / n); })();
+  const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  const dither = (x, y, b) => b > (BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16;
+  const lit = (h) => { const nz = Math.sqrt(Math.max(0, 1 - h.d)); return Math.max(0, h.u * L[0] + h.v * L[1] + nz * L[2]); };
+
+  const below = (f, maxY) => (x, y) => y < maxY ? f(x, y) : null;
+  const shapes = [
+    { id: 'plate', hit: ell(48, 52, 40, 7), shade: (h, x, y) => h.d > 0.6 && h.d < 0.74 },
+    { id: 'body', hit: below(ell(48, 38, 25, 15), 51), shade: (h, x, y) => dither(x, y, lit(h) * 1.1 + 0.22) },
+    { id: 'legL', hit: ell(29, 30, 9, 6, 0.75), shade: (h, x, y) => dither(x, y, lit(h) * 1.1 + 0.25) },
+    { id: 'legR', hit: ell(67, 30, 9, 6, -0.75), shade: (h, x, y) => dither(x, y, lit(h) * 1.1 + 0.2) },
+    { id: 'boneL', hit: any(seg(24, 24, 20, 19, 1.2), ell(17.5, 18.5, 2.2, 2.2), ell(20.5, 15.5, 2.2, 2.2)), shade: () => true },
+    { id: 'boneR', hit: any(seg(72, 24, 76, 19, 1.2), ell(78.5, 18.5, 2.2, 2.2), ell(75.5, 15.5, 2.2, 2.2)), shade: () => true },
+  ];
+
+  // 先算每格屬於哪個形狀，再畫：跟背景相鄰 → 白色外框；跟前面的形狀相鄰 → 黑色分隔線
+  const grid = new Int8Array(W * H).fill(-1), hits = new Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    for (let z = shapes.length - 1; z >= 0; z--) {
+      const h = shapes[z].hit(x + 0.5, y + 0.5);
+      if (h) { grid[y * W + x] = z; hits[y * W + x] = h; break; }
+    }
+  }
+  const at = (x, y) => (x < 0 || y < 0 || x >= W || y >= H) ? -1 : grid[y * W + x];
+  const still = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const z = at(x, y); if (z < 0) continue;
+    const nb = [at(x - 1, y), at(x + 1, y), at(x, y - 1), at(x, y + 1)];
+    let on;
+    if (nb.some(n => n > z)) on = false;
+    else if (nb.some(n => n < z)) on = true;
+    else on = shapes[z].shade(hits[y * W + x], x, y);
+    if (on) still[y * W + x] = 1;
+  }
+  // 烤得酥脆的焦斑
+  for (const [x, y] of [[40, 36], [45, 33], [52, 35], [57, 38], [43, 40], [35, 39], [61, 42], [50, 39], [27, 30], [33, 29], [63, 30], [69, 33]])
+    if (grid[y * W + x] >= 1) still[y * W + x] = 0;
+
+  // ---- THE END（5x7 點陣字，放大 2 倍） ----
+  const FONT = {
+    T: ['#####', '..#..', '..#..', '..#..', '..#..', '..#..', '..#..'],
+    H: ['#...#', '#...#', '#...#', '#####', '#...#', '#...#', '#...#'],
+    E: ['#####', '#....', '#....', '####.', '#....', '#....', '#####'],
+    N: ['#...#', '##..#', '##..#', '#.#.#', '#..##', '#..##', '#...#'],
+    D: ['####.', '#...#', '#...#', '#...#', '#...#', '#...#', '####.'],
+    ' ': ['.....', '.....', '.....', '.....', '.....', '.....', '.....'],
+  };
+  const TEXT = 'THE END', S = 2, tw = (TEXT.length * 6 - 1) * S, tx = Math.round((W - tw) / 2), ty = 62;
+  [...TEXT].forEach((ch, i) => FONT[ch].forEach((row, r) => [...row].forEach((p, c) => {
+    if (p === '#') for (let a = 0; a < S; a++) for (let b = 0; b < S; b++) still[(ty + r * S + a) * W + tx + (i * 6 + c) * S + b] = 1;
+  })));
+
+  // ---- 熱氣（逐格動畫） ----
+  const steam = (frame) => {
+    const px = [];
+    [[40, 0], [48, 2], [56, 1]].forEach(([sx, ph]) => {
+      for (let y = 4; y <= 17; y++) {
+        if ((y + frame + ph) % 7 === 0) continue;
+        px.push([sx + Math.round(Math.sin((y + frame * 2 + ph * 3) / 2.2) * 1.6), y]);
+      }
+    });
+    return px;
+  };
+
+  const img = ctx.createImageData(W, H);
+  let frame = 0;
+  const draw = () => {
+    const buf = new Uint8Array(still);
+    for (const [x, y] of steam(frame)) buf[y * W + x] = 1;
+    for (let i = 0; i < W * H; i++) {
+      const v = buf[i] ? 255 : 0;
+      img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  };
+  const fit = () => {
+    const s = Math.max(1, Math.floor(Math.min(innerWidth * 0.94 / W, innerHeight * 0.94 / H)));
+    cv.style.width = W * s + 'px'; cv.style.height = H * s + 'px';
+  };
+  addEventListener('resize', fit); fit(); draw();
+  if (!matchMedia('(prefers-reduced-motion: reduce)').matches) setInterval(() => { frame = (frame + 1) % 7; draw(); }, 260);
+})();
+</script>
+</body>
+</html>
