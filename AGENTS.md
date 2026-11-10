@@ -4,7 +4,7 @@
 
 > **2026-11-10 起服務已停止營運。** chick.thesilvertrees.com 只剩靜態結束頁 `apps/the-end/`（黑白像素烤全雞＋THE END）。
 > Cloud SQL `chick-db` 已匯出到 `gs://silver-greens-chick-archive/chick-db-final-20261110.sql.gz` 後刪除，排程也已刪除。
-> `.github/workflows/deploy.yml` 現在只建置、部署結束頁；改 `apps/web`、`apps/server` 不會上線。以下規則保留作為紀錄。
+> `.github/workflows/deploy.yml` 現在只建置、部署結束頁；改 `apps/web`、`apps/server` 不會上線。要回復遊戲照 `docs/RESTORE.md`。以下規則保留作為紀錄。
 
 ## 分工：Codex commit，Claude Code push 與部署
 
